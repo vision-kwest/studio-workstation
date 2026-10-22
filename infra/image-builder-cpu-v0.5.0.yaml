@@ -1,0 +1,304 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Experimental RES-staged Ubuntu 24.04 CPU/DCV golden-AMI pipeline. Image Builder
+  creates and terminates temporary build/test instances; no SSH or control host.
+Parameters:
+  BaseAmiId:
+    Type: AWS::EC2::Image::Id
+    Default: ami-0fc0d6e8d70ab2d42
+    Description: Canonical Ubuntu 24.04 x86_64 AMI in us-east-1; verify owner before deploying.
+  BuilderInstanceType:
+    Type: String
+    Default: m7i.xlarge
+    AllowedValues: [m7i.large, m7i.xlarge, m7i.2xlarge]
+Resources:
+  BuilderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  BuilderInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref BuilderRole]
+  GdmFirstComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: studio-cpu-gdm-first
+      Platform: Linux
+      Version: 0.5.0
+      Description: Install GDM separately, check OS dependency upgrades, and reboot.
+      Data: |
+        name: studio-cpu-gdm-first
+        description: GDM-first Ubuntu 24.04 preparation
+        schemaVersion: 1.0
+        phases:
+          - name: build
+            steps:
+              - name: PreflightAndInstallGDM
+                action: ExecuteBash
+                onFailure: Abort
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+                      . /etc/os-release
+                      test "$ID" = ubuntu && test "$VERSION_ID" = 24.04
+                      test "$(uname -m)" = x86_64
+                      df -h /
+                      free -m
+                      apt-get clean
+                      rm -rf /var/lib/apt/lists/*
+                      timeout --signal=TERM --kill-after=60s 15m apt-get update -o Acquire::Retries=3
+                      echo 'APT simulation for GDM (record package transitions)'
+                      apt-get -s install gdm3 | tee /var/log/studio-gdm-plan.log
+                      # A changed init stack is a known risk in this account.
+                      # Fail BEFORE installing if a core init upgrade is required.
+                      if grep -Eq '^Inst (systemd|libsystemd0|systemd-sysv|udev|libudev1) ' /var/log/studio-gdm-plan.log; then
+                        echo 'CORE_OS_UPGRADE_REQUIRED: choose a refreshed Ubuntu 24.04 Canonical base AMI with up-to-date systemd; do not upgrade it inside this SSM step.' >&2
+                        exit 40
+                      fi
+                      timeout --signal=TERM --kill-after=60s 25m apt-get install -y -o Acquire::Retries=3 gdm3
+                      dpkg --audit
+                      install -d /etc/gdm3
+                      sed -i '/^WaylandEnable=/d' /etc/gdm3/custom.conf
+                      sed -i '/^\\[daemon\\]/a WaylandEnable=false' /etc/gdm3/custom.conf
+              - name: RebootAfterGDM
+                action: Reboot
+                onFailure: Abort
+                inputs:
+                  delaySeconds: 15
+              - name: ConfirmGDMStage
+                action: ExecuteBash
+                onFailure: Abort
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      dpkg-query -W gdm3
+                      dpkg --audit
+                      systemctl is-system-running || true
+  DesktopComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: studio-cpu-desktop-res-stage
+      Platform: Linux
+      Version: 0.5.0
+      Description: RES-derived Ubuntu desktop dependencies and CPU dummy Xorg.
+      Data: |
+        name: studio-cpu-desktop-res-stage
+        description: RES-aligned desktop after GDM-first reboot
+        schemaVersion: 1.0
+        phases:
+          - name: build
+            steps:
+              - name: InstallDesktop
+                action: ExecuteBash
+                onFailure: Abort
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+                      timeout --signal=TERM --kill-after=60s 15m apt-get update -o Acquire::Retries=3
+                      apt-get -s install ubuntu-desktop xserver-xorg-video-dummy | tee /var/log/studio-desktop-plan.log
+                      if grep -Eq '^Inst (systemd|libsystemd0|systemd-sysv|udev|libudev1) ' /var/log/studio-desktop-plan.log; then
+                        echo 'CORE_OS_UPGRADE_REQUIRED during desktop install; refresh Canonical base AMI before rebuilding.' >&2
+                        exit 40
+                      fi
+                      timeout --signal=TERM --kill-after=60s 40m apt-get install -y -o Acquire::Retries=3 ubuntu-desktop xserver-xorg-video-dummy
+                      dpkg --audit
+                      cat > /etc/X11/xorg.conf <<'XORG'
+                      Section "Device"
+                          Identifier "DummyDevice"
+                          Driver "dummy"
+                          Option "UseEDID" "false"
+                          VideoRam 512000
+                      EndSection
+                      Section "Monitor"
+                          Identifier "DummyMonitor"
+                          HorizSync 5.0 - 1000.0
+                          VertRefresh 5.0 - 200.0
+                          Option "ReducedBlanking"
+                      EndSection
+                      Section "Screen"
+                          Identifier "DummyScreen"
+                          Device "DummyDevice"
+                          Monitor "DummyMonitor"
+                          DefaultDepth 24
+                          SubSection "Display"
+                              Viewport 0 0
+                              Depth 24
+                              Virtual 4096 2160
+                          EndSubSection
+                      EndSection
+                      XORG
+                      if ! id workstation >/dev/null 2>&1; then
+                        useradd -m -s /bin/bash workstation
+                      fi
+                      passwd -l workstation || true
+                      systemctl set-default graphical.target
+                      systemctl enable gdm3
+              - name: RebootAfterDesktop
+                action: Reboot
+                onFailure: Abort
+                inputs:
+                  delaySeconds: 15
+              - name: ConfirmDesktopStage
+                action: ExecuteBash
+                onFailure: Abort
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      dpkg-query -W ubuntu-desktop gdm3 xserver-xorg-video-dummy
+                      dpkg --audit
+                      grep -q 'WaylandEnable=false' /etc/gdm3/custom.conf
+  DcvComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: studio-cpu-dcv-res-stage
+      Platform: Linux
+      Version: 0.5.0
+      Description: Install DCV packages following RES 2026.06 Ubuntu package selection.
+      Data: |
+        name: studio-cpu-dcv-res-stage
+        description: Install checksum-verified DCV server web viewer and xdcv
+        schemaVersion: 1.0
+        phases:
+          - name: build
+            steps:
+              - name: InstallDCV
+                action: ExecuteBash
+                onFailure: Abort
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+                      tmpdir=$(mktemp -d)
+                      trap 'rm -rf "$tmpdir"' EXIT
+                      cd "$tmpdir"
+                      base=https://d1uj6qtbmh3dt5.cloudfront.net
+                      curl -fLsS "$base/nice-dcv-ubuntu2404-x86_64.tgz" -o dcv.tgz
+                      curl -fLsS "$base/nice-dcv-ubuntu2404-x86_64.tgz.sha256sum" -o checksum
+                      expected=$(awk '{print $1}' checksum)
+                      [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]]
+                      printf '%s  dcv.tgz\\n' "$expected" | sha256sum -c -
+                      mkdir packages
+                      tar -xzf dcv.tgz -C packages --strip-components=1
+                      shopt -s nullglob
+                      server=(packages/nice-dcv-server_*_amd64.ubuntu2404.deb)
+                      viewer=(packages/nice-dcv-web-viewer_*_amd64.ubuntu2404.deb)
+                      xdcv=(packages/nice-xdcv_*_amd64.ubuntu2404.deb)
+                      test "${#server[@]}" -eq 1
+                      test "${#viewer[@]}" -eq 1
+                      test "${#xdcv[@]}" -eq 1
+                      apt-get install -y "./${server[0]}" "./${viewer[0]}" "./${xdcv[0]}"
+                      usermod -aG video dcv
+                      install -d /etc/X11/xorg.conf.d /etc/dcv
+                      printf 'Section "Extensions"\\n Option "DPMS" "Disable"\\nEndSection\\n' > /etc/X11/xorg.conf.d/99-disable-dpms.conf
+                      cat >> /etc/dcv/dcv.conf <<'DCV'
+                      [security]
+                      authentication="system"
+                      [session-management]
+                      create-session=true
+                      [session-management/automatic-console-session]
+                      owner="workstation"
+                      DCV
+                      systemctl enable dcvserver
+              - name: RebootAfterDCV
+                action: Reboot
+                onFailure: Abort
+                inputs:
+                  delaySeconds: 15
+  SmokeTestComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: studio-cpu-dcv-smoke-test-res
+      Platform: Linux
+      Version: 0.5.0
+      Description: Verify desktop and DCV after reboot, but not interactive login.
+      Data: |
+        name: studio-cpu-dcv-smoke-test-res
+        description: Check services and DCV console after staged reboots
+        schemaVersion: 1.0
+        phases:
+          - name: test
+            steps:
+              - name: CheckDesktop
+                action: ExecuteBash
+                onFailure: Abort
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      systemctl is-enabled gdm3
+                      systemctl is-enabled dcvserver
+                      systemctl is-active gdm3
+                      systemctl is-active dcvserver
+                      pgrep -a Xorg || { journalctl -u gdm3 --no-pager -n 100; exit 1; }
+                      dcv list-sessions
+                      dcv list-sessions | grep -q console
+                      ss -lnt | grep -q ':8443 '
+                      test "$(passwd -S workstation | awk '{print $2}')" = L
+  Recipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name: studio-cpu-ubuntu2404-dcv
+      Version: 0.5.0
+      ParentImage: !Ref BaseAmiId
+      Components:
+        - ComponentArn: !Ref GdmFirstComponent
+        - ComponentArn: !Ref DesktopComponent
+        - ComponentArn: !Ref DcvComponent
+        - ComponentArn: !Ref SmokeTestComponent
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 80
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+  Infrastructure:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name: studio-cpu-image-builder
+      InstanceProfileName: !Ref BuilderInstanceProfile
+      InstanceTypes: [!Ref BuilderInstanceType]
+      TerminateInstanceOnFailure: true
+      Description: Uses default VPC networking; requires SSM and internet egress for package downloads.
+  Distribution:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: studio-cpu-image-distribution
+      Distributions:
+        - Region: !Ref AWS::Region
+          AmiDistributionConfiguration:
+            Name: 'studio-cpu-dcv-{{ imagebuilder:buildDate }}'
+            Description: Experimental CPU-only Ubuntu 24.04 DCV workstation
+  Pipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name: studio-cpu-dcv-pipeline
+      ImageRecipeArn: !Ref Recipe
+      InfrastructureConfigurationArn: !Ref Infrastructure
+      DistributionConfigurationArn: !Ref Distribution
+      ImageTestsConfiguration:
+        ImageTestsEnabled: true
+        TimeoutMinutes: 60
+      Status: ENABLED
+Outputs:
+  PipelineArn:
+    Value: !Ref Pipeline
+  NextStep:
+    Value: Open EC2 Image Builder > Image pipelines > studio-cpu-dcv-pipeline > Run pipeline. Review image build logs and test results.
