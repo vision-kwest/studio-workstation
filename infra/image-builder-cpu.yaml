@@ -34,7 +34,7 @@ Resources:
     Properties:
       Name: studio-cpu-desktop
       Platform: Linux
-      Version: 0.4.1
+      Version: 0.4.2
       Description: Install RES-aligned Ubuntu desktop prerequisites before DCV.
       Data: |
         name: studio-cpu-desktop
@@ -61,8 +61,37 @@ Resources:
                       apt-get clean
                       rm -rf /var/lib/apt/lists/*
                       timeout --signal=TERM --kill-after=60s 15m apt-get update -o Acquire::Retries=3
+                      # Keep SSM diagnostics visible even if apt stops producing output.
+                      # Background watchdog is removed on success/failure of this step.
+                      diagnostic_watchdog() {
+                        while :; do
+                          echo "=== INSTALL WATCHDOG $(date -Is) ==="
+                          uptime
+                          free -m
+                          df -h /
+                          ps -eo pid,ppid,stat,etime,comm --sort=-%cpu | head -25
+                          systemctl --no-pager list-jobs || true
+                          sleep 60
+                        done
+                      }
+                      diagnostic_watchdog > /var/log/studio-image-build-watchdog.log 2>&1 &
+                      watchdog_pid=$!
+                      cleanup_watchdog() {
+                        kill "$watchdog_pid" 2>/dev/null || true
+                        wait "$watchdog_pid" 2>/dev/null || true
+                      }
+                      trap cleanup_watchdog EXIT
                       echo "Installing RES-aligned desktop packages"
-                      timeout --signal=TERM --kill-after=60s 45m apt-get install -y -o Acquire::Retries=3 ubuntu-desktop gdm3
+                      if ! timeout --signal=TERM --kill-after=60s 45m apt-get install -y -o Acquire::Retries=3 ubuntu-desktop gdm3; then
+                        echo "Desktop package install failed; diagnostic snapshot follows"
+                        tail -100 /var/log/apt/term.log || true
+                        dpkg --audit || true
+                        ps -eo pid,ppid,stat,etime,wchan:24,args --forest | tail -100 || true
+                        tail -100 /var/log/studio-image-build-watchdog.log || true
+                        exit 1
+                      fi
+                      cleanup_watchdog
+                      trap - EXIT
                       dpkg --audit
                       echo "Desktop packages installed successfully"
                       install -d /etc/gdm3
@@ -106,7 +135,7 @@ Resources:
     Properties:
       Name: studio-cpu-dcv
       Platform: Linux
-      Version: 0.4.1
+      Version: 0.4.2
       Description: Install checksum-verified DCV Ubuntu 24.04 packages from AWS RES 2026.06 URLs.
       Data: |
         name: studio-cpu-dcv
@@ -158,7 +187,7 @@ Resources:
     Properties:
       Name: studio-cpu-dcv-smoke-test
       Platform: Linux
-      Version: 0.4.1
+      Version: 0.4.2
       Description: Fail image test if DCV, Xorg or graphical desktop cannot start.
       Data: |
         name: studio-cpu-dcv-smoke-test
@@ -189,7 +218,7 @@ Resources:
     Type: AWS::ImageBuilder::ImageRecipe
     Properties:
       Name: studio-cpu-ubuntu2404-dcv
-      Version: 0.4.1
+      Version: 0.4.2
       ParentImage: !Ref BaseAmiId
       Components:
         - ComponentArn: !Ref DesktopComponent
