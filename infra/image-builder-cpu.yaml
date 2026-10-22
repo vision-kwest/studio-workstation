@@ -34,11 +34,11 @@ Resources:
     Properties:
       Name: studio-cpu-desktop
       Platform: Linux
-      Version: 0.3.1
-      Description: Install minimal GNOME, GDM and Xorg dummy display on Ubuntu 24.04.
+      Version: 0.4.0
+      Description: Install RES-aligned Ubuntu desktop prerequisites before DCV.
       Data: |
         name: studio-cpu-desktop
-        description: Install Ubuntu 24.04 desktop and headless Xorg
+        description: Install RES-aligned Ubuntu 24.04 desktop prerequisites
         schemaVersion: 1.0
         phases:
           - name: build
@@ -55,39 +55,28 @@ Resources:
                       test "$ID" = ubuntu
                       test "$VERSION_ID" = 24.04
                       test "$(uname -m)" = x86_64
-                      # Avoid starting GUI services during image baking. Restored on exit.
-                      install -d /usr/sbin
-                      if [ -e /usr/sbin/policy-rc.d ]; then
-                        echo 'Existing policy-rc.d detected; refusing to overwrite it' >&2
-                        exit 1
-                      fi
-                      printf '#!/bin/sh\\nexit 101\\n' > /usr/sbin/policy-rc.d
-                      chmod 755 /usr/sbin/policy-rc.d
-                      cleanup_policy() { rm -f /usr/sbin/policy-rc.d; }
-                      trap cleanup_policy EXIT
-                      echo 'Starting apt update'
-                      timeout --signal=TERM --kill-after=60s 15m apt-get update
-                      echo 'Starting GNOME/Xorg package installation'
-                      timeout --signal=TERM --kill-after=60s 35m apt-get install -y --no-install-recommends ubuntu-desktop-minimal gdm3 xorg xserver-xorg-video-dummy curl ca-certificates tar gnupg
-                      echo 'GNOME/Xorg package installation completed'
+                      # RES 2026.06 uses ubuntu-desktop and gdm3 (not ubuntu-desktop-minimal).
+                      # Do not infer a deadlock from the final gdm reload warning.
+                      echo "Installing RES-aligned desktop packages"
+                      timeout --signal=TERM --kill-after=60s 45m apt-get install -y ubuntu-desktop gdm3
                       dpkg --audit
-                      cleanup_policy
-                      trap - EXIT
+                      echo "Desktop packages installed successfully"
                       install -d /etc/gdm3
                       sed -i '/^WaylandEnable=/d' /etc/gdm3/custom.conf
                       sed -i '/^\[daemon\]/a WaylandEnable=false' /etc/gdm3/custom.conf
-                      install -d /etc/X11/xorg.conf.d
-                      cat > /etc/X11/xorg.conf.d/20-studio-dummy.conf <<'XORG'
+                      # CPU-only dummy Xorg configuration from RES 2026.06.
+                      cat > /etc/X11/xorg.conf <<'XORG'
                       Section "Device"
                           Identifier "DummyDevice"
                           Driver "dummy"
-                          VideoRam 256000
+                          Option "UseEDID" "false"
+                          VideoRam 512000
                       EndSection
                       Section "Monitor"
                           Identifier "DummyMonitor"
-                          HorizSync 30-80
-                          VertRefresh 50-75
-                          Modeline "1920x1080" 172.80 1920 2040 2248 2576 1080 1081 1084 1118
+                          HorizSync 5.0 - 1000.0
+                          VertRefresh 5.0 - 200.0
+                          Option "ReducedBlanking"
                       EndSection
                       Section "Screen"
                           Identifier "DummyScreen"
@@ -95,11 +84,13 @@ Resources:
                           Monitor "DummyMonitor"
                           DefaultDepth 24
                           SubSection "Display"
+                              Viewport 0 0
                               Depth 24
-                              Modes "1920x1080"
+                              Virtual 4096 2160
                           EndSubSection
                       EndSection
                       XORG
+                      apt-get install -y xserver-xorg-video-dummy
                       if ! id workstation >/dev/null 2>&1; then
                         useradd -m -s /bin/bash workstation
                       fi
@@ -111,7 +102,7 @@ Resources:
     Properties:
       Name: studio-cpu-dcv
       Platform: Linux
-      Version: 0.3.1
+      Version: 0.4.0
       Description: Install checksum-verified DCV Ubuntu 24.04 packages from AWS RES 2026.06 URLs.
       Data: |
         name: studio-cpu-dcv
@@ -140,10 +131,14 @@ Resources:
                       shopt -s nullglob
                       server=(packages/nice-dcv-server_*_amd64.ubuntu2404.deb)
                       viewer=(packages/nice-dcv-web-viewer_*_amd64.ubuntu2404.deb)
+                      xdcv=(packages/nice-xdcv_*_amd64.ubuntu2404.deb)
                       test "${#server[@]}" -eq 1
                       test "${#viewer[@]}" -eq 1
-                      apt-get install -y "./${server[0]}" "./${viewer[0]}"
+                      test "${#xdcv[@]}" -eq 1
+                      apt-get install -y "./${server[0]}" "./${viewer[0]}" "./${xdcv[0]}"
                       usermod -aG video dcv
+                      install -d /etc/X11/xorg.conf.d
+                      printf 'Section "Extensions"\\n    Option "DPMS" "Disable"\\nEndSection\\n' > /etc/X11/xorg.conf.d/99-disable-dpms.conf
                       install -d /etc/dcv
                       cat >> /etc/dcv/dcv.conf <<'DCV'
                       [security]
@@ -159,7 +154,7 @@ Resources:
     Properties:
       Name: studio-cpu-dcv-smoke-test
       Platform: Linux
-      Version: 0.3.1
+      Version: 0.4.0
       Description: Fail image test if DCV, Xorg or graphical desktop cannot start.
       Data: |
         name: studio-cpu-dcv-smoke-test
@@ -181,7 +176,7 @@ Resources:
                       sleep 25
                       systemctl is-active gdm3
                       systemctl is-active dcvserver
-                      pgrep -a Xorg
+                      pgrep -a Xorg || { journalctl -u gdm3 --no-pager -n 100; exit 1; }
                       dcv list-sessions
                       dcv list-sessions | grep -q console
                       ss -lnt | grep -q ':8443 '
@@ -190,7 +185,7 @@ Resources:
     Type: AWS::ImageBuilder::ImageRecipe
     Properties:
       Name: studio-cpu-ubuntu2404-dcv
-      Version: 0.3.1
+      Version: 0.4.0
       ParentImage: !Ref BaseAmiId
       Components:
         - ComponentArn: !Ref DesktopComponent
