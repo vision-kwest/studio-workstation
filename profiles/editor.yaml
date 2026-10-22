@@ -1,0 +1,10 @@
+id: editor
+hardware: [nvidia]
+applications:
+  - id: davinci-resolve
+    install_strategy: licensed-vendor-installer
+  - id: audacity
+    install_strategy: apt-or-appimage
+  - id: ffmpeg
+    install_strategy: apt
+status: design-only
