@@ -34,7 +34,7 @@ Resources:
     Properties:
       Name: studio-cpu-desktop
       Platform: Linux
-      Version: 0.3.0
+      Version: 0.3.1
       Description: Install minimal GNOME, GDM and Xorg dummy display on Ubuntu 24.04.
       Data: |
         name: studio-cpu-desktop
@@ -55,8 +55,24 @@ Resources:
                       test "$ID" = ubuntu
                       test "$VERSION_ID" = 24.04
                       test "$(uname -m)" = x86_64
-                      apt-get update
-                      apt-get install -y --no-install-recommends ubuntu-desktop-minimal gdm3 xorg xserver-xorg-video-dummy curl ca-certificates tar gnupg
+                      # Avoid starting GUI services during image baking. Restored on exit.
+                      install -d /usr/sbin
+                      if [ -e /usr/sbin/policy-rc.d ]; then
+                        echo 'Existing policy-rc.d detected; refusing to overwrite it' >&2
+                        exit 1
+                      fi
+                      printf '#!/bin/sh\\nexit 101\\n' > /usr/sbin/policy-rc.d
+                      chmod 755 /usr/sbin/policy-rc.d
+                      cleanup_policy() { rm -f /usr/sbin/policy-rc.d; }
+                      trap cleanup_policy EXIT
+                      echo 'Starting apt update'
+                      timeout --signal=TERM --kill-after=60s 15m apt-get update
+                      echo 'Starting GNOME/Xorg package installation'
+                      timeout --signal=TERM --kill-after=60s 35m apt-get install -y --no-install-recommends ubuntu-desktop-minimal gdm3 xorg xserver-xorg-video-dummy curl ca-certificates tar gnupg
+                      echo 'GNOME/Xorg package installation completed'
+                      dpkg --audit
+                      cleanup_policy
+                      trap - EXIT
                       install -d /etc/gdm3
                       sed -i '/^WaylandEnable=/d' /etc/gdm3/custom.conf
                       sed -i '/^\[daemon\]/a WaylandEnable=false' /etc/gdm3/custom.conf
@@ -95,7 +111,7 @@ Resources:
     Properties:
       Name: studio-cpu-dcv
       Platform: Linux
-      Version: 0.3.0
+      Version: 0.3.1
       Description: Install checksum-verified DCV Ubuntu 24.04 packages from AWS RES 2026.06 URLs.
       Data: |
         name: studio-cpu-dcv
@@ -143,7 +159,7 @@ Resources:
     Properties:
       Name: studio-cpu-dcv-smoke-test
       Platform: Linux
-      Version: 0.3.0
+      Version: 0.3.1
       Description: Fail image test if DCV, Xorg or graphical desktop cannot start.
       Data: |
         name: studio-cpu-dcv-smoke-test
@@ -174,7 +190,7 @@ Resources:
     Type: AWS::ImageBuilder::ImageRecipe
     Properties:
       Name: studio-cpu-ubuntu2404-dcv
-      Version: 0.3.0
+      Version: 0.3.1
       ParentImage: !Ref BaseAmiId
       Components:
         - ComponentArn: !Ref DesktopComponent
