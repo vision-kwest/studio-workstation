@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Experimental CPU-only Ubuntu 24.04 DCV golden-AMI pipeline. Image Builder
+  creates and terminates temporary build/test instances; no SSH or control host.
+Parameters:
+  BaseAmiId:
+    Type: AWS::EC2::Image::Id
+    Default: ami-0fc0d6e8d70ab2d42
+    Description: Canonical Ubuntu 24.04 x86_64 AMI in us-east-1; verify owner before deploying.
+  BuilderInstanceType:
+    Type: String
+    Default: m7i.xlarge
+    AllowedValues: [m7i.large, m7i.xlarge, m7i.2xlarge]
+Resources:
+  BuilderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  BuilderInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref BuilderRole]
+  DesktopComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: studio-cpu-desktop
+      Platform: Linux
+      Version: 0.3.0
+      Description: Install minimal GNOME, GDM and Xorg dummy display on Ubuntu 24.04.
+      Data: |
+        name: studio-cpu-desktop
+        description: Install Ubuntu 24.04 desktop and headless Xorg
+        schemaVersion: 1.0
+        phases:
+          - name: build
+            steps:
+              - name: InstallDesktop
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      export DEBIAN_FRONTEND=noninteractive
+                      export NEEDRESTART_MODE=a
+                      . /etc/os-release
+                      test "$ID" = ubuntu
+                      test "$VERSION_ID" = 24.04
+                      test "$(uname -m)" = x86_64
+                      apt-get update
+                      apt-get install -y --no-install-recommends ubuntu-desktop-minimal gdm3 xorg xserver-xorg-video-dummy curl ca-certificates tar gnupg
+                      install -d /etc/gdm3
+                      sed -i '/^WaylandEnable=/d' /etc/gdm3/custom.conf
+                      sed -i '/^\[daemon\]/a WaylandEnable=false' /etc/gdm3/custom.conf
+                      install -d /etc/X11/xorg.conf.d
+                      cat > /etc/X11/xorg.conf.d/20-studio-dummy.conf <<'XORG'
+                      Section "Device"
+                          Identifier "DummyDevice"
+                          Driver "dummy"
+                          VideoRam 256000
+                      EndSection
+                      Section "Monitor"
+                          Identifier "DummyMonitor"
+                          HorizSync 30-80
+                          VertRefresh 50-75
+                          Modeline "1920x1080" 172.80 1920 2040 2248 2576 1080 1081 1084 1118
+                      EndSection
+                      Section "Screen"
+                          Identifier "DummyScreen"
+                          Device "DummyDevice"
+                          Monitor "DummyMonitor"
+                          DefaultDepth 24
+                          SubSection "Display"
+                              Depth 24
+                              Modes "1920x1080"
+                          EndSubSection
+                      EndSection
+                      XORG
+                      if ! id workstation >/dev/null 2>&1; then
+                        useradd -m -s /bin/bash workstation
+                      fi
+                      passwd -l workstation || true
+                      systemctl set-default graphical.target
+                      systemctl enable gdm3
+  DcvComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: studio-cpu-dcv
+      Platform: Linux
+      Version: 0.3.0
+      Description: Install checksum-verified DCV Ubuntu 24.04 packages from AWS RES 2026.06 URLs.
+      Data: |
+        name: studio-cpu-dcv
+        description: Install Amazon DCV and configure console session
+        schemaVersion: 1.0
+        phases:
+          - name: build
+            steps:
+              - name: InstallDCV
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      tmpdir=$(mktemp -d)
+                      trap 'rm -rf "$tmpdir"' EXIT
+                      cd "$tmpdir"
+                      base=https://d1uj6qtbmh3dt5.cloudfront.net
+                      curl -fLsS "$base/nice-dcv-ubuntu2404-x86_64.tgz" -o dcv.tgz
+                      curl -fLsS "$base/nice-dcv-ubuntu2404-x86_64.tgz.sha256sum" -o checksum
+                      expected=$(awk '{print $1}' checksum)
+                      test "${#expected}" -eq 64
+                      printf '%s  dcv.tgz\n' "$expected" | sha256sum -c -
+                      mkdir packages
+                      tar -xzf dcv.tgz -C packages --strip-components=1
+                      shopt -s nullglob
+                      server=(packages/nice-dcv-server_*_amd64.ubuntu2404.deb)
+                      viewer=(packages/nice-dcv-web-viewer_*_amd64.ubuntu2404.deb)
+                      test "${#server[@]}" -eq 1
+                      test "${#viewer[@]}" -eq 1
+                      apt-get install -y "./${server[0]}" "./${viewer[0]}"
+                      usermod -aG video dcv
+                      install -d /etc/dcv
+                      cat >> /etc/dcv/dcv.conf <<'DCV'
+                      [security]
+                      authentication="system"
+                      [session-management]
+                      create-session=true
+                      [session-management/automatic-console-session]
+                      owner="workstation"
+                      DCV
+                      systemctl enable dcvserver
+  SmokeTestComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: studio-cpu-dcv-smoke-test
+      Platform: Linux
+      Version: 0.3.0
+      Description: Fail image test if DCV, Xorg or graphical desktop cannot start.
+      Data: |
+        name: studio-cpu-dcv-smoke-test
+        description: Smoke test headless graphical console
+        schemaVersion: 1.0
+        phases:
+          - name: test
+            steps:
+              - name: CheckDesktop
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - |
+                      set -euxo pipefail
+                      systemctl is-enabled gdm3
+                      systemctl is-enabled dcvserver
+                      systemctl restart gdm3
+                      systemctl restart dcvserver
+                      sleep 25
+                      systemctl is-active gdm3
+                      systemctl is-active dcvserver
+                      pgrep -a Xorg
+                      dcv list-sessions
+                      dcv list-sessions | grep -q console
+                      ss -lnt | grep -q ':8443 '
+                      test "$(passwd -S workstation | awk '{print $2}')" = L
+  Recipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name: studio-cpu-ubuntu2404-dcv
+      Version: 0.3.0
+      ParentImage: !Ref BaseAmiId
+      Components:
+        - ComponentArn: !Ref DesktopComponent
+        - ComponentArn: !Ref DcvComponent
+        - ComponentArn: !Ref SmokeTestComponent
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 80
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+  Infrastructure:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name: studio-cpu-image-builder
+      InstanceProfileName: !Ref BuilderInstanceProfile
+      InstanceTypes: [!Ref BuilderInstanceType]
+      TerminateInstanceOnFailure: true
+      Description: Uses default VPC networking; requires SSM and internet egress for package downloads.
+  Distribution:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: studio-cpu-image-distribution
+      Distributions:
+        - Region: !Ref AWS::Region
+          AmiDistributionConfiguration:
+            Name: 'studio-cpu-dcv-{{ imagebuilder:buildDate }}'
+            Description: Experimental CPU-only Ubuntu 24.04 DCV workstation
+  Pipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name: studio-cpu-dcv-pipeline
+      ImageRecipeArn: !Ref Recipe
+      InfrastructureConfigurationArn: !Ref Infrastructure
+      DistributionConfigurationArn: !Ref Distribution
+      ImageTestsConfiguration:
+        ImageTestsEnabled: true
+        TimeoutMinutes: 60
+      Status: ENABLED
+Outputs:
+  PipelineArn:
+    Value: !Ref Pipeline
+  NextStep:
+    Value: Open EC2 Image Builder > Image pipelines > studio-cpu-dcv-pipeline > Run pipeline. Review image build logs and test results.
