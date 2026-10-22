@@ -1,0 +1,8 @@
+id: creator
+hardware: [nvidia]
+applications:
+  - id: blender
+    install_strategy: versioned-vendor-archive
+  - id: unreal-engine
+    install_strategy: licensed-or-source-build
+status: design-only
