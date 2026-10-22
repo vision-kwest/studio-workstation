@@ -1,0 +1,12 @@
+id: developer
+hardware: [cpu, nvidia]
+applications:
+  - id: vscode
+    install_strategy: vendor-package
+  - id: android-studio
+    install_strategy: versioned-vendor-archive
+  - id: git
+    install_strategy: apt
+  - id: cmake
+    install_strategy: apt
+status: design-only
