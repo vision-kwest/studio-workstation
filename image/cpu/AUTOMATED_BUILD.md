@@ -1,4 +1,16 @@
-# Automated CPU/DCV AMI build — v0.3 (draft)
+# RES-aligned implementation update (v0.4.0)
+
+The Image Builder recipe now uses RES 2026.06's `ubuntu-desktop` + `gdm3`, its CPU-only `/etc/X11/xorg.conf` dummy configuration, and its DCV server + web viewer + `nice-xdcv` package selection. This is a *partial* source-based port, not a guarantee of parity: RES also runs Python bootstrap logic for DCV startup, permissions, and Xorg readiness, and its reboot staging differs from Image Builder.
+
+**Before running another build:** confirm the earlier stalled Image Builder execution is cancelled and temporary EC2 builder has terminated. Update the existing CloudFormation stack with `infra/image-builder-cpu.yaml` from this feature branch; the recipe/components are now version `0.4.0`. Verify CloudFormation changes and the selected pipeline recipe version before Run pipeline. Do not run a new build against the old `0.3.x` recipe.
+
+**What success means:** An Image Builder build passing is only a *service-level smoke test*. It does not prove that DCV graphical login works. Do not merge/promote or advertise a working AMI until a clean instance from that AMI has been started, a unique password securely provisioned for the locked `workstation` account, a real DCV console login performed, and a stop/start cycle tested.
+
+**If it stalls again:** collect actual `apt`, `dpkg`, `systemd`, SSM and AWSTOE process/log evidence per [the investigation](../../docs/image-builder-hang-investigation.md) (currently on the documentation PR branch). Do not infer root cause from the last visible GDM warning.
+
+---
+
+# Automated CPU/DCV AMI build — v0.4 (draft)
 
 This replaces the manual-instance build process proposed in PR #2.
 
