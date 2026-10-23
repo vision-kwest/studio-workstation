@@ -1,0 +1,54 @@
+name: Gate 2 T3 mocked RES initialization
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tests/gate2_mocked_initialization.py'
+      - 'tests/gate2_run_mocked.py'
+      - '.github/workflows/gate2-t3-mocked.yml'
+permissions:
+  contents: read
+jobs:
+  mocked-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify original RES archive
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/res-t3/report
+          curl -fLsS --retry 3 --max-time 120 \
+            https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/idea-virtual-desktop-2026.06.tar.gz \
+            -o /tmp/res-t3/virtual-desktop.tar.gz
+          echo 'f5d2297537bda746fe74411c18140bcd0f2d4322852fa9d32ce7606a93aed7a8  /tmp/res-t3/virtual-desktop.tar.gz' | sha256sum -c -
+          tar -xOzf /tmp/res-t3/virtual-desktop.tar.gz ./requirements.txt > /tmp/res-t3/requirements.txt
+          cp tests/gate2_run_mocked.py tests/gate2_mocked_initialization.py /tmp/res-t3/
+          cat > /tmp/res-t3/Dockerfile <<'DOCKERFILE'
+          FROM python:3.12-slim
+          WORKDIR /audit
+          COPY requirements.txt .
+          RUN python -m pip install --no-cache-dir -r requirements.txt
+          COPY gate2_run_mocked.py gate2_mocked_initialization.py ./
+          USER 65534:65534
+          ENTRYPOINT ["python", "-B", "/audit/gate2_run_mocked.py"]
+          DOCKERFILE
+      - name: Build disposable test environment
+        run: docker build --pull -t res-gate2-t3:ci /tmp/res-t3
+      - name: Run mocked tests with no network
+        run: |
+          chmod 777 /tmp/res-t3/report
+          docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+            --read-only --tmpfs /tmp:rw,nosuid,noexec,size=128m --memory 2g --pids-limit 64 \
+            --user 65534:65534 \
+            --mount type=bind,src=/tmp/res-t3/virtual-desktop.tar.gz,dst=/audit/virtual-desktop.tar.gz,readonly \
+            --mount type=bind,src=/tmp/res-t3/report,dst=/audit/report \
+            res-gate2-t3:ci \
+            /audit/virtual-desktop.tar.gz /audit/gate2_mocked_initialization.py /audit/report/t3-report.json
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate2-t3-report
+          path: /tmp/res-t3/report/t3-report.json
+          if-no-files-found: warn
