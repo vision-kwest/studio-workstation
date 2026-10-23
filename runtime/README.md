@@ -36,3 +36,18 @@ Source: `aws/res` commit `1f526a241fb293a29fb018f08ccf81c100c05a42`. Files under
 - No IAM, EC2, CloudFormation or Image Builder changes.
 - Do not merge this draft until the blockers are resolved and tests pass.
 - Preserve D-006 (original NVIDIA/DCV/GNOME/Xorg behavior) and D-007 (original cloud-init, semaphore and reboot continuation).
+
+## Final pre-deployment review — 2026-10-23
+
+**Deployment authorization: BLOCKED.** CI confirms syntax, archive construction, and mocked behaviors, not a functioning workstation.
+
+Verified gaps from repository inspection:
+
+1. `infra/workstation.yaml` still accepts an already prepared `ImageId`. It does not render the original RES SDK workstation user-data template, provide a derived bootstrap archive URI, or invoke the original runtime `install.sh -p false` sequence. This is a missing deployment integration, not a reason to replace the RES template.
+2. The derived installation and application archives exist only as local/CI outputs. There is no approved S3 publishing workflow or versioned, integrity-checked deployment input for the modified archives. Original artifact hashes are verified, but modified artifact identity and EC2 `s3:GetObject` permissions are not yet established.
+3. `STUDIO_STANDALONE` and related inputs must survive both original cloud-init reentries and reach the Supervisor process. This is not demonstrated by mocked tests.
+4. Option A requires provisioning a dedicated, non-root local account with a locked password, followed by interactive SSM enrollment. Current deployment infrastructure does not create that account. The Python entrypoint now fails fast when the account is missing or root; it does not create or activate credentials.
+5. The application installer now fails on missing archive URI, failed S3 download, and failed Supervisor restart. Its `app_installed.lock` means installation finished, **not** successful DCV console login.
+6. DCV version-specific PAM, TLS, permissions file ownership, and real console readiness remain acceptance gates.
+
+**Required next implementation:** integrate the original SDK workstation user-data template and artifact URI inputs into a minimal, reviewed CloudFormation launch path; provide a secure locked-account creation mechanism; verify original reboot continuity and modified archive delivery. Do not deploy until those are implemented and explicitly approved.
