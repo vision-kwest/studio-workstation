@@ -1,0 +1,30 @@
+name: RES archive overlay integration
+on:
+  pull_request:
+    paths:
+      - 'runtime/**'
+      - 'tests/test_res_overlay_archives.py'
+      - '.github/workflows/res-overlay-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  archives:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download original verified RES archives
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/res-original
+          curl --fail --location --retry 2 --max-time 120 \
+            https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/res-installation-scripts.tar.gz \
+            -o /tmp/res-original/installation-scripts.tar.gz
+          curl --fail --location --retry 2 --max-time 120 \
+            https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/idea-virtual-desktop-2026.06.tar.gz \
+            -o /tmp/res-original/virtual-desktop.tar.gz
+          echo '2e3b0e4b198582ea03b1926aaaf76da21688f2e6809ad4d153b95a9417c72658  /tmp/res-original/installation-scripts.tar.gz' | sha256sum -c -
+          echo 'f5d2297537bda746fe74411c18140bcd0f2d4322852fa9d32ce7606a93aed7a8  /tmp/res-original/virtual-desktop.tar.gz' | sha256sum -c -
+      - name: Build and inspect both derived archives without executing RES
+        run: python3 tests/test_res_overlay_archives.py /tmp/res-original
