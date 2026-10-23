@@ -39,7 +39,7 @@ set +a
         install_commands=[command],infra_config=None,proxy_config=None)
     # Fn::Sub must not interpolate original RES shell variables.
     # Preserve only CloudFormation's AWS::Region pseudo parameter.
-    userdata=re.sub(r"\\$\\{(?!AWS::Region\\})([^}]+)\\}",lambda m: chr(36)+"{!"+m.group(1)+"}",userdata)
+    userdata=re.sub(r"\$\{(?!AWS::Region\})([^}]+)\}",lambda m: chr(36)+"{!"+m.group(1)+"}",userdata)
     if len(userdata.encode())>16384: raise ValueError("EC2 user-data exceeds 16KiB")
     return userdata
 def main():
