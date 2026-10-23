@@ -259,7 +259,7 @@ Resources:
           [Unit]
           Description=Studio Workstation local staged bootstrap
           Wants=network-online.target
-          After=network-online.target cloud-final.service
+          After=network-online.target
           ConditionPathExists=!/var/lib/studio-workstation/ready
           
           [Service]
