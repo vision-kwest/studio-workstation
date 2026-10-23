@@ -1,0 +1,37 @@
+name: Gate 2 RES static audit
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tests/gate2_static_audit.py'
+      - '.github/workflows/gate2-static-audit.yml'
+permissions:
+  contents: read
+jobs:
+  static-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download original RES 2026.06 archives (no AWS credentials)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/res-audit
+          curl --fail --location --retry 2 --max-time 90 \
+            https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/res-installation-scripts.tar.gz \
+            -o /tmp/res-audit/installation-scripts.tar.gz
+          curl --fail --location --retry 2 --max-time 90 \
+            https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/idea-virtual-desktop-2026.06.tar.gz \
+            -o /tmp/res-audit/virtual-desktop.tar.gz
+      - name: Run integrity and AST checks (never import or execute RES code)
+        run: |
+          python tests/gate2_static_audit.py --directory /tmp/res-audit --report gate2-static-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate2-static-report
+          path: gate2-static-report.json
+          if-no-files-found: ignore
