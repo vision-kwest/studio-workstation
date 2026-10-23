@@ -18,8 +18,19 @@ jobs:
           python3 - <<'PY'
           import ast
           from pathlib import Path
-          files = list(Path("runtime/overrides").rglob("*.py"))
-          assert len(files) == 7, files
+          root = Path("runtime/overrides")
+          files = sorted(root.rglob("*.py"))
+          required = {
+              "ideavirtualdesktop/app/standalone_bootstrap.py",
+              "ideavirtualdesktop/app/linux/bootstrap.py",
+              "ideavirtualdesktop/app/linux/post_reboot.py",
+              "ideabootstrap/dcv/dcv.py",
+              "ideabootstrap/dcv/linux/dcv_host.py",
+              "ideabootstrap/dcv/linux/gl.py",
+          }
+          actual = {p.relative_to(root).as_posix() for p in files}
+          missing = required - actual
+          assert not missing, f"Missing required RES overrides: {sorted(missing)}"
           for file in files:
               ast.parse(file.read_text(), filename=str(file))
               print("OK", file)
