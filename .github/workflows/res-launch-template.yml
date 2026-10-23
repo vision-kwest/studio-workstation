@@ -29,6 +29,11 @@ jobs:
           assert 'scripts-user, always' in u
           assert 'install.sh -p false' in u
           assert 'STUDIO_STANDALONE=true' in u
+          assert 'STUDIO_APP_PACKAGE_URI=s3://research-engineering-studio-us-east-1/review-only/2026.06/virtual-desktop.tar.gz' in u
+          assert 'STUDIO_s3://' not in u
+          assert 'STUDIO_GPU_FAMILIES=g4dn,g5,g6' in u
+          assert 'source /etc/studio-standalone.env' in u
+          assert 'install.sh -p false' in u and '-g NONE' in u
           assert 'useradd --create-home' in u and 'passwd -l workstation' in u
           assert 'pre_install_finished.lock' in u
           # Guard against accidentally disabling the escaping logic.
