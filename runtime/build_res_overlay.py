@@ -9,31 +9,58 @@ import hashlib
 import io
 from pathlib import Path, PurePosixPath
 import tarfile
+import copy
 
 EXPECTED = {
  "installation-scripts.tar.gz":"2e3b0e4b198582ea03b1926aaaf76da21688f2e6809ad4d153b95a9417c72658",
  "virtual-desktop.tar.gz":"f5d2297537bda746fe74411c18140bcd0f2d4322852fa9d32ce7606a93aed7a8",
 }
 ROOT=Path(__file__).resolve().parent/"overrides"
-def rewrite(raw, mapping):
+def rewrite(raw, mapping, additions=None, replacements=None):
+    """Copy a tarball, changing only explicitly listed members.
+
+    Preserve source metadata and fail on unexpected file types or missing
+    targets. Additions are limited to a new file in an existing package.
+    """
+    additions = additions or {}
+    replacements = replacements or {}
     out=io.BytesIO()
     found=set()
+    existing=set()
     with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as src:
-        with tarfile.open(fileobj=out,mode="w:gz") as dst:
-            for member in src:
-                path=PurePosixPath(member.name)
-                if path.is_absolute() or ".." in path.parts or not (member.isfile() or member.isdir()):
+        with tarfile.open(fileobj=out,mode="w:gz",format=tarfile.PAX_FORMAT) as dst:
+            for original in src:
+                member=copy.copy(original)
+                name=PurePosixPath(member.name)
+                if member.name.startswith("/") or ".." in name.parts or not (member.isfile() or member.isdir()):
                     raise ValueError("Unsafe archive entry "+member.name)
                 key=member.name.removeprefix("./")
-                data=src.extractfile(member).read() if member.isfile() else None
-                if key in mapping:
-                    data=mapping[key].read_bytes()
+                if key in existing:
+                    raise ValueError("Duplicate archive member "+key)
+                existing.add(key)
+                data=src.extractfile(original).read() if member.isfile() else None
+                if key in mapping or key in replacements:
+                    if not member.isfile():
+                        raise ValueError("Cannot replace directory "+key)
+                    data=mapping[key].read_bytes() if key in mapping else replacements[key]
                     member.size=len(data)
                     found.add(key)
                 dst.addfile(member,io.BytesIO(data) if data is not None else None)
-            missing=set(mapping)-found
+            missing=(set(mapping)|set(replacements))-found
             if missing:
                 raise ValueError("Original archive missing override paths: "+str(sorted(missing)))
+            for name,source in sorted(additions.items()):
+                path=PurePosixPath(name)
+                if name.startswith("/") or ".." in path.parts or name in existing:
+                    raise ValueError("Unsafe or duplicate addition "+name)
+                data=source.read_bytes()
+                info=tarfile.TarInfo(name)
+                info.size=len(data)
+                info.mode=0o644
+                info.mtime=0
+                info.uid=info.gid=0
+                info.uname=info.gname=""
+                dst.addfile(info,io.BytesIO(data))
     return out.getvalue()
 def main():
     p=argparse.ArgumentParser()
@@ -70,10 +97,24 @@ def main():
                 if len(matches)!=1:
                     raise ValueError("Cannot locate unique original module "+relative)
                 mapping[matches[0]]=ROOT/prefix/relative
-            nested[package]=rewrite(members[package],mapping)
-        # The new standalone entry point must be inserted into the existing
-        # source distribution. No implicit file insertion is permitted.
-        raise RuntimeError("Standalone entrypoint insertion into original Python sdist not implemented; refusing incomplete archive")
+            if prefix=="ideavirtualdesktop":
+                # Keep original source distribution layout and setup metadata.
+                # setuptools package discovery includes this .py in the existing
+                # ideavirtualdesktop.app package; no new package is introduced.
+                parents=[n.rsplit("/",1)[0] for n in names
+                         if n.endswith("/ideavirtualdesktop/app/__init__.py")]
+                if len(parents)!=1:
+                    raise ValueError("Cannot identify original app package root")
+                entry=parents[0]+"/standalone_bootstrap.py"
+                if entry in names:
+                    raise ValueError("Standalone entry already exists in source archive")
+                nested[package]=rewrite(members[package],mapping,
+                    additions={entry:ROOT/"ideavirtualdesktop/app/standalone_bootstrap.py"})
+            else:
+                nested[package]=rewrite(members[package],mapping)
+        # Replace only the two modified nested source distributions. Other
+        # original application archive members remain unchanged.
+        output=rewrite(raw,{},replacements=nested)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_bytes(output)
     print(args.output,hashlib.sha256(output).hexdigest())
