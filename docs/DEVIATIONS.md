@@ -1,6 +1,6 @@
 # RES 2026.06 Deviation Register
 
-**Status: proposed decisions only. No approved standalone code patch set yet.**
+**Status: design choices recorded, including approved Option A manual SSM credential enrollment. No approved standalone code patch set yet.**
 
 Every change from the pinned upstream RES commit must be recorded here *before* implementation. Do not treat a proposed removal as proven safe.
 
@@ -13,6 +13,11 @@ Every change from the pinned upstream RES commit must be recorded here *before* 
 | D-005 | RES CloudFormation/cluster orchestration | One EC2 instance, role, SG and EBS | Reduce cost and complexity | Confirm all bootstrap inputs and instance metadata requirements | **Proposed** |
 | D-006 | RES GPU/DCV installation | Preserve upstream code and configuration | Fidelity to working demo | Test NVIDIA T4 and CPU headless variants | **No deviation intended** |
 | D-007 | RES runtime reboot/continuation | Preserve original logic; do not invent new systemd state machine | Avoid prior ordering-cycle regression | Trace exact user-data/systemd/cron handoff | **No deviation intended** |
+
+## Gate 3 and Gate 4 review references
+
+- [Gate 3 security review](GATE_3_SECURITY_REVIEW.md): Option A first-login activation is approved as a design; exact historical DCV version, PAM, TLS and runtime authorization remain open.
+- [Gate 4 minimal patch specification](GATE_4_MINIMAL_PATCH_SPEC.md): file/function-level proposed adaptations for D-001–D-005; D-006 and D-007 must remain unchanged. Exact unified diffs and explicit implementation approval are still required.
 
 ## Entry template
 
