@@ -13,15 +13,16 @@ import sys
 from unittest import TestCase, TestLoader, TextTestRunner, mock
 
 class NegativeCases(TestCase):
-    def test_missing_session_id_dcv_host_rejected_but_configure_logs(self):
+    def test_missing_session_id_dcv_host_raises_value_error(self):
         mod = importlib.import_module("ideabootstrap.dcv.linux.dcv_host")
         with mock.patch.dict(os.environ, {}, clear=True), \
              mock.patch.object(mod, "_configure_storage_root"), \
              mock.patch.object(mod, "logger") as log:
-            mod.configure()
-            self.assertTrue(log.error.called, "Missing session ID must be logged")
-            # Original configure() returns despite failure in _configure_dcv_conf().
-            self.assertTrue(log.info.called)
+            # Upstream _configure_dcv_conf() checks IDEA_SESSION_ID before its
+            # try/except, so this ValueError propagates through configure().
+            with self.assertRaisesRegex(ValueError, "IDEA_SESSION_ID environment variable is required"):
+                mod.configure()
+            log.error.assert_not_called()
 
     def test_missing_linux_account_storage_root_error_logged(self):
         mod = importlib.import_module("ideabootstrap.dcv.linux.dcv_host")
