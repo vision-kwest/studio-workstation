@@ -61,7 +61,7 @@ def run(directory):
                         added=set(b)-set(a)
                         assert len(added)==1,added
                         assert next(iter(added)).endswith("/ideavirtualdesktop/app/standalone_bootstrap.py")
-                assert b"STUDIO_STANDALONE" in modified["idea-bootstrap-lib.tar.gz"]
+                assert any(b"STUDIO_STANDALONE" in data for data in files(modified["idea-bootstrap-lib.tar.gz"]).values())
             print("PASS",filename,hashlib.sha256(dst.read_bytes()).hexdigest())
     print("Overlay archive tests passed. No RES runtime executed.")
 if __name__=="__main__":
