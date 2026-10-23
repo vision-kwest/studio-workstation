@@ -26,9 +26,12 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           source = Path('runtime/bootstrap-cpu.sh').read_text().rstrip()
-          # CloudFormation intrinsic tags require cfn-lint; use raw source comparison here.
-          text = Path('infra/workstation-runtime-cpu-v0.6.0.yaml').read_text()
-          assert source in text, 'Embedded bootstrap differs from runtime/bootstrap-cpu.sh'
+          template = Path('infra/workstation-runtime-cpu-v0.6.0.yaml').read_text()
+          marker = "cat > /usr/local/sbin/studio-workstation-bootstrap <<'STUDIO_BOOTSTRAP_SCRIPT'\n"
+          assert marker in template, 'Bootstrap heredoc not found'
+          block = template.split(marker, 1)[1].split('\n          STUDIO_BOOTSTRAP_SCRIPT', 1)[0]
+          extracted = '\n'.join(line[10:] if line.startswith(' ' * 10) else line for line in block.splitlines()).rstrip()
+          assert source == extracted, 'Embedded bootstrap differs from runtime/bootstrap-cpu.sh'
           PY
       - name: Install CloudFormation linter
         run: python -m pip install cfn-lint
