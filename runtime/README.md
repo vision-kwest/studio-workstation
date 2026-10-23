@@ -22,12 +22,12 @@ Source: `aws/res` commit `1f526a241fb293a29fb018f08ccf81c100c05a42`. Files under
 
 ## Remaining blockers for this SAME implementation PR
 
-1. Trace and selectively isolate `bootstrap.py` remaining RES-specific operations: shared storage, AD/SSSD, sudo, proxy, tagging, identity and customization. Do not blanket skip.
-2. Resolve how original `resserver` / Supervisor initialization is invoked without RES control plane. No replacement systemd state machine or alternate installer allowed.
-3. Integrate the reviewed overrides into the **original verified RES archives** in a deterministic, checksum-aware build workflow, without replacing the original user-data template or stage ordering.
+1. **Partially implemented:** selectively guard RES-only storage, AD, sudo, proxy, tagging, identity and customization calls in `bootstrap.py`; mocked standalone behavior and preservation of essential host setup still require proof.
+2. **Candidate implemented, not proven:** use original Supervisor installation to invoke a small Python entrypoint calling upstream `bootstrap.run()` instead of the `ResApp` event loop. Verify execution/reboot behavior and all remaining imports and environment inputs.
+3. **Implemented, CI pending:** build both derived archives from SHA-256-verified original RES packages, replacing selected existing modules and adding the standalone entrypoint inside the original Python source distribution. The new integration workflow checks untouched members remain byte-identical. Neither archive is uploaded or deployed.
 4. Establish exact safe `STUDIO_STANDALONE` input propagation from original SDK user-data through both reboot stages and Python process.
 5. Verify DCV version-specific PAM, permissions grammar, file modes, TLS, and Option A interactive SSM account enrollment. Validate proposed timeout values and local owner existence.
-6. Add mocked standalone-branch tests and unchanged-RES-branch regression tests, then rerun T0–T4. Existing CI in this PR is syntax/static only.
+6. Run archive integration CI, then add mocked standalone-branch and unchanged-RES-branch behavioral tests and rerun T0–T4. Archive integration is not a runtime test.
 7. Before a controlled EC2 deployment, obtain explicit AWS/IAM approval and verify the standalone role can read the original archives.
 
 ## Review gates
