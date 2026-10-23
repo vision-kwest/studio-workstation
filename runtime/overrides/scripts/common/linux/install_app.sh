@@ -86,12 +86,15 @@ APP_PACKAGE_DOWNLOAD_URI=$($AWS dynamodb get-item \
                         --output text \
                         | awk '/VALUE/ {print $2}')
 fi
-if [ $? -ne 0 ]; then
-  log_info "No app needs to be installed on this host. Skipping..."
-  exit 0
+if [[ -z "${APP_PACKAGE_DOWNLOAD_URI}" ]]; then
+  echo "ERROR: Application package URI was not resolved" >&2
+  exit 1
 fi
 
-$AWS --region "${INSTANCE_REGION}" s3 cp "${APP_PACKAGE_DOWNLOAD_URI}" "${BOOTSTRAP_DIR}/"
+if ! $AWS --region "${INSTANCE_REGION}" s3 cp "${APP_PACKAGE_DOWNLOAD_URI}" "${BOOTSTRAP_DIR}/"; then
+  echo "ERROR: Failed to download application archive" >&2
+  exit 1
+fi
 
 APP_DEPLOY_DIR="/opt/idea/app"
 PACKAGE_ARCHIVE=$(basename "${APP_PACKAGE_DOWNLOAD_URI}")
@@ -186,6 +189,15 @@ startretries=10
 " >> /etc/supervisord.d/${COMPONENT}.ini
 
 fi
-systemctl restart supervisord
+if ! systemctl restart supervisord; then
+  echo "ERROR: Supervisor restart failed" >&2
+  exit 1
+fi
+
+if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
+  # Do not mark installation complete merely because Supervisor accepted a
+  # configuration file. Runtime console readiness is a separate acceptance gate.
+  echo "Standalone application installed; DCV console readiness not yet verified"
+fi
 
 echo $(date +%s) > ${APP_INSTALLED_LOCK}
