@@ -19,7 +19,7 @@ jobs:
           import ast
           from pathlib import Path
           files = list(Path("runtime/overrides").rglob("*.py"))
-          assert len(files) == 5, files
+          assert len(files) == 7, files
           for file in files:
               ast.parse(file.read_text(), filename=str(file))
               print("OK", file)
