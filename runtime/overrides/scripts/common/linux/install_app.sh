@@ -134,6 +134,14 @@ ENVIRONMENT="
     IDEA_APP_DEPLOY_DIR=\"$APP_DEPLOY_DIR\",
     MACHINE=\"$MACHINE\",
     IDEA_MODULE_ID=\"$MODULE_ID\""
+# Carry explicit standalone inputs into the original application process.
+if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
+    ENVIRONMENT+=",
+    STUDIO_STANDALONE=\"true\",
+    STUDIO_GPU_FAMILIES=\"${STUDIO_GPU_FAMILIES:?required}\",
+    STUDIO_DCV_IDLE_TIMEOUT=\"${STUDIO_DCV_IDLE_TIMEOUT:?required}\",
+    STUDIO_DCV_IDLE_WARNING=\"${STUDIO_DCV_IDLE_WARNING:?required}\""
+fi
 # Add environment variables for VDI
 if [[ ! -z "${PROJECT_NAME}" ]]; then
     ENVIRONMENT+=",
