@@ -31,6 +31,10 @@ jobs:
           assert 'STUDIO_STANDALONE=true' in u
           assert 'useradd --create-home' in u and 'passwd -l workstation' in u
           assert 'pre_install_finished.lock' in u
+          # Guard against accidentally disabling the escaping logic.
+          assert '${!PATH}' in u, "Original shell PATH was not escaped"
+          assert '${!BASE_OS}' in u, "Original shell BASE_OS was not escaped"
+          assert '${AWS::Region}' in u, "CloudFormation region must remain substitutable"
           unresolved = re.findall(r'\$\{(?!AWS::Region|!)[^}]+\}',u)
           assert not unresolved, f"Unescaped CloudFormation substitutions: {unresolved[:15]}"
           assert len(u.encode())<=16384
