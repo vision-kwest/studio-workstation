@@ -166,6 +166,15 @@ fi
 
 echo "[program:${COMPONENT}]
 environment=${ENVIRONMENT}" > /etc/supervisord.d/${COMPONENT}.ini
+if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
+  echo "command=/opt/idea/python/latest/bin/python -m ideavirtualdesktop.app.standalone_bootstrap
+autorestart=false
+startsecs=0
+startretries=0
+redirect_stderr=true
+stdout_logfile=/opt/idea/app/logs/stdout.log
+" >> /etc/supervisord.d/${COMPONENT}.ini
+else
 echo "command=/opt/idea/python/latest/bin/resserver
 process_name=${COMPONENT}
 redirect_stderr=true
@@ -176,6 +185,7 @@ startsecs=30
 startretries=10
 " >> /etc/supervisord.d/${COMPONENT}.ini
 
+fi
 systemctl restart supervisord
 
 echo $(date +%s) > ${APP_INSTALLED_LOCK}
