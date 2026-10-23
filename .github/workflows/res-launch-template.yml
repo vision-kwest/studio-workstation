@@ -31,7 +31,8 @@ jobs:
           assert 'STUDIO_STANDALONE=true' in u
           assert 'useradd --create-home' in u and 'passwd -l workstation' in u
           assert 'pre_install_finished.lock' in u
-          assert not re.search(r'\$\{(?!AWS::Region|!)[^}]+\}',u)
+          unresolved = re.findall(r'\$\{(?!AWS::Region|!)[^}]+\}',u)
+          assert not unresolved, f"Unescaped CloudFormation substitutions: {unresolved[:15]}"
           assert len(u.encode())<=16384
           sg=t['Resources']['WorkstationSG']['Properties']['SecurityGroupIngress']
           assert len(sg)==1 and sg[0]['FromPort']==8443 and sg[0]['IpProtocol']=='tcp'
