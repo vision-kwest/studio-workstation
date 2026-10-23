@@ -45,18 +45,21 @@ def run():
         amazon_ssm_agent.configure()
         cloudwatch_agent.setup()
 
-        idea_proxy.set_proxy()
+        if os.environ.get("STUDIO_STANDALONE") != "true":
+            idea_proxy.set_proxy()
         idea_service_account.setup_account()
 
-        shared_storage.configure()
+        if os.environ.get("STUDIO_STANDALONE") != "true":
+            shared_storage.configure()
 
         path = "/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin"
         restrict_ssh.configure(session_owner=True)
         disable_ssh.configure()
         sudoer_secure_path.configure(path)
 
-        ebs_volume_tags.setup()
-        network_interface_tags.setup()
+        if os.environ.get("STUDIO_STANDALONE") != "true":
+            ebs_volume_tags.setup()
+            network_interface_tags.setup()
 
         chronyd.configure()
         bootstrap_common.disable_ulimit()
@@ -67,20 +70,24 @@ def run():
         messages = [f'{os.environ.get("IDEA_MODULE_NAME", "")} (v{os.environ.get("IDEA_MODULE_VERSION", "")}), Cluster: {os.environ.get("IDEA_CLUSTER_NAME", "")}']
         motd.update(messages)
 
-        active_directory.configure()
+        if os.environ.get("STUDIO_STANDALONE") != "true":
+            active_directory.configure()
 
         if os.environ.get("STUDIO_STANDALONE") != "true":
             cognito_modules.configure()
-        set_sudoers.configure()
-        ssh_keygen.configure()
-        hibernation.resume_logger()
+        if os.environ.get("STUDIO_STANDALONE") != "true":
+            set_sudoers.configure()
+        if os.environ.get("STUDIO_STANDALONE") != "true":
+            ssh_keygen.configure()
+        if os.environ.get("STUDIO_STANDALONE") != "true":
+            hibernation.resume_logger()
 
         if os.environ.get("IDEA_SESSION_ID", "NONE") != "NONE":
             gnome_utils.configure()
             dcv.configure()
 
         customization_script = f"{os.environ.get('IDEA_CLUSTER_HOME', '')}/dcv_host/userdata_customizations.sh"
-        if os.path.isfile(customization_script):
+        if os.environ.get("STUDIO_STANDALONE") != "true" and os.path.isfile(customization_script):
             log_file = f"{os.environ.get('IDEA_CLUSTER_HOME', '')}/logs/userdata_customizations.log"
             with open(log_file, 'a') as log:
                 subprocess.run(
@@ -90,7 +97,8 @@ def run():
                 )
 
         bootstrap_common.source_launch_env_file('/etc/launch_script_environment')
-        on_vdi_configured()
+        if os.environ.get("STUDIO_STANDALONE") != "true":
+            on_vdi_configured()
 
         logger.info(f"Created semaphore directory: {SEMAPHORE_DIR}")
         os.makedirs(SEMAPHORE_DIR, exist_ok=True)
@@ -104,7 +112,8 @@ def run():
 
         bootstrap_common.source_launch_env_file('/etc/launch_script_environment')
         if os.environ.get('RERUN_ON_REBOOT') == "True" and os.path.isfile(LINUX_VDI_CONFIG_HOST_READY_LOCK):
-            on_vdi_configured()
+            if os.environ.get("STUDIO_STANDALONE") != "true":
+                on_vdi_configured()
         else:
             logger.info("Skipping running ON_VDI_CONFIGURED_COMMANDS")
 
