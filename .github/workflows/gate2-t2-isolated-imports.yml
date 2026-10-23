@@ -1,0 +1,74 @@
+name: Gate 2 T2 isolated imports
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tests/gate2_import_only.py'
+      - 'tests/README_GATE2_T2.md'
+      - '.github/workflows/gate2-t2-isolated-imports.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  import-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download pinned RES application archive
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/res-t2
+          curl --fail --location --retry 3 --max-time 120 \
+            https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/idea-virtual-desktop-2026.06.tar.gz \
+            -o /tmp/res-t2/virtual-desktop.tar.gz
+          echo 'f5d2297537bda746fe74411c18140bcd0f2d4322852fa9d32ce7606a93aed7a8  /tmp/res-t2/virtual-desktop.tar.gz' | sha256sum -c -
+
+      - name: Prepare original dependency manifest and Docker build context
+        run: |
+          set -euo pipefail
+          cp tests/gate2_import_only.py /tmp/res-t2/
+          tar -xOzf /tmp/res-t2/virtual-desktop.tar.gz ./requirements.txt > /tmp/res-t2/requirements.txt
+          cat > /tmp/res-t2/Dockerfile <<'DOCKERFILE'
+          FROM python:3.12-slim
+          ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1
+          WORKDIR /audit
+          COPY requirements.txt /audit/requirements.txt
+          RUN python -m pip install --requirement /audit/requirements.txt
+          COPY gate2_import_only.py /audit/gate2_import_only.py
+          USER 65534:65534
+          ENTRYPOINT ["python", "-B", "/audit/gate2_import_only.py"]
+          DOCKERFILE
+
+      - name: Build disposable dependency environment
+        run: docker build --pull --tag res-gate2-t2:ci /tmp/res-t2
+
+      - name: Import original RES modules without network or credentials
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/res-t2/report
+          chmod 777 /tmp/res-t2/report
+          docker run --rm \
+            --network none \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=128m \
+            --memory 2g --pids-limit 64 \
+            --user 65534:65534 \
+            --mount type=bind,src=/tmp/res-t2/virtual-desktop.tar.gz,dst=/audit/virtual-desktop.tar.gz,readonly \
+            --mount type=bind,src=/tmp/res-t2/report,dst=/audit/report \
+            res-gate2-t2:ci \
+            --archive /audit/virtual-desktop.tar.gz \
+            --report /audit/report/gate2-t2-report.json
+
+      - name: Upload T2 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate2-t2-report
+          path: /tmp/res-t2/report/gate2-t2-report.json
+          if-no-files-found: warn
