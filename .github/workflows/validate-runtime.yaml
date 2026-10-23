@@ -1,0 +1,36 @@
+name: Validate runtime bootstrap
+on:
+  pull_request:
+    paths:
+      - 'infra/workstation-runtime-cpu-v0.6.0.yaml'
+      - 'runtime/**'
+      - '.github/workflows/validate-runtime.yaml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/workstation-runtime-cpu-v0.6.0.yaml'
+      - 'runtime/**'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate shell syntax
+        run: bash -n runtime/bootstrap-cpu.sh
+      - name: Check embedded bootstrap matches source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('runtime/bootstrap-cpu.sh').read_text().rstrip()
+          # CloudFormation intrinsic tags require cfn-lint; use raw source comparison here.
+          text = Path('infra/workstation-runtime-cpu-v0.6.0.yaml').read_text()
+          assert source in text, 'Embedded bootstrap differs from runtime/bootstrap-cpu.sh'
+          PY
+      - name: Install CloudFormation linter
+        run: python -m pip install cfn-lint
+      - name: Lint CloudFormation template
+        run: cfn-lint infra/workstation-runtime-cpu-v0.6.0.yaml
