@@ -8,8 +8,8 @@ import json
 import re
 from pathlib import Path
 
-BUCKET="research-engineering-studio-us-east-1"
-BASE="studio-workstation/releases"
+BUCKET="studio-workstation-releases-401233741942-us-east-1"
+BASE="releases"
 UPSTREAM="res-2026.06"
 ARTIFACTS=("installation-scripts.tar.gz","virtual-desktop.tar.gz")
 MANIFEST="release-manifest.json"
