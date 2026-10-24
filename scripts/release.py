@@ -14,7 +14,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from release_publish import publish
 
 ROOT=Path(__file__).resolve().parents[1]
 SOURCE_BUCKET="research-engineering-studio-us-east-1"
@@ -100,6 +99,7 @@ def main():
               "derived_sha256":hashes,"status":"LOCAL_VERIFIED_NOT_PUBLISHED"}
     (release/"release-manifest.json").write_text(json.dumps(manifest,indent=2)+"\n")
     if args.publish:
+        from release_publish import publish
         publish(release,args.version,region=args.region)
         print("\nSUCCESS — immutable S3 release published; no EC2 deployment.")
     else:
