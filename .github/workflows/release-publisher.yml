@@ -1,0 +1,21 @@
+name: Immutable release publisher tests
+on:
+  pull_request:
+    paths:
+      - 'scripts/release.py'
+      - 'scripts/release_publish.py'
+      - 'scripts/README.md'
+      - 'tests/test_release_publish.py'
+      - '.github/workflows/release-publisher.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline S3 publication tests
+        run: python3 -m unittest discover -s tests -p test_release_publish.py -v
+      - name: Python syntax
+        run: python3 -m py_compile scripts/release.py scripts/release_publish.py tests/test_release_publish.py
