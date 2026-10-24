@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Rebuild, test and checksum the two RES-derived archives. No AWS changes.
+
+Run from a cloned repository:
+    python3 scripts/release.py
+
+The script never pulls Git, uploads S3 objects, or deploys infrastructure.
+"""
+import argparse
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT=Path(__file__).resolve().parents[1]
+EXPECTED={
+ "installation-scripts.tar.gz":"2e3b0e4b198582ea03b1926aaaf76da21688f2e6809ad4d153b95a9417c72658",
+ "virtual-desktop.tar.gz":"f5d2297537bda746fe74411c18140bcd0f2d4322852fa9d32ce7606a93aed7a8",
+}
+def digest(path):
+    h=hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda:f.read(1024*1024),b""):
+            h.update(chunk)
+    return h.hexdigest()
+def run(*args):
+    subprocess.run([str(x) for x in args],check=True,cwd=ROOT)
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--release-dir",type=Path,default=Path.home()/"studio-release")
+    args=p.parse_args()
+    release=args.release_dir.expanduser().resolve()
+    originals=release/"original"
+    derived=release/"derived"
+    staging=release/"staging"
+    for name,expected in EXPECTED.items():
+        path=originals/name
+        if not path.is_file() or digest(path)!=expected:
+            raise ValueError("Missing or invalid original archive: "+str(path))
+        print("VERIFIED ORIGINAL:",name,flush=True)
+    staging.mkdir(parents=True,exist_ok=True)
+    hashes={}
+    for name in EXPECTED:
+        first=staging/name
+        second=staging/(name+".repeat")
+        for output in (first,second):
+            run(sys.executable,ROOT/"runtime/build_res_overlay.py",
+                "--input",originals/name,"--output",output)
+        if digest(first)!=digest(second) or first.read_bytes()!=second.read_bytes():
+            raise ValueError("Nondeterministic archive: "+name)
+        hashes[name]=digest(first)
+        print("REPRODUCIBLE:",name,hashes[name],flush=True)
+    run(sys.executable,ROOT/"tests/test_res_overlay_archives.py",originals)
+    derived.mkdir(parents=True,exist_ok=True)
+    for name in EXPECTED:
+        (staging/name).replace(derived/name)
+    commit=subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip()
+    manifest={"source_commit":commit,"original_sha256":EXPECTED,
+              "derived_sha256":hashes,"status":"LOCAL_VERIFIED_NOT_PUBLISHED"}
+    (release/"release-manifest.json").write_text(json.dumps(manifest,indent=2)+"\n")
+    print("\nSUCCESS — verified local release; no S3 upload or EC2 deployment.")
+    print("Manifest:",release/"release-manifest.json")
+if __name__=="__main__":
+    try: main()
+    except (OSError,ValueError,subprocess.CalledProcessError) as e:
+        print("FAILED:",e,file=sys.stderr)
+        sys.exit(1)
