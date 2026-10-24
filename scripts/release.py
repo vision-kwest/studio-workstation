@@ -5,7 +5,7 @@ Run from a cloned repository:
     python3 scripts/release.py
 
 The script downloads missing originals from the known RES release bucket.
-It never pulls Git, uploads S3 objects, or deploys infrastructure.
+By default it never uploads to S3 or deploys infrastructure.\nExplicit --publish enables immutable release publication, never EC2 deployment.
 """
 import argparse
 import hashlib
@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from release_publish import publish
 
 ROOT=Path(__file__).resolve().parents[1]
 SOURCE_BUCKET="research-engineering-studio-us-east-1"
@@ -68,7 +69,11 @@ def main():
     p.add_argument("--release-dir",type=Path,default=Path.home()/"studio-release")
     p.add_argument("--offline",action="store_true",help="Require previously downloaded original archives")
     p.add_argument("--region",default="us-east-1",help="Region for source S3 reads")
+    p.add_argument("--publish",action="store_true",help="Explicitly publish immutable versioned artifacts to S3")
+    p.add_argument("--version",help="Required with --publish, e.g. v0.1.0")
     args=p.parse_args()
+    if args.publish != bool(args.version):
+        p.error("--publish and --version must be supplied together")
     release=args.release_dir.expanduser().resolve()
     originals=release/"original"
     derived=release/"derived"
@@ -94,7 +99,11 @@ def main():
     manifest={"source_commit":commit,"original_sha256":EXPECTED,
               "derived_sha256":hashes,"status":"LOCAL_VERIFIED_NOT_PUBLISHED"}
     (release/"release-manifest.json").write_text(json.dumps(manifest,indent=2)+"\n")
-    print("\nSUCCESS — verified local release; no S3 upload or EC2 deployment.")
+    if args.publish:
+        publish(release,args.version,region=args.region)
+        print("\nSUCCESS — immutable S3 release published; no EC2 deployment.")
+    else:
+        print("\nSUCCESS — verified local release; no S3 upload or EC2 deployment.")
     print("Manifest:",release/"release-manifest.json")
 if __name__=="__main__":
     try: main()
