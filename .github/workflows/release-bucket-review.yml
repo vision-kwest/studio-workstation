@@ -1,0 +1,38 @@
+name: Release bucket infrastructure review
+on:
+  pull_request:
+    paths:
+      - 'infra/release-bucket.yaml'
+      - 'scripts/release_publish.py'
+      - 'tests/test_release_publish.py'
+      - '.github/workflows/release-bucket-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-review:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline publisher regression tests
+        run: python3 -m unittest discover -s tests -p test_release_publish.py -v
+      - name: Validate CloudFormation bucket template structure
+        run: |
+          python3 -m pip install 'PyYAML>=6,<7'
+          python3 - <<'PY'
+          import yaml
+          from pathlib import Path
+          class Loader(yaml.SafeLoader): pass
+          def intrinsic(loader,tag,node):
+              return loader.construct_scalar(node)
+          Loader.add_multi_constructor("!",intrinsic)
+          t=yaml.load(Path("infra/release-bucket.yaml").read_text(),Loader=Loader)
+          bucket=t["Resources"]["ReleaseBucket"]
+          p=bucket["Properties"]
+          assert p["BucketName"]=="studio-workstation-releases-401233741942-us-east-1"
+          assert p["VersioningConfiguration"]["Status"]=="Enabled"
+          assert p["BucketEncryption"]["ServerSideEncryptionConfiguration"][0]["ServerSideEncryptionByDefault"]["SSEAlgorithm"]=="AES256"
+          assert all(p["PublicAccessBlockConfiguration"].values())
+          assert bucket["DeletionPolicy"]=="Retain"
+          print("PASS private versioned release bucket structure")
+          PY

@@ -18,12 +18,14 @@ Options: `--release-dir PATH`, `--offline` (no downloads), `--region us-east-1`.
 
 ## Immutable release publication — Option 2
 
-The approved release destination reuses the existing bucket and separates the
-Studio Workstation version from its upstream RES version:
+The release destination is an account-owned, private bucket created by
+`infra/release-bucket.yaml`. This replaces the original proposal to publish
+to the upstream RES bucket, which permits downloads but denies administrative
+and publication checks. The source bucket remains read-only.
 
 ```text
-s3://research-engineering-studio-us-east-1/
-  studio-workstation/releases/v0.1.0/res-2026.06/
+s3://studio-workstation-releases-401233741942-us-east-1/
+  releases/v0.1.0/res-2026.06/
     installation-scripts.tar.gz
     virtual-desktop.tar.gz
     release-manifest.json
@@ -59,6 +61,37 @@ appropriate object existence-check permissions. No EC2, IAM, or CloudFormation
 resources are created by this command.
 
 **Deployment note:** `runtime/render_workstation.py` must be given the same
-release prefix (`studio-workstation/releases/v0.1.0/res-2026.06`), rather
+release prefix (`releases/v0.1.0/res-2026.06`), rather
 than the earlier experimental `cpu-v1` prefix. CPU and GPU builds may share
 the same released application artifacts.
+
+## Release bucket provisioning (separate approval)
+
+After reviewing and merging the bucket infrastructure PR, an authorized AWS
+administrator can create the release bucket in `us-east-1` with:
+
+```bash
+aws cloudformation deploy \
+  --stack-name studio-workstation-release-bucket \
+  --template-file infra/release-bucket.yaml \
+  --region us-east-1
+```
+
+This is a **resource-creating command**. Do not run it until explicitly
+authorized. The bucket uses SSE-S3 encryption, blocks all public access,
+enables S3 versioning, enforces TLS and is retained if the stack is deleted.
+The template does not grant public or cross-account access. Use a properly
+authorized IAM role rather than account root.
+
+The original RES archives remain read-only inputs from
+`s3://research-engineering-studio-us-east-1/releases/2026.06/`.
+The derived release is written only to the dedicated account-owned bucket.
+Before deployment, render the workstation template with:
+
+```bash
+python3 runtime/render_workstation.py \
+  --bucket studio-workstation-releases-401233741942-us-east-1 \
+  --prefix releases/v0.1.0/res-2026.06 \
+  --user workstation \
+  --output ~/studio-release/workstation-cpu.json
+```
