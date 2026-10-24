@@ -1,0 +1,20 @@
+name: Release source acquisition tests
+on:
+  pull_request:
+    paths:
+      - 'scripts/release.py'
+      - 'scripts/README.md'
+      - 'tests/test_release_download.py'
+      - '.github/workflows/release-source-download.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test offline, cached, checksum and failure paths
+        run: python3 -m unittest discover -s tests -p test_release_download.py -v
+      - name: Python syntax
+        run: python3 -m py_compile scripts/release.py tests/test_release_download.py
