@@ -46,7 +46,7 @@ class ReleasePublishTests(unittest.TestCase):
         for invalid in ("v1","latest","v1.0.0/evil","v01.0.0"):
             with self.assertRaises(ValueError):m.prefix_for(invalid)
         self.assertEqual(m.prefix_for("v0.1.0"),
-            "studio-workstation/releases/v0.1.0/res-2026.06")
+            "releases/v0.1.0/res-2026.06")
     def test_publish_and_verify_manifest_last(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);self.setup_release(root);s3=FakeS3()
