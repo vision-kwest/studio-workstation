@@ -10,6 +10,7 @@ import io
 from pathlib import Path, PurePosixPath
 import tarfile
 import copy
+import gzip
 
 EXPECTED = {
  "installation-scripts.tar.gz":"2e3b0e4b198582ea03b1926aaaf76da21688f2e6809ad4d153b95a9417c72658",
@@ -25,10 +26,11 @@ def rewrite(raw, mapping, additions=None, replacements=None):
     additions = additions or {}
     replacements = replacements or {}
     out=io.BytesIO()
+    tar_buffer=io.BytesIO()
     found=set()
     existing=set()
     with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as src:
-        with tarfile.open(fileobj=out,mode="w:gz",format=tarfile.PAX_FORMAT) as dst:
+        with tarfile.open(fileobj=tar_buffer,mode="w",format=tarfile.PAX_FORMAT) as dst:
             for original in src:
                 member=copy.copy(original)
                 name=PurePosixPath(member.name)
@@ -61,6 +63,10 @@ def rewrite(raw, mapping, additions=None, replacements=None):
                 info.uid=info.gid=0
                 info.uname=info.gname=""
                 dst.addfile(info,io.BytesIO(data))
+    # Gzip mtime is otherwise the current wall-clock time. Keep original
+    # tar member metadata; normalize only the outer compression wrapper.
+    with gzip.GzipFile(fileobj=out,mode="wb",filename="",mtime=0,compresslevel=9) as gz:
+        gz.write(tar_buffer.getvalue())
     return out.getvalue()
 def main():
     p=argparse.ArgumentParser()
