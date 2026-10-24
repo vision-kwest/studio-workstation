@@ -1,0 +1,56 @@
+name: Standalone RES overlay static checks
+on:
+  pull_request:
+    paths:
+      - 'runtime/overrides/**'
+      - '.github/workflows/standalone-overlay.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  syntax:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax (no imports or execution)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          root = Path("runtime/overrides")
+          files = sorted(root.rglob("*.py"))
+          required = {
+              "ideavirtualdesktop/app/standalone_bootstrap.py",
+              "ideavirtualdesktop/app/linux/bootstrap.py",
+              "ideavirtualdesktop/app/linux/post_reboot.py",
+              "ideabootstrap/dcv/dcv.py",
+              "ideabootstrap/dcv/linux/dcv_host.py",
+              "ideabootstrap/dcv/linux/gl.py",
+          }
+          actual = {p.relative_to(root).as_posix() for p in files}
+          missing = required - actual
+          assert not missing, f"Missing required RES overrides: {sorted(missing)}"
+          for file in files:
+              ast.parse(file.read_text(), filename=str(file))
+              print("OK", file)
+          PY
+      - name: Bash syntax (no execution)
+        run: |
+          set -euo pipefail
+          find runtime/overrides/scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+      - name: Standalone branch smoke assertions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path("runtime/overrides")
+          auth=(root/"ideabootstrap/dcv/linux/dcv_host.py").read_text()
+          assert 'authentication' in auth and 'auth-token-verifier' in auth
+          perms=(root/"ideabootstrap/dcv/dcv.py").read_text()
+          assert '%owner% allow builtin' in perms
+          app=(root/"scripts/common/linux/install_app.sh").read_text()
+          assert 'STUDIO_APP_PACKAGE_URI' in app and 'STUDIO_STANDALONE' in app
+          boot=(root/"scripts/virtual-desktop-host/linux/install.sh").read_text()
+          assert 'host_modules.sh' in boot and 'STUDIO_STANDALONE' in boot
+          print("Static branch assertions passed; no runtime validation implied")
+          PY

@@ -1,0 +1,154 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "CPU RES 2026.06 derived runtime original workstation user-data",
+  "Parameters": {
+    "ImageId": {
+      "Type": "AWS::EC2::Image::Id"
+    },
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id"
+    },
+    "SubnetId": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "ClientCidr": {
+      "Type": "String",
+      "AllowedPattern": "^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}/32$"
+    },
+    "InstanceType": {
+      "Type": "String",
+      "Default": "m7i.large",
+      "AllowedValues": [
+        "m7i.large",
+        "m7i.xlarge"
+      ]
+    },
+    "DiskSizeGiB": {
+      "Type": "Number",
+      "Default": 100,
+      "MinValue": 60,
+      "MaxValue": 2048
+    }
+  },
+  "Resources": {
+    "WorkstationSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "DCV from trusted IPv4 only; no inbound SSH",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 8443,
+            "ToPort": 8443,
+            "CidrIp": {
+              "Ref": "ClientCidr"
+            }
+          }
+        ]
+      }
+    },
+    "WorkstationRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        ],
+        "Policies": [
+          {
+            "PolicyName": "ReadDerivedRESArtifacts",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": []
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "WorkstationProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "WorkstationRole"
+          }
+        ]
+      }
+    },
+    "Workstation": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {
+          "Ref": "ImageId"
+        },
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "SubnetId": {
+          "Ref": "SubnetId"
+        },
+        "SecurityGroupIds": [
+          {
+            "Ref": "WorkstationSG"
+          }
+        ],
+        "IamInstanceProfile": {
+          "Ref": "WorkstationProfile"
+        },
+        "MetadataOptions": {
+          "HttpTokens": "required",
+          "HttpEndpoint": "enabled"
+        },
+        "UserData": "RENDER_OFFLINE",
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "VolumeSize": {
+                "Ref": "DiskSizeGiB"
+              },
+              "VolumeType": "gp3",
+              "Encrypted": true,
+              "DeleteOnTermination": false
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "studio-workstation-res-cpu"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "InstanceId": {
+      "Value": {
+        "Ref": "Workstation"
+      }
+    }
+  }
+}

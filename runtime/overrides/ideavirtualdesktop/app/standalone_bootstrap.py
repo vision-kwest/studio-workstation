@@ -1,0 +1,35 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""Standalone entry into the ORIGINAL RES Linux bootstrap; no ResApp lifecycle.
+
+Invoked by the original RES Supervisor installation mechanism. Not a reboot
+manager: the original cloud-init user-data and shell semaphores own reentry.
+"""
+import os
+import pwd
+
+def main():
+    if os.environ.get("STUDIO_STANDALONE") != "true":
+        raise RuntimeError("Standalone entrypoint requires STUDIO_STANDALONE=true")
+    required = ("IDEA_SESSION_OWNER", "IDEA_SESSION_ID", "RES_BASE_OS",
+                "STUDIO_GPU_FAMILIES", "STUDIO_DCV_IDLE_TIMEOUT",
+                "STUDIO_DCV_IDLE_WARNING")
+    missing = [name for name in required if not os.environ.get(name)]
+    if missing:
+        raise RuntimeError("Missing required standalone inputs: " + ", ".join(missing))
+    if os.environ["RES_BASE_OS"] != "ubuntu2404":
+        raise RuntimeError("Standalone entrypoint supports Ubuntu 24.04 only")
+    owner = os.environ["IDEA_SESSION_OWNER"]
+    try:
+        account = pwd.getpwnam(owner)
+    except KeyError as exc:
+        raise RuntimeError("Standalone console owner must be an existing Linux user") from exc
+    if account.pw_uid == 0:
+        raise RuntimeError("Standalone console owner must not be root")
+    if os.environ["IDEA_SESSION_ID"] == "NONE":
+        raise RuntimeError("Standalone console session ID must not be NONE")
+    from ideavirtualdesktop.app.linux import bootstrap
+    bootstrap.run()
+
+if __name__ == "__main__":
+    main()

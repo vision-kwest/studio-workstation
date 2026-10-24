@@ -1,0 +1,51 @@
+name: RES workstation launch template review
+on:
+  pull_request:
+    paths:
+      - 'runtime/render_workstation.py'
+      - 'runtime/workstation-template.json'
+      - 'runtime/upstream/**'
+      - '.github/workflows/res-launch-template.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install template renderer
+        run: python3 -m pip install 'jinja2>=3.1,<4'
+      - name: Render offline CPU template and validate safety
+        run: |
+          set -euo pipefail
+          python3 runtime/render_workstation.py --bucket research-engineering-studio-us-east-1 --prefix review-only/2026.06 --user workstation --output /tmp/workstation-rendered.json
+          python3 - <<'PY'
+          import json,re
+          t=json.load(open('/tmp/workstation-rendered.json'))
+          p=t['Resources']['Workstation']['Properties']
+          u=p['UserData']['Fn::Base64']['Fn::Sub']
+          assert 'cloud_final_modules:' in u
+          assert 'scripts-user, always' in u
+          assert 'install.sh -p false' in u
+          assert 'STUDIO_STANDALONE=true' in u
+          assert 'STUDIO_APP_PACKAGE_URI=s3://research-engineering-studio-us-east-1/review-only/2026.06/virtual-desktop.tar.gz' in u
+          assert 'STUDIO_s3://' not in u
+          assert 'STUDIO_GPU_FAMILIES=g4dn,g5,g6' in u
+          assert 'source /etc/studio-standalone.env' in u
+          assert 'install.sh -p false' in u and '-g NONE' in u
+          assert 'useradd --create-home' in u and 'passwd -l workstation' in u
+          assert 'pre_install_finished.lock' in u
+          # Guard against accidentally disabling the escaping logic.
+          assert '${!PATH}' in u, "Original shell PATH was not escaped"
+          assert '${!BASE_OS}' in u, "Original shell BASE_OS was not escaped"
+          assert '${AWS::Region}' in u, "CloudFormation region must remain substitutable"
+          unresolved = re.findall(r'\$\{(?!AWS::Region|!)[^}]+\}',u)
+          assert not unresolved, f"Unescaped CloudFormation substitutions: {unresolved[:15]}"
+          assert len(u.encode())<=16384
+          sg=t['Resources']['WorkstationSG']['Properties']['SecurityGroupIngress']
+          assert len(sg)==1 and sg[0]['FromPort']==8443 and sg[0]['IpProtocol']=='tcp'
+          role=t['Resources']['WorkstationRole']['Properties']['Policies'][0]['PolicyDocument']['Statement'][0]
+          assert role['Action']==['s3:GetObject'] and len(role['Resource'])==2
+          print('PASS original user data, reboot reentry, local account, S3 scope, network restrictions')
+          PY
