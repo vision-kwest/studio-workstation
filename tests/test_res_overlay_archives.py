@@ -32,6 +32,11 @@ def run(directory):
             dst=Path(temp)/(filename+".modified")
             subprocess.run([sys.executable,str(BUILDER),"--input",str(src),
                             "--output",str(dst)],check=True)
+            # Rebuild independently; output bytes must be identical.
+            repeat=Path(temp)/(filename+".repeat")
+            subprocess.run([sys.executable,str(BUILDER),"--input",str(src),
+                            "--output",str(repeat)],check=True)
+            assert dst.read_bytes()==repeat.read_bytes(), "Nondeterministic archive: "+filename
             original=files(src.read_bytes())
             modified=files(dst.read_bytes())
             assert required <= modified.keys()
