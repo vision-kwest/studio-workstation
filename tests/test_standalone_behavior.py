@@ -25,7 +25,8 @@ class StandaloneBehavior(TestCase):
              mock.patch.object(m.bootstrap_common,"source_launch_env_file"), \
              mock.patch.object(m.post_reboot,"run",side_effect=lambda:events.append("post")), \
              mock.patch.object(m.gnome_utils,"configure",side_effect=lambda:events.append("gnome")), \
-             mock.patch.object(m.dcv,"configure",side_effect=lambda:events.append("dcv")):
+             mock.patch.object(m.dcv,"configure",side_effect=lambda:events.append("dcv")), \
+             mock.patch.object(m.dcv,"is_dcvserver_ready",return_value=True):
             preserved=[(m.amazon_ssm_agent,"configure"),(m.cloudwatch_agent,"setup"),
                        (m.idea_service_account,"setup_account"),(m.restrict_ssh,"configure"),
                        (m.disable_ssh,"configure"),(m.sudoer_secure_path,"configure"),
@@ -45,6 +46,27 @@ class StandaloneBehavior(TestCase):
                 stack.enter_context(mock.patch.object(m,"on_vdi_configured",side_effect=AssertionError("RES customization")))
                 m.run()
             self.assertEqual(events,["gnome","dcv","post"])
+
+    def test_initial_dcv_readiness_failure_propagates(self):
+        m=importlib.import_module("ideavirtualdesktop.app.linux.bootstrap")
+        with mock.patch.dict(os.environ,{"STUDIO_STANDALONE":"true","IDEA_SESSION_ID":"test"},clear=False), \
+             mock.patch.object(m.os.path,"isfile",return_value=False), \
+             mock.patch.object(m.bootstrap_common,"set_reboot_required"), \
+             mock.patch.object(m.gnome_utils,"configure"), \
+             mock.patch.object(m.dcv,"configure"), \
+             mock.patch.object(m.dcv,"is_dcvserver_ready",return_value=False):
+            from contextlib import ExitStack
+            with ExitStack() as stack:
+                for obj,name in ((m.amazon_ssm_agent,"configure"),(m.cloudwatch_agent,"setup"),
+                                 (m.idea_service_account,"setup_account"),(m.restrict_ssh,"configure"),
+                                 (m.disable_ssh,"configure"),(m.sudoer_secure_path,"configure"),
+                                 (m.chronyd,"configure"),(m.bootstrap_common,"disable_ulimit"),
+                                 (m.bootstrap_common,"disable_strict_host_check"),
+                                 (m.bootstrap_common,"disable_se_linux"),(m.motd,"disable_update"),
+                                 (m.motd,"update")):
+                    stack.enter_context(mock.patch.object(obj,name))
+                with self.assertRaisesRegex(RuntimeError,"DCV server failed initial readiness"):
+                    m.run()
 
     def test_existing_config_lock_calls_post_reboot(self):
         m=importlib.import_module("ideavirtualdesktop.app.linux.bootstrap")
