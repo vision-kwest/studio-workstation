@@ -85,6 +85,8 @@ def run():
         if os.environ.get("IDEA_SESSION_ID", "NONE") != "NONE":
             gnome_utils.configure()
             dcv.configure()
+            if os.environ.get("STUDIO_STANDALONE") == "true" and not dcv.is_dcvserver_ready():
+                raise RuntimeError("Standalone DCV server failed initial readiness check")
 
         customization_script = f"{os.environ.get('IDEA_CLUSTER_HOME', '')}/dcv_host/userdata_customizations.sh"
         if os.environ.get("STUDIO_STANDALONE") != "true" and os.path.isfile(customization_script):
