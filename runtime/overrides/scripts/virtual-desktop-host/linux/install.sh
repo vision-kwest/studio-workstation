@@ -84,7 +84,7 @@ if [[ ! -f ${INSTALL_FINISHED_LOCK} ]]; then
   if [[ ! -f ${BOOTSTRAP_DIR}/res_installed_all_packages.log ]]; then
     # Disable SSM agent if exists to avoid unexpected reboot during installation
     # Don't disable ssm during pre baking AMI since it uses SSM to run remote commands
-    if [[ $PREBAKING_AMI == "false" ]]; then
+    if [[ $PREBAKING_AMI == "false" && "${STUDIO_STANDALONE}" != "true" ]]; then
       /bin/bash  "${SCRIPT_DIR}/../../common/linux/disable_amazon_ssm_agent.sh" -o $BASE_OS -s "${SCRIPT_DIR}/.."
     fi
 
