@@ -1,0 +1,18 @@
+name: Release IAM policy contract
+on:
+  pull_request:
+    paths:
+      - 'infra/workstation-release-read-policy.json'
+      - 'tests/test_release_role_policy.py'
+      - 'scripts/README.md'
+      - '.github/workflows/release-iam-policy.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate versioned read-only instance policy
+        run: python3 -m unittest discover -s tests -p test_release_role_policy.py -v
