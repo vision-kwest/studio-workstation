@@ -28,10 +28,12 @@ def run():
         if not standalone:
             update_session_host_info()
 
-        if dcv.configure_automatic_console_session():
-            session_state = dcv.poll_dcv_session_ready()
-            if not standalone:
-                update_session_state(session_state)
+        configured = dcv.configure_automatic_console_session()
+        session_state = dcv.poll_dcv_session_ready() if configured else "ERROR"
+        if standalone and session_state != "READY":
+            raise RuntimeError("Standalone DCV console failed readiness check")
+        if not standalone and configured:
+            update_session_state(session_state)
         return
 
     logger.info(f"Running post reboot process: {LINUX_VDI_CONFIG_HOST_READY_LOCK}")
@@ -81,8 +83,10 @@ def run():
     if not standalone:
         update_session_host_info()
 
-    if dcv.configure_automatic_console_session():
-        session_state = dcv.poll_dcv_session_ready()
-        if not standalone:
-            update_session_state(session_state)
-        logger.info("DCV session placement complete with state: %s", session_state)
+    configured = dcv.configure_automatic_console_session()
+    session_state = dcv.poll_dcv_session_ready() if configured else "ERROR"
+    if standalone and session_state != "READY":
+        raise RuntimeError("Standalone DCV console failed readiness check")
+    if not standalone and configured:
+        update_session_state(session_state)
+    logger.info("DCV session placement complete with state: %s", session_state)
