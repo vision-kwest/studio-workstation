@@ -1,0 +1,16 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadPinnedStudioRelease",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/v0.1.0/res-2026.06/installation-scripts.tar.gz",
+        "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/v0.1.0/res-2026.06/virtual-desktop.tar.gz"
+      ]
+    }
+  ]
+}
