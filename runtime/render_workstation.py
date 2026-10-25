@@ -51,9 +51,6 @@ def main():
     a=p.parse_args()
     template=json.loads((ROOT/"workstation-template.json").read_text())
     template["Resources"]["Workstation"]["Properties"]["UserData"]={"Fn::Base64":{"Fn::Sub":render(a.bucket,a.prefix,a.user)}}
-    template["Resources"]["WorkstationRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"][0]["Resource"]=[
-        "arn:aws:s3:::"+a.bucket+"/"+a.prefix.strip("/")+"/"+name for name in
-        ("installation-scripts.tar.gz","virtual-desktop.tar.gz")]
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(template,indent=2)+"\n")
     print("Generated reviewable CloudFormation:",a.output)
