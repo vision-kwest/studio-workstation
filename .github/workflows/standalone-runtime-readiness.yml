@@ -1,0 +1,24 @@
+name: Standalone runtime readiness regression
+on:
+  pull_request:
+    paths:
+      - 'runtime/overrides/**'
+      - 'tests/test_standalone_readiness_contract.py'
+      - '.github/workflows/standalone-runtime-readiness.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check standalone SSM and DCV contracts
+        run: python3 -m unittest discover -s tests -p test_standalone_readiness_contract.py -v
+      - name: Python syntax
+        run: |
+          python3 -m py_compile runtime/overrides/ideavirtualdesktop/app/linux/bootstrap.py runtime/overrides/ideavirtualdesktop/app/linux/post_reboot.py
+      - name: Shell syntax
+        run: |
+          bash -n runtime/overrides/scripts/virtual-desktop-host/linux/install.sh
+          bash -n runtime/overrides/scripts/common/linux/install_app.sh
