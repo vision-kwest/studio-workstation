@@ -28,6 +28,16 @@ def main():
         raise RuntimeError("Standalone console owner must not be root")
     if os.environ["IDEA_SESSION_ID"] == "NONE":
         raise RuntimeError("Standalone console session ID must not be NONE")
+    # RES 2026.06 already supports local default logging when IDEA_MODULE_ID
+    # is absent. Prime its cached logger before importing bootstrap modules,
+    # whose module-level get_logger() calls otherwise scan DynamoDB.
+    from res.utils import logging_utils
+    module_id = os.environ.pop("IDEA_MODULE_ID", None)
+    try:
+        logging_utils.res_logging()
+    finally:
+        if module_id is not None:
+            os.environ["IDEA_MODULE_ID"] = module_id
     from ideavirtualdesktop.app.linux import bootstrap
     bootstrap.run()
 
