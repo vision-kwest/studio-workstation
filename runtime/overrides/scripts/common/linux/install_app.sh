@@ -171,9 +171,9 @@ echo "[program:${COMPONENT}]
 environment=${ENVIRONMENT}" > /etc/supervisord.d/${COMPONENT}.ini
 if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
   echo "command=/opt/idea/python/latest/bin/python -m ideavirtualdesktop.app.standalone_bootstrap
-autorestart=false
-startsecs=0
-startretries=0
+autorestart=unexpected
+startsecs=10
+startretries=3
 redirect_stderr=true
 stdout_logfile=/opt/idea/app/logs/stdout.log
 " >> /etc/supervisord.d/${COMPONENT}.ini
