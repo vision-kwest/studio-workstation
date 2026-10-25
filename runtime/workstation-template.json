@@ -28,6 +28,12 @@
       "Default": 100,
       "MinValue": 60,
       "MaxValue": 2048
+    },
+    "InstanceProfileName": {
+      "Type": "String",
+      "Default": "StudioWorkstationSSMRole",
+      "AllowedPattern": "[A-Za-z0-9+=,.@_-]+",
+      "Description": "Existing EC2 instance profile with SSM and release archive read access"
     }
   },
   "Resources": {
@@ -50,53 +56,6 @@
         ]
       }
     },
-    "WorkstationRole": {
-      "Type": "AWS::IAM::Role",
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "ec2.amazonaws.com"
-              },
-              "Action": "sts:AssumeRole"
-            }
-          ]
-        },
-        "ManagedPolicyArns": [
-          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-        ],
-        "Policies": [
-          {
-            "PolicyName": "ReadDerivedRESArtifacts",
-            "PolicyDocument": {
-              "Version": "2012-10-17",
-              "Statement": [
-                {
-                  "Effect": "Allow",
-                  "Action": [
-                    "s3:GetObject"
-                  ],
-                  "Resource": []
-                }
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "WorkstationProfile": {
-      "Type": "AWS::IAM::InstanceProfile",
-      "Properties": {
-        "Roles": [
-          {
-            "Ref": "WorkstationRole"
-          }
-        ]
-      }
-    },
     "Workstation": {
       "Type": "AWS::EC2::Instance",
       "Properties": {
@@ -115,7 +74,7 @@
           }
         ],
         "IamInstanceProfile": {
-          "Ref": "WorkstationProfile"
+          "Ref": "InstanceProfileName"
         },
         "MetadataOptions": {
           "HttpTokens": "required",

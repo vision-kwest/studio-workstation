@@ -45,7 +45,9 @@ jobs:
           assert len(u.encode())<=16384
           sg=t['Resources']['WorkstationSG']['Properties']['SecurityGroupIngress']
           assert len(sg)==1 and sg[0]['FromPort']==8443 and sg[0]['IpProtocol']=='tcp'
-          role=t['Resources']['WorkstationRole']['Properties']['Policies'][0]['PolicyDocument']['Statement'][0]
-          assert role['Action']==['s3:GetObject'] and len(role['Resource'])==2
-          print('PASS original user data, reboot reentry, local account, S3 scope, network restrictions')
+          assert 'WorkstationRole' not in t['Resources']
+          assert 'WorkstationProfile' not in t['Resources']
+          assert p['IamInstanceProfile']=={'Ref':'InstanceProfileName'}
+          assert t['Parameters']['InstanceProfileName']['Default']=='StudioWorkstationSSMRole'
+          print('PASS original user data, reboot reentry, local account, existing instance profile, network restrictions')
           PY
