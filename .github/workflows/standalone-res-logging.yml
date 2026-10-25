@@ -1,0 +1,16 @@
+name: Standalone RES logging startup
+on:
+  pull_request:
+    paths:
+      - 'runtime/overrides/ideavirtualdesktop/app/standalone_bootstrap.py'
+      - 'tests/test_standalone_logging_startup.py'
+      - '.github/workflows/standalone-res-logging.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -p test_standalone_logging_startup.py -v
