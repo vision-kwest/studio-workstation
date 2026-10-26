@@ -104,7 +104,7 @@ if [ ! -f /root/bootstrap/semaphore/pre_install_finished.lock ]; then
   chmod +x /root/bootstrap/download_bootstrap.sh
 
   install_aws_cli
-  bash /root/bootstrap/download_bootstrap.sh "{{ bootstrap_package_uri }}"
+  bash /root/bootstrap/download_bootstrap.sh "{{ bootstrap_package_uri }}" || exit 1
 
   # prepare steps are done, create the lock file with the timestamp
   mkdir -p /root/bootstrap/semaphore
