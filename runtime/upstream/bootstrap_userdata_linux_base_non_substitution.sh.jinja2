@@ -104,7 +104,16 @@ if [ ! -f /root/bootstrap/semaphore/pre_install_finished.lock ]; then
   chmod +x /root/bootstrap/download_bootstrap.sh
 
   install_aws_cli
-  bash /root/bootstrap/download_bootstrap.sh "{{ bootstrap_package_uri }}"
+  # Standalone safety gate: a failed S3 download must never create the
+  # pre-install completion marker (original RES script otherwise continues).
+  if ! bash /root/bootstrap/download_bootstrap.sh "{{ bootstrap_package_uri }}"; then
+    echo "ERROR: RES bootstrap archive download/extraction failed" >&2
+    exit 1
+  fi
+  if [[ ! -s /root/bootstrap/latest/scripts/virtual-desktop-host/linux/install.sh ]]; then
+    echo "ERROR: RES installer missing after archive extraction" >&2
+    exit 1
+  fi
 
   # prepare steps are done, create the lock file with the timestamp
   mkdir -p /root/bootstrap/semaphore
