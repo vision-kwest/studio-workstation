@@ -81,6 +81,7 @@ if [ ! -f /root/bootstrap/semaphore/pre_install_finished.lock ]; then
   }
 
   echo "#!/bin/bash
+  set -e
   PACKAGE_DOWNLOAD_URI=\${1}
   PACKAGE_ARCHIVE=\$(basename \${PACKAGE_DOWNLOAD_URI})
   PACKAGE_NAME=\${PACKAGE_ARCHIVE%.tar.gz*}
