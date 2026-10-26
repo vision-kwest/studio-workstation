@@ -1,0 +1,19 @@
+name: CPU workstation golden-path contracts
+on:
+  pull_request:
+    paths:
+      - 'runtime/upstream/bootstrap_userdata_linux_base_non_substitution.sh.jinja2'
+      - 'runtime/overrides/ideavirtualdesktop/app/standalone_bootstrap.py'
+      - 'tests/test_fresh_bootstrap_contract.py'
+      - 'scripts/check_cpu_workstation.sh'
+      - '.github/workflows/cpu-golden-path.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -p test_fresh_bootstrap_contract.py -v
+      - run: bash -n scripts/check_cpu_workstation.sh
