@@ -1,0 +1,21 @@
+name: CPU acceptance contracts
+on:
+  pull_request:
+    paths:
+      - 'runtime/**'
+      - 'scripts/check_workstation_aws.py'
+      - 'scripts/check_workstation_guest.sh'
+      - 'scripts/workstation_lifecycle.py'
+      - 'tests/test_cpu_acceptance_contract.py'
+      - '.github/workflows/cpu-acceptance-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -p test_cpu_acceptance_contract.py -v
+      - run: python3 -m py_compile scripts/check_workstation_aws.py scripts/workstation_lifecycle.py
+      - run: bash -n scripts/check_workstation_guest.sh
