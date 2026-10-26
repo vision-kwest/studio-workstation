@@ -11,6 +11,7 @@ class DeploymentAcceptanceContracts(unittest.TestCase):
         self.assertLess(source.index("logging_utils.res_logging()"),source.index("from ideavirtualdesktop.app.linux import bootstrap"))
     def test_bootstrap_does_not_mark_failed_download_complete(self):
         source=(ROOT/"runtime/upstream/bootstrap_userdata_linux_base_non_substitution.sh.jinja2").read_text()
+        self.assertIn('echo "#!/bin/bash\n  set -e\n  PACKAGE_DOWNLOAD_URI=',source)
         self.assertIn('if ! bash /root/bootstrap/download_bootstrap.sh',source)
         self.assertIn('if [[ ! -s /root/bootstrap/latest/scripts/virtual-desktop-host/linux/install.sh ]]',source)
         self.assertLess(source.index('if ! bash /root/bootstrap/download_bootstrap.sh'),source.index('pre_install_finished.lock\nfi'))
