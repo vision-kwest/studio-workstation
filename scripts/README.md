@@ -168,3 +168,104 @@ Verify the EC2 role's read access before launch. After launch, check
 `cloud-init status --long`, SSM connectivity across reboot stages,
 Supervisor logs, `dcvserver` status and TCP 8443, and the automatic
 console session. Do not treat `app_installed.lock` alone as DCV readiness.
+
+## CPU standalone end-to-end acceptance — 2026-10-25
+
+**Observed working instance:** `i-09122a298e3878a57` in `us-east-1`,
+Ubuntu 24.04, `m7i.large`, RES 2026.06-derived runtime.
+The browser connected to Amazon DCV on port 8443, authenticated as the
+local Linux user `workstation`, and displayed an interactive GNOME
+desktop with a working terminal. `dcv describe-session console --json`
+reported `status: running`, owner `workstation`, display layout
+2560×1600. The DCV server was active and listening on TCP 8443.
+Cloud-init finished with no errors, and SSM Session Manager worked.
+The one-shot Supervisor application reported `EXITED` after logging
+`DCV session placement complete with state: READY`; that status alone
+is not a failure.
+
+**Important distinction:** v0.1.2 was **manually hotfixed** onto the
+already-provisioned v0.1.1 instance by extracting
+`standalone_bootstrap.py` from the verified v0.1.2 nested application
+archive. The installed module SHA-256 was
+`696534dbe781128f70abaa978a822f05cbdaf9fc74dca14350c7cf3155477f9f`.
+A successful *fresh* v0.1.2 deployment has **not yet been observed**.
+The committed overlay and published v0.1.2 archive contain the same
+logging change, but fresh provisioning is a separate acceptance gate.
+Do not claim a reproducible fresh deployment until it passes.
+
+### Fresh deployment prerequisites and verification
+
+1. Publish a new immutable release from merged `main` using
+   `python3 scripts/release.py --publish --version VERSION`. Do not
+   overwrite an existing release.
+2. Ensure `StudioWorkstationSSMRole` has
+   `AmazonSSMManagedInstanceCore` and the version-independent
+   `StudioWorkstationReleaseRead` inline policy. Verify both archive
+   objects are readable **using the instance role**. The published
+   release prefix must match the rendered user data.
+3. Render with `python3 runtime/render_workstation.py --bucket BUCKET
+   --prefix releases/VERSION/res-2026.06 --user workstation
+   --output OUTPUT.json`, then run `aws cloudformation validate-template`.
+4. Deploy to a new test stack only after reviewing billable resources,
+   image, subnet, client /32 CIDR and existing instance profile. Allow
+   RES to complete its package build and reboot stages.
+5. From the instance via SSM run
+   `sudo bash /path/to/studio-workstation/scripts/check_cpu_workstation.sh`.
+   This is a **read-only** smoke check; the repository must be available
+   on the instance or the script copied there.
+6. From the approved client network, test DCV HTTPS, local Linux
+   authentication, GNOME interaction, terminal and reconnect.
+   The account is provisioned with a **locked password**. Interactive
+   login requires a separate approved credential-enrollment step
+   (`sudo passwd workstation` through SSM). Do not store passwords in
+   user data, source control, logs, or CloudFormation parameters.
+
+### Stop/start lifecycle acceptance (requires approval)
+
+Before stopping, record `InstanceId`, EBS volume ID, current
+`dcv describe-session console --json`, SSM status and current public
+IP. Save open work. From an authorized **CloudShell** identity, use:
+
+```bash
+INSTANCE=i-09122a298e3878a57
+aws ec2 stop-instances --instance-ids "$INSTANCE" --region us-east-1
+aws ec2 wait instance-stopped --instance-ids "$INSTANCE" --region us-east-1
+aws ec2 start-instances --instance-ids "$INSTANCE" --region us-east-1
+aws ec2 wait instance-status-ok --instance-ids "$INSTANCE" --region us-east-1
+```
+
+Afterward verify SSM Online and run the acceptance script **on the
+instance**. Confirm DCV is reachable, `console` remains running and
+local login works. A stopped instance with an automatically assigned
+public IP normally receives a **new public IP** when started; update
+client URLs and any DNS records. A session may need to be recreated;
+record that as a lifecycle failure instead of assuming persistence.
+Do not delete the CloudFormation stack or root EBS volume.
+
+### Trusted DCV TLS — deployment decision
+
+The observed browser warned `Not Secure`: DCV is reachable over
+HTTPS but the presented certificate is not trusted by the client.
+Do not suppress TLS verification or treat a self-signed certificate
+exception as production trust.
+
+**Recommended internet-facing path:** reserve an Elastic IP (billable)
+or use an automated DNS update for the changing EC2 public IP; create
+a DNS name you control (for example `dcv.example.com`); obtain a
+publicly trusted certificate for **that name** using a validated ACME
+DNS-01 challenge (or another trusted CA); configure the DCV server's
+documented certificate/key paths with root-only permissions; restart
+DCV during an approved maintenance window; verify the browser connects
+to `https://YOUR_DNS_NAME:8443` without certificate warnings and
+that the cert chain, SAN, hostname and renewal process are correct.
+Certificate renewal must be automated and monitored. Never commit
+private keys to Git or embed them in user data.
+
+**Alternative private path:** use a managed VPN or private overlay
+network and a client-trusted private CA, with DCV restricted to that
+network. A VPN alone does **not** make an untrusted certificate trusted.
+Select a path based on the domain, IP stability, client network and
+operational preferences before making infrastructure changes.
+
+No certificate, DNS record, Elastic IP, VPN or renewal automation
+has been provisioned by this repository change.
