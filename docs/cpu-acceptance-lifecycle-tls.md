@@ -132,3 +132,54 @@ explicitly preserve `ClientCidr=0.0.0.0/0`; review the change set before
 applying it. Do not redeploy the existing workstation merely to change
 this parameter without first reviewing whether EC2 replacement is
 proposed.
+
+
+## Validated fresh CPU deployment — v0.1.3 (2026-10-28)
+
+**Result: PASS — fresh provisioning and interactive desktop.** This
+acceptance result is based on the deployment and guest logs supplied
+during the validation session, plus a successful browser login reported
+by the operator. It does **not** imply that the fresh instance has
+passed stop/start lifecycle testing.
+
+| Item | Observed result |
+| --- | --- |
+| Release | `v0.1.3` / RES `2026.06` |
+| CloudFormation stack | `studio-workstation-cpu-v013`, deployment succeeded |
+| EC2 instance | `i-0bbfbdc878d3a2320`, `m7i.large`, `us-east-1` |
+| Base image | `ami-0d6dd9e8265d48906` (Ubuntu 24.04) |
+| Network | Public subnet; `ClientCidr=0.0.0.0/0` for TCP 8443 |
+| Instance role | `StudioWorkstationSSMRole` |
+| Root volume | 100 GiB gp3, encrypted |
+| SSM | Online, interactive session established |
+| Cloud-init | `status: done`, `errors: []` |
+| Installer | All stage markers present: `pre_install_finished.lock`, `install_finished.lock`, `install_post_reboot_finished.lock`, `app_installed.lock` |
+| Linux configuration | `linux_vdi_config.lock` and `linux_vdi_config_host_ready.lock` present |
+| DCV service | `active` |
+| DCV session | `console`, owner `workstation` |
+| RES readiness log | `2026-10-28 08:04:17 UTC: DCV session placement complete with state: READY` |
+| Browser | Local `workstation` login and interactive DCV shared desktop confirmed by operator |
+| Manual repairs | None to Python packages, bootstrap files, IAM or RES configuration during fresh provisioning |
+
+**Package hashes** (verified during publication):
+- `installation-scripts.tar.gz`: `813259748335482b1877192a61a008b32e613038ee831305d9e4767c51c23ab7`
+- `virtual-desktop.tar.gz`: `4d9b89d149d2d984193e346ef0c48294a7a976dd32208a6e06ac365d4581c4a3`
+- `release-manifest.json`: `13bbecd2409215754b825c79cf3fc563fc969e654a205ea32b554a23630ee917`
+
+The immutable release is stored at
+`s3://studio-workstation-releases-401233741942-us-east-1/releases/v0.1.3/res-2026.06/`.
+The archive hashes match v0.1.2; changes to the CloudFormation
+template, bootstrap guard and tests are delivered from the merged
+repository and rendered template, not necessarily the two application
+archives.
+
+**Manual account enrollment remains required:** the local Linux
+`workstation` password was set through SSM using `passwd` before
+browser login. This is not yet unattended credential provisioning.
+
+**Remaining acceptance gates:** stop/start lifecycle of this v0.1.3
+instance, public-IP change/reconnection after start, and any required
+repeatability checks. TLS trust is deferred by decision; DCV is
+currently publicly reachable on port 8443 with an untrusted
+certificate. Do not include secrets or password values in acceptance
+artifacts.
