@@ -15,6 +15,17 @@ class DeploymentAcceptanceContracts(unittest.TestCase):
         self.assertIn('if ! bash /root/bootstrap/download_bootstrap.sh',source)
         self.assertIn('if [[ ! -s /root/bootstrap/latest/scripts/virtual-desktop-host/linux/install.sh ]]',source)
         self.assertLess(source.index('if ! bash /root/bootstrap/download_bootstrap.sh'),source.index('pre_install_finished.lock\nfi'))
+    def test_public_dcv_ingress_is_default_and_restrictable(self):
+        template=json.loads((ROOT/"runtime/workstation-template.json").read_text())
+        cidr=template["Parameters"]["ClientCidr"]
+        self.assertEqual(cidr["Default"],"0.0.0.0/0")
+        import re
+        for valid in ("0.0.0.0/0","76.166.163.7/32","192.168.1.0/24"):
+            self.assertIsNotNone(re.fullmatch(cidr["AllowedPattern"],valid))
+        for invalid in ("999.999.999.999/32","1.2.3.4/33","not-a-cidr"):
+            self.assertIsNone(re.fullmatch(cidr["AllowedPattern"],invalid))
+        ingress=template["Resources"]["WorkstationSG"]["Properties"]["SecurityGroupIngress"]
+        self.assertEqual(ingress,[{"IpProtocol":"tcp","FromPort":8443,"ToPort":8443,"CidrIp":{"Ref":"ClientCidr"}}])
     def test_instance_remains_single_machine(self):
         template=json.loads((ROOT/"runtime/workstation-template.json").read_text())
         self.assertEqual(template["Resources"]["Workstation"]["Type"],"AWS::EC2::Instance")
