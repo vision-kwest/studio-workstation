@@ -32,7 +32,7 @@ From an administrator environment (not inside SSM):
    Validate with `aws cloudformation validate-template --template-body file:///tmp/studio-workstation-v012.json --region us-east-1`.
 3. Deploy a **new, separately named** test stack only after reviewing the
    resulting billable EC2 and EBS resources. Choose a public subnet with
-   internet route and restrict TCP 8443 ingress to the actual client /32.
+   internet route. `ClientCidr` defaults to `0.0.0.0/0` for access from any IPv4 address; override it with a trusted client `/32` when restriction is desired.
    This is not an automated deployment command.
 4. From CloudShell run
    `python3 scripts/check_workstation_aws.py --stack STACK_NAME`.
@@ -111,3 +111,24 @@ trust the certificate and hostname.
 key management, stable IP, and renewal method require a deliberate
 choice and authorization. No certificate, Elastic IP, or DNS change is
 performed by these scripts.
+
+## Public DCV access (current choice)
+
+The user selected direct public DCV access for now. The CloudFormation
+`ClientCidr` parameter defaults to `0.0.0.0/0`, allowing inbound
+TCP 8443 from any IPv4 address. No inbound SSH is added. To restrict
+access later, pass `ClientCidr=YOUR_PUBLIC_IP/32` when deploying.
+
+**Security:** DCV remains password-protected, but its login endpoint is
+publicly reachable. Use a strong unique Linux password. The existing
+untrusted HTTPS certificate is unchanged; TLS trust remains deferred.
+This does not open other ports or guarantee availability on IPv6.
+
+**Existing stack:** Changing the repository template does not update
+`studio-workstation-cpu-v011` automatically. Its live security group
+was modified separately. A future CloudFormation update must use a
+freshly rendered template with the updated parameter definition and
+explicitly preserve `ClientCidr=0.0.0.0/0`; review the change set before
+applying it. Do not redeploy the existing workstation merely to change
+this parameter without first reviewing whether EC2 replacement is
+proposed.
