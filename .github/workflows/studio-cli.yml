@@ -1,0 +1,18 @@
+name: Studio CLI tests
+on:
+  pull_request:
+    paths:
+      - 'studio'
+      - 'scripts/studio_workstation_cli.py'
+      - 'tests/test_studio_workstation_cli.py'
+      - '.github/workflows/studio-cli.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -p test_studio_workstation_cli.py -v
+      - run: python3 studio workstation --help
