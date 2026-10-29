@@ -183,3 +183,24 @@ repeatability checks. TLS trust is deferred by decision; DCV is
 currently publicly reachable on port 8443 with an untrusted
 certificate. Do not include secrets or password values in acceptance
 artifacts.
+
+## Lifecycle follow-up — 2026-10-28
+
+**Operator-reported PASS:** the fresh v0.1.3 instance
+`i-0bbfbdc878d3a2320` was restarted, and the operator successfully
+reconnected to the interactive desktop using Amazon DCV. This verifies
+the practical restart/reconnect workflow for the validated CPU baseline.
+The operator did not provide a separate command transcript of the
+lifecycle action, so this record does not distinguish an EC2 reboot
+from an EC2 stop-then-start. A full stop/start test of v0.1.3 should
+remain separately recorded if required.
+
+**Cleanup reported:** the earlier test instance was terminated.
+This does not establish that the earlier CloudFormation stack
+(`studio-workstation-cpu-v011`), retained EBS volumes, or other
+resources were deleted. Review those resources separately before
+considering infrastructure cleanup complete. Do not delete volumes
+until any needed data has been backed up.
+
+The fresh v0.1.3 instance is the retained validated CPU baseline.
+No additional AWS changes are performed by this documentation update.
