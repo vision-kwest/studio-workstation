@@ -36,8 +36,9 @@ def generate(audit):
     desktop["name"]="studio-gpu-desktop-res-stage"
     desktop["description"]="RES GPU desktop: preserve GDM-first and reboot, omit dummy Xorg"
     src,commands=script(desktop,"InstallDesktop")
-    src=replace_once(src,"ubuntu-desktop xserver-xorg-video-dummy","ubuntu-desktop")
-    src=replace_once(src,"ubuntu-desktop xserver-xorg-video-dummy","ubuntu-desktop")
+    if src.count("ubuntu-desktop xserver-xorg-video-dummy")!=2:
+        raise ValueError("Expected two desktop apt commands")
+    src=src.replace("ubuntu-desktop xserver-xorg-video-dummy","ubuntu-desktop")
     start=src.index("              cat > /etc/X11/xorg.conf <<'XORG'") if "              cat > /etc/X11/xorg.conf <<'XORG'" in src else src.index("cat > /etc/X11/xorg.conf <<'XORG'")
     end=src.index("\nXORG",start)+len("\nXORG")
     src=src[:start]+src[end:]
@@ -51,7 +52,9 @@ def generate(audit):
         {"name":"InstallResNvidiaGrid","action":"ExecuteBash","onFailure":"Abort","inputs":{"commands":["""set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
 test "$(uname -m)" = x86_64
-test -e /dev/nvidia0 || lspci | grep -qi NVIDIA
+lspci | grep -qi NVIDIA
+apt-get update -o Acquire::Retries=3
+apt-get install -y mesa-utils gcc make "linux-headers-$(uname -r)" "linux-modules-extra-$(uname -r)"
 # Download the SAME immutable RES-derived installation scripts as the CPU runtime.
 # Builder profile must be explicitly allowed to read this release archive.
 mkdir -p /root/bootstrap/latest /root/bootstrap/logs
