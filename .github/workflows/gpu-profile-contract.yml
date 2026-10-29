@@ -1,0 +1,17 @@
+name: GPU profile source contracts
+on:
+  pull_request:
+    paths:
+      - 'runtime/render_workstation.py'
+      - 'tests/test_gpu_profile_contract.py'
+      - '.github/workflows/gpu-profile-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install jinja2
+      - run: python3 -m unittest discover -s tests -p test_gpu_profile_contract.py -v
