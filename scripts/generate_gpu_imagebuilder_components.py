@@ -63,6 +63,16 @@ echo '813259748335482b1877192a61a008b32e613038ee831305d9e4767c51c23ab7  /tmp/res
 tar -xzf /tmp/res-installation-scripts.tar.gz -C /root/bootstrap/latest
 test -f /root/bootstrap/latest/scripts/dcv/linux/gpu_drivers.sh
 test -f /root/bootstrap/latest/package_config.yml
+# Use the original RES utility bootstrap. Its yq.sh installs mikefarah/yq
+# (not the Python yq wrapper) and jq.sh provides the RES jq dependency.
+RES_SCRIPTS=/root/bootstrap/latest/scripts/virtual-desktop-host/linux
+/bin/bash /root/bootstrap/latest/scripts/common/linux/yq.sh -s "$RES_SCRIPTS"
+/bin/bash /root/bootstrap/latest/scripts/common/linux/jq.sh -o ubuntu2404 -s "$RES_SCRIPTS"
+command -v yq
+command -v jq
+# Confirm RES package configuration can be read before driver installation.
+source /root/bootstrap/latest/scripts/common/linux/config_common.sh
+test "$(get_string package_config.gpu_driver.nvidia.s3_bucket_path)" = "s3://ec2-linux-nvidia-drivers/latest/"
 # Original RES uses signed aws s3 cp for public GRID distribution.
 # Explicit builder IAM s3:GetObject is required; do not patch upstream installer.
 source /root/bootstrap/latest/scripts/common/linux/bootstrap_common.sh

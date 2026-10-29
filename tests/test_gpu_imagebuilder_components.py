@@ -22,6 +22,16 @@ class GpuComponentsTests(unittest.TestCase):
         self.assertEqual(confirm_commands[0],"dpkg-query -W ubuntu-desktop gdm3")
         self.assertEqual(install_commands[0],install)
 
+    def test_res_utilities_precede_grid_driver(self):
+        from pathlib import Path
+        source=(Path(__file__).resolve().parents[1]/
+                "scripts/generate_gpu_imagebuilder_components.py").read_text()
+        self.assertLess(source.index("scripts/common/linux/yq.sh -s"),
+                        source.index("scripts/dcv/linux/gpu_drivers.sh -o"))
+        self.assertLess(source.index("scripts/common/linux/jq.sh -o"),
+                        source.index("scripts/dcv/linux/gpu_drivers.sh -o"))
+        self.assertIn("get_string package_config.gpu_driver.nvidia.s3_bucket_path",source)
+
     def test_rejects_wrong_component_order(self):
         with self.assertRaises(ValueError):
             generate({"components":[{"name":"studio-cpu-dcv-res-stage","version":"0.5.0"}]})
