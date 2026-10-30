@@ -45,6 +45,13 @@ class GpuComponentsTests(unittest.TestCase):
             isinstance(t,ast.Subscript) and isinstance(t.value,ast.Name) and t.value.id=="confirm_commands"
             for t in n.targets) for n in ast.walk(function)))
 
+    def test_no_non_res_modules_extra_dependency(self):
+        from pathlib import Path
+        source=(Path(__file__).resolve().parents[1]/
+                "scripts/generate_gpu_imagebuilder_components.py").read_text()
+        self.assertNotIn("linux-modules-extra-",source)
+        self.assertIn('linux-headers-$(uname -r)',source)
+
     def test_rejects_wrong_component_order(self):
         with self.assertRaises(ValueError):
             generate({"components":[{"name":"studio-cpu-dcv-res-stage","version":"0.5.0"}]})
