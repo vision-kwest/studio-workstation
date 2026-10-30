@@ -60,7 +60,7 @@ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
 test "$(uname -m)" = x86_64
 lspci | grep -qi NVIDIA
 apt-get update -o Acquire::Retries=3
-apt-get install -y mesa-utils gcc make binutils pciutils "linux-headers-$(uname -r)" "linux-modules-extra-$(uname -r)"
+apt-get install -y mesa-utils gcc make binutils pciutils "linux-headers-$(uname -r)"
 dpkg --audit
 # Download the SAME immutable RES-derived installation scripts as the CPU runtime.
 # Builder profile must be explicitly allowed to read this release archive.
