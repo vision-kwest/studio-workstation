@@ -54,7 +54,8 @@ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
 test "$(uname -m)" = x86_64
 lspci | grep -qi NVIDIA
 apt-get update -o Acquire::Retries=3
-apt-get install -y mesa-utils gcc make "linux-headers-$(uname -r)" "linux-modules-extra-$(uname -r)"
+apt-get install -y mesa-utils gcc make binutils pciutils "linux-headers-$(uname -r)" "linux-modules-extra-$(uname -r)"
+dpkg --audit
 # Download the SAME immutable RES-derived installation scripts as the CPU runtime.
 # Builder profile must be explicitly allowed to read this release archive.
 mkdir -p /root/bootstrap/latest /root/bootstrap/logs
@@ -73,6 +74,8 @@ command -v jq
 # Confirm RES package configuration can be read before driver installation.
 source /root/bootstrap/latest/scripts/common/linux/config_common.sh
 test "$(get_string package_config.gpu_driver.nvidia.s3_bucket_path)" = "s3://ec2-linux-nvidia-drivers/latest/"
+# Detect drift in the observed mutable GRID distribution before RES installs it.
+aws s3api head-object --bucket ec2-linux-nvidia-drivers --key latest/NVIDIA-Linux-x86_64-595.91.07-grid-aws.run --region us-east-1 --query ContentLength --output text | grep -qx 429294370
 # Original RES uses signed aws s3 cp for public GRID distribution.
 # Explicit builder IAM s3:GetObject is required; do not patch upstream installer.
 source /root/bootstrap/latest/scripts/common/linux/bootstrap_common.sh
@@ -104,20 +107,24 @@ grep -qi nvidia /etc/X11/xorg.conf
     smoke["name"]="studio-gpu-dcv-smoke-test-res"
     smoke["description"]="Original DCV smoke test plus T4 hardware verification"
     src,commands=script(smoke,"CheckDesktop")
-    src+='''\n              nvidia-smi -L | grep -E 'Tesla T4|NVIDIA T4|T4'
+    # Keep the validated CPU console checks; add RES-style Xorg validation.
+    src += """
+              nvidia-smi -L | grep -E 'Tesla T4|NVIDIA T4|T4'
               test -e /dev/nvidia0
               modinfo nvidia
               dpkg-query -W nice-dcv-gl
               test -f /etc/X11/xorg.conf
               grep -qi nvidia /etc/X11/xorg.conf
               command -v glxinfo
-              # Use the Xorg authentication file discovered from its process args.
-              auth=$(ps -eo args | sed -n 's/.*Xorg.*-auth \\([^ ]*\\).*/\\1/p' | head -1)
+              # RES validates Xorg via its -auth file and xhost dcv access.
+              auth=$(ps -eo args | grep '[X]org ' | sed -n 's/.*-auth \\([^ ]*\\).*/\\1/p' | head -n 1)
               test -n "$auth"
+              test -r "$auth"
+              DISPLAY=:0 XAUTHORITY="$auth" xhost | grep -F 'SI:localuser:dcv'
               DISPLAY=:0 XAUTHORITY="$auth" glxinfo -B | tee /tmp/studio-gpu-glxinfo.txt
               grep -Eiq 'OpenGL renderer string:.*(Tesla T4|NVIDIA T4|T4)' /tmp/studio-gpu-glxinfo.txt
               ! grep -Eiq 'llvmpipe|softpipe' /tmp/studio-gpu-glxinfo.txt
-'''
+"""
     commands[0]=src
     return {"gpu_desktop":desktop,"gpu_nvidia":gpu,"gpu_dcv":dcv,"gpu_smoke":smoke}
 
