@@ -32,6 +32,19 @@ class GpuComponentsTests(unittest.TestCase):
                         source.index("scripts/dcv/linux/gpu_drivers.sh -o"))
         self.assertIn("get_string package_config.gpu_driver.nvidia.s3_bucket_path",source)
 
+    def test_generator_rewrites_confirmation_not_only_install(self):
+        from pathlib import Path
+        generator=(Path(__file__).resolve().parents[1]/
+                   "scripts/generate_gpu_imagebuilder_components.py").read_text()
+        self.assertIn('confirm_commands[0] = replace_once(', generator)
+        self.assertNotIn('comment.\\\\n    # Modify', generator)
+        import ast
+        tree=ast.parse(generator)
+        function=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="generate")
+        self.assertTrue(any(isinstance(n,ast.Assign) and any(
+            isinstance(t,ast.Subscript) and isinstance(t.value,ast.Name) and t.value.id=="confirm_commands"
+            for t in n.targets) for n in ast.walk(function)))
+
     def test_rejects_wrong_component_order(self):
         with self.assertRaises(ValueError):
             generate({"components":[{"name":"studio-cpu-dcv-res-stage","version":"0.5.0"}]})
