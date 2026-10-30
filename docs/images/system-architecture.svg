@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+<title id="title">Studio Workstation architecture</title><desc id="desc">GitHub source feeds versioned S3 releases and Image Builder, producing CPU and GPU AMIs deployed through CloudFormation to EC2 workstations, accessed through Amazon DCV with SSM for administration.</desc>
+<rect width="1200" height="630" fill="#f5f8fc"/>
+<text x="54" y="70" font-family="Arial,sans-serif" font-size="35" font-weight="bold" fill="#132c46">Studio Workstation</text>
+<text x="54" y="108" font-family="Arial,sans-serif" font-size="19" fill="#52657b">From versioned RES-derived sources to an interactive desktop</text>
+<g font-family="Arial,sans-serif" text-anchor="middle">
+<rect x="42" y="170" width="208" height="116" rx="15" fill="#e1eefe" stroke="#4580c3" stroke-width="2"/>
+<text x="146" y="210" font-size="23" font-weight="bold" fill="#153f6e">GitHub</text><text x="146" y="242" font-size="16" fill="#153f6e">Source + tests</text>
+<rect x="320" y="170" width="220" height="116" rx="15" fill="#e0f5ec" stroke="#29926a" stroke-width="2"/>
+<text x="430" y="210" font-size="23" font-weight="bold" fill="#126349">S3 releases</text><text x="430" y="242" font-size="16" fill="#126349">Versioned archives</text>
+<rect x="610" y="170" width="242" height="116" rx="15" fill="#fff0db" stroke="#d08b31" stroke-width="2"/>
+<text x="731" y="210" font-size="22" font-weight="bold" fill="#7d4c12">EC2 Image Builder</text><text x="731" y="242" font-size="16" fill="#7d4c12">CPU / GPU recipes</text>
+<rect x="916" y="170" width="240" height="116" rx="15" fill="#e9e6fa" stroke="#8270c5" stroke-width="2"/>
+<text x="1036" y="210" font-size="23" font-weight="bold" fill="#493b83">Validated AMIs</text><text x="1036" y="242" font-size="16" fill="#493b83">Separate CPU / GPU</text>
+<rect x="320" y="390" width="230" height="118" rx="15" fill="#e1eefe" stroke="#4580c3" stroke-width="2"/>
+<text x="435" y="428" font-size="22" font-weight="bold" fill="#153f6e">CloudFormation</text><text x="435" y="459" font-size="16" fill="#153f6e">Provision / destroy</text>
+<rect x="625" y="390" width="226" height="118" rx="15" fill="#e0f5ec" stroke="#29926a" stroke-width="2"/>
+<text x="738" y="428" font-size="23" font-weight="bold" fill="#126349">EC2 workstation</text><text x="738" y="459" font-size="16" fill="#126349">Ubuntu + GNOME</text>
+<rect x="925" y="390" width="230" height="118" rx="15" fill="#fff0db" stroke="#d08b31" stroke-width="2"/>
+<text x="1040" y="428" font-size="23" font-weight="bold" fill="#7d4c12">Amazon DCV</text><text x="1040" y="459" font-size="16" fill="#7d4c12">Browser desktop</text>
+</g>
+<g fill="none" stroke="#52657b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M250 228 H310"/><path d="M540 228 H600"/><path d="M852 228 H906"/>
+<path d="M1036 286 V337 H435 V380"/><path d="M550 449 H615"/><path d="M851 449 H915"/>
+</g>
+<g fill="#52657b"><path d="M310 228 l-12 -7 v14z"/><path d="M600 228 l-12 -7 v14z"/><path d="M906 228 l-12 -7 v14z"/><path d="M435 380 l-7 -12 h14z"/><path d="M615 449 l-12 -7 v14z"/><path d="M915 449 l-12 -7 v14z"/></g>
+<text x="54" y="581" font-family="Arial,sans-serif" font-size="17" fill="#52657b">SSM: administrative access • RES 2026.06: desktop bootstrap • GPU AMI validation in progress</text>
+</svg>
