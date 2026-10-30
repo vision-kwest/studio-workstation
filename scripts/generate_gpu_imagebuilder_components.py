@@ -42,7 +42,13 @@ def generate(audit):
     start=src.index("              cat > /etc/X11/xorg.conf <<'XORG'") if "              cat > /etc/X11/xorg.conf <<'XORG'" in src else src.index("cat > /etc/X11/xorg.conf <<'XORG'")
     end=src.index("\nXORG",start)+len("\nXORG")
     src=src[:start]+src[end:]
-    # ConfirmDesktopStage has its own dpkg-query command, not an apt command.\n    # Modify that check in the stage that actually contains it.\n    confirm,confirm_commands=script(desktop,"ConfirmDesktopStage")\n    confirm_commands[0]=replace_once(confirm,\n        "dpkg-query -W ubuntu-desktop gdm3 xserver-xorg-video-dummy",\n        "dpkg-query -W ubuntu-desktop gdm3")
+    # ConfirmDesktopStage has its own package assertion, separate from InstallDesktop.
+    confirm, confirm_commands = script(desktop, "ConfirmDesktopStage")
+    confirm_commands[0] = replace_once(
+        confirm,
+        "dpkg-query -W ubuntu-desktop gdm3 xserver-xorg-video-dummy",
+        "dpkg-query -W ubuntu-desktop gdm3",
+    )
     commands[0]=src
     gpu={
       "name":"studio-gpu-nvidia-res-stage",
