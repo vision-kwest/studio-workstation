@@ -1,40 +1,46 @@
-# Studio Workstation — Foundation v0.1
+# Studio Workstation
 
-A lightweight, modular single-EC2 workstation foundation. No RES, control host, OpenTofu, SSH, Active Directory, NAT gateway, or always-on launcher.
+A lightweight AWS Ubuntu 24.04 workstation system using **EC2 Image Builder**, **CloudFormation**, **AWS Research and Engineering Studio (RES) 2026.06 bootstrap**, **Amazon DCV**, and **Systems Manager**. No full RES control plane is required for the standalone workstation.
 
-## Included
-- CloudFormation single-instance infrastructure with encrypted EBS, restricted DCV port 8443 and SSM role.
-- Optional Python EC2 lifecycle CLI: status, start, stop, connect, check.
-- Design-only profiles: developer, creator, editor.
-- Unit tests for instance discovery.
+![Illustrated Studio Workstation architecture](docs/images/system-architecture.svg)
 
-## Not implemented
-**Do not deploy expecting a working DCV desktop.** Golden Ubuntu 24.04 AMIs, NVIDIA/Xorg/DCV configuration, desktop login, automated console session, end-to-end tests, profile installers, persistent independent data volume, idle stop, and cost guardrails are not yet built.
+## Visual guides
 
-## Security
-Use only a validated AMI; CPU and NVIDIA builds must be separate. SSM requires outbound connectivity. No inbound SSH is permitted. Restrict TCP/UDP 8443 to your public IP /32. Never store passwords in CloudFormation or user data. Root EBS DeleteOnTermination=false can incur ongoing charges after stack deletion. Check AMI root device mapping before deployment.
+- [Architecture: how the pieces fit together](docs/visual-architecture.md)
+- [CPU and GPU Image Builder pipelines](docs/gpu-image-builder-visual.md)
+- [Workstation lifecycle: create, connect, stop, start, destroy](docs/workstation-lifecycle-visual.md)
+- [GPU source trace and validation gates](docs/res-gpu-imagebuilder-audit.md)
 
-## CLI (optional)
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-aws sso login --profile YOUR_SSO_PROFILE
-python -m workstation.cli check --instance-id i-EXAMPLE --profile YOUR_SSO_PROFILE
-python -m workstation.cli start --instance-id i-EXAMPLE --profile YOUR_SSO_PROFILE --wait
-python -m workstation.cli connect --instance-id i-EXAMPLE --profile YOUR_SSO_PROFILE
-python -m workstation.cli stop --instance-id i-EXAMPLE --profile YOUR_SSO_PROFILE --wait
-```
+## Current status
 
-## Milestones
-1. CPU-only Ubuntu 24.04 DCV golden AMI and graphical login validation.
-2. NVIDIA g4dn golden AMI; verify nvidia-smi, Xorg, DCV and graphics.
-3. Idempotent modular application installers with license/version/disk validation.
-4. Optional local launcher, persistent data volume, idle-stop and cost guardrails.
+| Area | Status |
+|---|---|
+| CPU Ubuntu 24.04 + DCV | **Validated**: fresh deployment, local login, stop/start reconnection |
+| CPU Image Builder | **Validated**: staged GDM-first CPU recipe 0.5.0 |
+| GPU Image Builder | **In progress**: GPU recipe 0.1.3/1 build initiated; outcome not yet established |
+| GPU workstation DCV login | **Not yet validated** |
+| Trusted public TLS hostname | Deferred |
 
-## RES 2026.06 reference
-- https://github.com/aws/res/blob/2026.06/source/idea/idea-bootstrap/resources/scripts/dcv/linux/gpu_drivers.sh
-- https://github.com/aws/res/blob/2026.06/source/idea/idea-bootstrap/resources/scripts/dcv/linux/debian/dcv_server.sh
-- https://github.com/aws/res/blob/2026.06/source/idea/idea-bootstrap/resources/scripts/virtual-desktop-host/linux/install.sh
+The CPU and GPU AMIs are **separate**. Do not deploy a CPU AMI as a GPU workstation. A registered Image Builder recipe or running build is not proof that a GPU AMI works.
 
-Do not run RES-dependent scripts unchanged.
+## Quick start and operations
+
+See [Studio CLI](docs/studio-cli.md) for the guarded `studio workstation` commands, and [GPU profile](docs/gpu-workstation-profile.md) for the source-first GPU build path.
+
+The repository includes the RES-derived runtime release tooling and CloudFormation renderer. AWS SSM provides administrative access; Amazon DCV provides interactive desktop access using a **local Linux account**, not IAM credentials.
+
+## Security and cost
+
+- Do not commit passwords, private keys, AWS credentials, or NVIDIA driver binaries.
+- Public DCV TCP 8443 exposure is configurable; restrict ingress when feasible. The current browser certificate may be untrusted.
+- EC2 compute costs stop when a workstation is stopped, but EBS volumes may continue to incur charges.
+- Image Builder GPU builds incur temporary GPU compute and storage charges.
+- Root EBS `DeleteOnTermination=false` can retain storage after stack deletion; audit retained volumes.
+
+## Upstream RES 2026.06 references
+
+- [Original NVIDIA GPU driver installer](https://github.com/aws/res/blob/2026.06/source/idea/idea-bootstrap/resources/scripts/dcv/linux/gpu_drivers.sh)
+- [Original Ubuntu DCV installation](https://github.com/aws/res/blob/2026.06/source/idea/idea-bootstrap/resources/scripts/dcv/linux/debian/dcv_server.sh)
+- [Original Linux workstation installer](https://github.com/aws/res/blob/2026.06/source/idea/idea-bootstrap/resources/scripts/virtual-desktop-host/linux/install.sh)
+
+The project reuses the original RES provisioning logic with narrowly scoped standalone adaptations. See the source audit for exact integration boundaries.
