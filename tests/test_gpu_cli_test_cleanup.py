@@ -235,6 +235,11 @@ class CleanupTests(unittest.TestCase):
             {"ResourceType": "AWS::EC2::Instance", "PhysicalResourceId": "i-test"},
             {"ResourceType": "AWS::EC2::SecurityGroup", "PhysicalResourceId": "sg-test"},
             {"ResourceType": "AWS::EC2::LaunchTemplate", "PhysicalResourceId": "lt-test"}]}
+        self.instance("stopped")
+        self.ec2.describe_security_groups.return_value = {"SecurityGroups": [
+            {"GroupId": "sg-test", "Tags": TAGS}]}
+        self.ec2.describe_launch_templates.return_value = {"LaunchTemplates": [
+            {"LaunchTemplateId": "lt-test", "Tags": TAGS}]}
         # No root EBS ID yet: do not delete the stack.
         result = reconcile(self.cf, self.ec2, STACK, TOKEN, ddb, "inventory-table")
         self.assertEqual(result["reason"], "durable inventory incomplete")
