@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'runtime/render_workstation.py'
+      - 'runtime/task7_safe_launcher.py'
+      - 'tests/test_task7_safe_launcher.py'
       - 'runtime/workstation-template.json'
       - 'runtime/upstream/**'
       - '.github/workflows/task7-launch-review.yml'
@@ -52,6 +54,10 @@ jobs:
           assert tags['Task7']=='PR61' and tags['Issue']=='60'
           print('PASS: offline GPU launch template checks; external schedule still required before launch')
           PY
+      - name: Test fail-closed launcher without AWS mutations
+        run: |
+          python3 -m py_compile runtime/task7_safe_launcher.py tests/test_task7_safe_launcher.py
+          python3 -m unittest discover -s tests -p test_task7_safe_launcher.py -v
       - name: Hash reviewed template
         run: sha256sum dist/task7-review/gpu-template.json
       - name: Configure restricted OIDC for exact template publication
