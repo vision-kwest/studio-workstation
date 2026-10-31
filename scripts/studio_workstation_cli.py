@@ -64,6 +64,12 @@ def gpu_release_preflight(args):
                   "--key", GPU_PREFIX + "/" + name, "--version-id", version)
         if obj.get("VersionId") != version:
             raise ValueError("GPU release object version mismatch: " + name)
+        # Original RES bootstrap uses the unversioned S3 URI. Ensure latest
+        # still points to the exact validated immutable version before launch.
+        latest = aws(args.region, "s3api", "head-object", "--bucket", args.bucket,
+                     "--key", GPU_PREFIX + "/" + name)
+        if latest.get("VersionId") != version:
+            raise ValueError("GPU release latest object differs from validated version: " + name)
 
 
 def gpu_ready(stack, region):
