@@ -47,6 +47,48 @@ class GpuProfileContracts(unittest.TestCase):
             self.assertNotIn("Task7", {tag["Key"] for tag in p["Tags"]})
             self.assertIn("-g NVIDIA", p["UserData"]["Fn::Base64"]["Fn::Sub"])
 
+    def test_scoped_gpu_root_volume_is_tagged_at_launch(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "scoped.json"
+            with mock.patch.object(sys, "argv", ["render_workstation.py",
+                   "--profile", "gpu", "--lifecycle", "persistent",
+                   "--bucket", "studio-release-bucket",
+                   "--prefix", "releases/task7-pr61-postreboot-a8ec326/res-2026.06",
+                   "--cleanup-token", "unique-test-token-123",
+                   "--test-stack", "studio-gpu-cli-unique-test",
+                   "--output", str(out)]):
+                render_main()
+            t = json.loads(out.read_text())
+            resources = t["Resources"]
+            lt = resources["CleanupVolumeTagLaunchTemplate"]["Properties"]
+            spec = lt["LaunchTemplateData"]["TagSpecifications"]
+            self.assertEqual(len(spec), 1)
+            self.assertEqual(spec[0]["ResourceType"], "volume")
+            expected = {"StudioCleanupToken": "unique-test-token-123",
+                        "StudioStack": "studio-gpu-cli-unique-test"}
+            self.assertEqual({x["Key"]: x["Value"] for x in spec[0]["Tags"]}, expected)
+            self.assertEqual({x["Key"]: x["Value"] for x in
+                              resources["WorkstationSG"]["Properties"]["Tags"]}, expected)
+            instance = resources["Workstation"]["Properties"]
+            self.assertEqual({x["Key"]: x["Value"] for x in instance["Tags"]
+                              if x["Key"] in expected}, expected)
+            self.assertEqual(instance["LaunchTemplate"]["LaunchTemplateId"],
+                             {"Ref": "CleanupVolumeTagLaunchTemplate"})
+            self.assertFalse(instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
+
+    def test_unscoped_gpu_does_not_add_launch_template(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "unscoped.json"
+            with mock.patch.object(sys, "argv", ["render_workstation.py",
+                   "--profile", "gpu", "--lifecycle", "persistent",
+                   "--bucket", "studio-release-bucket",
+                   "--prefix", "releases/test/res-2026.06",
+                   "--output", str(out)]):
+                render_main()
+            t = json.loads(out.read_text())
+            self.assertNotIn("CleanupVolumeTagLaunchTemplate", t["Resources"])
+            self.assertNotIn("LaunchTemplate", t["Resources"]["Workstation"]["Properties"])
+
     def test_default_gpu_renderer_preserves_task7_temporary_mode(self):
         with tempfile.TemporaryDirectory() as d:
             out = Path(d) / "gpu.json"
