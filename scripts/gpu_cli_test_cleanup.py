@@ -112,4 +112,9 @@ def handler(event, context):
     if datetime.now(timezone.utc) < deadline:
         return {"complete": False, "reason": "deadline not reached"}
     import boto3
-    return reconcile(boto3.client("cloudformation"), boto3.client("ec2"), stack, token)
+    result = reconcile(boto3.client("cloudformation"), boto3.client("ec2"), stack, token)
+    # A successful invocation must mean independently verified absence.
+    # Pending after the deadline raises to trigger Lambda Errors alarm/retries.
+    if not result["complete"] and os.environ.get("STUDIO_FAIL_PENDING") == "true":
+        raise RuntimeError("Deadline cleanup incomplete: " + str(result))
+    return result
