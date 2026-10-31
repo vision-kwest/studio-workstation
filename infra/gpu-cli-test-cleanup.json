@@ -2,7 +2,7 @@
   "AWSTemplateFormatVersion": "2010-09-09",
   "Description": "INDEPENDENT test-only deadline cleanup; deploy in a separate stack BEFORE GPU CLI creation.",
   "Parameters": {
-    "TestStack": {"Type": "String", "AllowedPattern": "^studio-gpu-cli-[a-z0-9-]{1,110}$"},
+    "TestStack": {"Type": "String", "AllowedPattern": "^studio-gpu-cli-[a-z0-9-]{1,35}$"},
     "CleanupToken": {"Type": "String", "NoEcho": true, "MinLength": 12, "MaxLength": 64, "AllowedPattern": "^[a-z0-9-]+$"},
     "DeadlineUtc": {"Type": "String", "AllowedPattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
     "LambdaZipBucket": {"Type": "String"},
@@ -26,7 +26,7 @@
       ]}}]
     }},
     "CleanupFunction": {"Type": "AWS::Lambda::Function", "Properties": {
-      "FunctionName": {"Fn::Sub": "studio-gpu-cli-cleanup-\${TestStack}"}, "Runtime": "python3.12", "Handler": "gpu_cli_test_cleanup.handler", "Timeout": 120,
+      "FunctionName": {"Fn::Sub": "studio-gpu-cli-cleanup-${TestStack}"}, "Runtime": "python3.12", "Handler": "gpu_cli_test_cleanup.handler", "Timeout": 120,
       "Role": {"Fn::GetAtt": ["CleanupRole", "Arn"]},
       "Code": {"S3Bucket": {"Ref": "LambdaZipBucket"}, "S3Key": {"Ref": "LambdaZipKey"}, "S3ObjectVersion": {"Ref": "LambdaZipVersion"}},
       "Environment": {"Variables": {"STUDIO_TEST_STACK": {"Ref": "TestStack"}, "STUDIO_CLEANUP_TOKEN": {"Ref": "CleanupToken"}, "STUDIO_NOT_BEFORE_UTC": {"Ref": "DeadlineUtc"}, "STUDIO_FAIL_PENDING": "true"}}
