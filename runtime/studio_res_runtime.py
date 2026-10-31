@@ -97,7 +97,7 @@ def assert_xorg_ready(xorg):
 def assert_gpu_gl():
     ps = run_command(["ps", "-eo", "args"])
     import re
-    matches = re.findall(r"X(?:org)?\\s+.*?-auth\\s+([^\\s]+)", ps.stdout)
+    matches = re.findall(r"X(?:org)?\s+.*?-auth\s+([^\s]+)", ps.stdout)
     if not matches:
         raise ReadinessError("Xorg -auth file not found")
     auth = Path(matches[0])
