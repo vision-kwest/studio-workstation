@@ -8,8 +8,8 @@ Status: **STAGING ONLY — NO INSTANCE LAUNCH AUTHORIZED BY THIS DOCUMENT.**
 - Upstream RES: 2026.06. Build via `runtime/build_res_overlay.py` from the two public upstream archives with hard-coded SHA256 verification.
 - GitHub Actions `task7-stage-artifacts.yml` creates two derived tarballs, `SHA256SUMS`, and `provenance.json`; the workflow uploads a short-lived **GitHub Actions artifact**, not S3.
 - Verify the two *derived* SHA256 digests after downloading the artifact and again after uploading to S3. Do not substitute the previously published `v0.1.3` archives, which do not include PR #61 fixes.
-- Proposed temporary object prefix (not created): `s3://studio-workstation-releases-401233741942-us-east-1/task7/pr61/<reviewed-sha>/`.
-- Existing instance profile `StudioWorkstationSSMRole` allows `s3:GetObject` on `releases/*/res-2026.06/{installation-scripts,virtual-desktop}.tar.gz` **only**. The proposed `task7/` prefix is NOT covered. Either use a reviewed permitted release path or request narrowly scoped temporary IAM permission before launching. No policy changes have been made.
+- Proposed temporary object prefix (not created): `s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-<reviewed-sha>/res-2026.06/`.
+- Existing instance profile `StudioWorkstationSSMRole` allows `s3:GetObject` on `releases/*/res-2026.06/{installation-scripts,virtual-desktop}.tar.gz` **only**. The proposed prefix matches this existing resource pattern; verify actual access from the instance role before launch. No IAM policy changes are planned.
 
 ## Launch controls
 
