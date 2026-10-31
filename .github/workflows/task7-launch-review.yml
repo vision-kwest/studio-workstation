@@ -1,0 +1,58 @@
+name: Task 7 GPU launch input offline review
+on:
+  pull_request:
+    paths:
+      - 'runtime/render_workstation.py'
+      - 'runtime/workstation-template.json'
+      - 'runtime/upstream/**'
+      - '.github/workflows/task7-launch-review.yml'
+  push:
+    branches:
+      - feature/res-2026-06-standalone-runtime
+    paths:
+      - '.github/workflows/task7-launch-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install offline renderer dependency
+        run: python3 -m pip install --user 'Jinja2>=3.1,<4'
+      - name: Render exact Task 7 GPU CloudFormation without deploying
+        run: |
+          set -euo pipefail
+          mkdir -p dist/task7-review
+          python3 runtime/render_workstation.py --profile gpu --bucket studio-workstation-releases-401233741942-us-east-1 --prefix releases/task7-pr61-c73e905/res-2026.06 --user workstation --output dist/task7-review/gpu-template.json
+          python3 - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('dist/task7-review/gpu-template.json')
+          t=json.loads(p.read_text())
+          a=t['Resources']['Workstation']['Properties']
+          u=a['UserData']['Fn::Base64']['Fn::Sub']
+          assert len(u.encode()) <= 16384
+          assert 'RENDER_OFFLINE' not in u
+          assert 'installation-scripts.tar.gz' in u and 'virtual-desktop.tar.gz' in u
+          assert 'releases/task7-pr61-c73e905/res-2026.06' in u
+          assert 'STUDIO_STANDALONE=true' in u
+          assert 'STUDIO_GPU_FAMILIES=g4dn,g5,g6' in u
+          assert 'passwd -l workstation' in u
+          assert a['MetadataOptions']['HttpTokens']=='required'
+          assert a['InstanceInitiatedShutdownBehavior']=='terminate'
+          assert a['BlockDeviceMappings'][0]['Ebs']['DeleteOnTermination'] is True
+          assert t['Parameters']['ClientCidr']['Default']=='127.0.0.1/32'
+          assert t['Parameters']['InstanceType']['AllowedValues']==['g4dn.xlarge']
+          assert all(rule['FromPort']==8443 and rule['ToPort']==8443 for rule in t['Resources']['WorkstationSG']['Properties']['SecurityGroupIngress'])
+          assert not any(rule['FromPort']==22 for rule in t['Resources']['WorkstationSG']['Properties']['SecurityGroupIngress'])
+          assert 'Task7' not in {tag['Key'] for tag in a['Tags']}, 'Launcher must add Task7=PR61 tag before launch'
+          print('PASS: offline GPU launch template checks; instance tag and external schedule are required before launch')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task7-reviewed-gpu-template
+          path: dist/task7-review/gpu-template.json
+          retention-days: 7
+          if-no-files-found: error
