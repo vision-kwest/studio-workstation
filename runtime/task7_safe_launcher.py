@@ -11,7 +11,7 @@ AMI = "ami-084caad6c89407d25"
 REGION = "us-east-1"
 ROLE = "arn:aws:iam::401233741942:role/studio-task7-pr61-terminator"
 BUCKET = "studio-workstation-releases-401233741942-us-east-1"
-TEMPLATE = "releases/task7-pr61-dcvperm-d4105cb/res-2026.06/gpu-template.json"
+TEMPLATE = "releases/task7-pr61-dpms-preinstalled-d5b6679/res-2026.06/gpu-template.json"
 SUBNET = "subnet-0986937ce71fb97cb"
 VPC = "vpc-01bbe5d01838f70b2"
 PROFILE = "StudioWorkstationSSMRole"
@@ -29,7 +29,7 @@ def validate_template(t):
     u = p["UserData"]["Fn::Base64"]["Fn::Sub"]
     assert "RENDER_OFFLINE" not in u and len(u.encode()) <= 16384
     assert "installation-scripts.tar.gz" in u and "virtual-desktop.tar.gz" in u
-    assert "releases/task7-pr61-dcvperm-d4105cb/res-2026.06" in u
+    assert "releases/task7-pr61-dpms-preinstalled-d5b6679/res-2026.06" in u
     assert "STUDIO_STANDALONE=true" in u and "-g NVIDIA" in u
     assert not re.search(r"\$\{(?!AWS::Region|![^}]+\})[^}]+\}", u)
     return p
