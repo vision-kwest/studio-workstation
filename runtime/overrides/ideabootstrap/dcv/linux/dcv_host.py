@@ -24,6 +24,8 @@ def _configure_storage_root() -> None:
     if os.path.islink(dcv_storage_root):
         error_msg = "something fishy is going on here. a sym-link should not exist. check with the session owner for bad actor or unwarranted usage of system."
         logger.error(error_msg)
+        if os.environ.get("STUDIO_STANDALONE") == "true":
+            raise RuntimeError(error_msg)
         return
 
     try:
@@ -39,6 +41,8 @@ def _configure_storage_root() -> None:
         logger.error(
             f"Error when creating storage root {dcv_storage_root} for session owner {session_owner}: {e}"
         )
+        if os.environ.get("STUDIO_STANDALONE") == "true":
+            raise
 
 
 def _configure_dcv_conf() -> None:
@@ -100,6 +104,8 @@ def _configure_dcv_conf() -> None:
         logger.info("Successfully configured dcv.conf")
     except Exception as e:
         logger.error(f"Error when configuring dcv.conf: {e}")
+        if os.environ.get("STUDIO_STANDALONE") == "true":
+            raise
 
 
 def apply_automatic_console_session_config(
