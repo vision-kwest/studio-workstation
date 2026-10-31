@@ -39,7 +39,7 @@ jobs:
           python3 tests/test_res_overlay_archives.py /tmp/res-original
           python3 runtime/build_res_overlay.py --input /tmp/res-original/installation-scripts.tar.gz --output dist/task7/installation-scripts.tar.gz
           python3 runtime/build_res_overlay.py --input /tmp/res-original/virtual-desktop.tar.gz --output dist/task7/virtual-desktop.tar.gz
-          echo '1a9b897fa52a8f2b4f6c5697d7cc5a7e490985e83ce193ec4f41a6462840742f  dist/task7/installation-scripts.tar.gz' | sha256sum -c -
+          echo 'cf759ffd5e2f64aee849f593473761971fb8e854ad5cd8ad5c8071b28e7ed9af  dist/task7/installation-scripts.tar.gz' | sha256sum -c -
           echo 'e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147  dist/task7/virtual-desktop.tar.gz' | sha256sum -c -
       - name: Configure temporary GitHub OIDC credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -50,7 +50,7 @@ jobs:
       - name: Upload exact objects and verify S3 readback
         run: |
           set -euo pipefail
-          prefix='s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-dcvperm-d4105cb/res-2026.06'
+          prefix='s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-dpms-preinstalled-d5b6679/res-2026.06'
           for name in installation-scripts.tar.gz virtual-desktop.tar.gz; do
             aws s3 cp "dist/task7/$name" "$prefix/$name" --sse AES256 --no-progress
             aws s3 cp "$prefix/$name" "/tmp/task7-$name" --no-progress
