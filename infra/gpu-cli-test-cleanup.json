@@ -268,6 +268,17 @@
                       "Arn"
                     ]
                   }
+                },
+                {
+                  "Sid": "SendToOnlySchedulerDLQ",
+                  "Effect": "Allow",
+                  "Action": "sqs:SendMessage",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "SchedulerDLQ",
+                      "Arn"
+                    ]
+                  }
                 }
               ]
             }
@@ -299,6 +310,14 @@
           "RetryPolicy": {
             "MaximumRetryAttempts": 2,
             "MaximumEventAgeInSeconds": 600
+          },
+          "DeadLetterConfig": {
+            "Arn": {
+              "Fn::GetAtt": [
+                "SchedulerDLQ",
+                "Arn"
+              ]
+            }
           }
         },
         "Name": {
@@ -332,6 +351,68 @@
           }
         ]
       }
+    },
+    "SchedulerDLQ": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+        "SqsManagedSseEnabled": true
+      }
+    },
+    "SchedulerDLQAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Scheduler cleanup delivery failures in dead-letter queue; investigate before workstation launch and until cleanup verified",
+        "Namespace": "AWS/SQS",
+        "MetricName": "ApproximateNumberOfMessagesVisible",
+        "Dimensions": [
+          {
+            "Name": "QueueName",
+            "Value": {
+              "Fn::GetAtt": [
+                "SchedulerDLQ",
+                "QueueName"
+              ]
+            }
+          }
+        ],
+        "Statistic": "Maximum",
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopic"
+          }
+        ]
+      }
+    },
+    "SchedulerDeliveryFailuresAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "EventBridge Scheduler target delivery failed; inspect schedule, IAM and DLQ",
+        "Namespace": "AWS/Scheduler",
+        "MetricName": "TargetErrorCount",
+        "Dimensions": [
+          {
+            "Name": "ScheduleGroup",
+            "Value": "default"
+          }
+        ],
+        "Statistic": "Sum",
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopic"
+          }
+        ]
+      }
     }
   },
   "Outputs": {
@@ -354,6 +435,11 @@
     "AlarmTopicArn": {
       "Value": {
         "Ref": "AlarmTopic"
+      }
+    },
+    "SchedulerDLQUrl": {
+      "Value": {
+        "Ref": "SchedulerDLQ"
       }
     }
   }
