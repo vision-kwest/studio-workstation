@@ -7,11 +7,13 @@ import json
 import re
 import time
 
-AMI = "ami-084caad6c89407d25"
+AMI = "ami-027c98f85b155c2ac"
 REGION = "us-east-1"
 ROLE = "arn:aws:iam::401233741942:role/studio-task7-pr61-terminator"
 BUCKET = "studio-workstation-releases-401233741942-us-east-1"
 TEMPLATE = "releases/task7-pr61-postreboot-a8ec326/res-2026.06/gpu-template.json"
+# S3 object version from the reviewed, immutable Task 7 GPU template.
+TEMPLATE_VERSION = "SA7FH5Yp5FSVmFRyih2Fr3vqvi5FKECi"
 SUBNET = "subnet-0986937ce71fb97cb"
 VPC = "vpc-01bbe5d01838f70b2"
 PROFILE = "StudioWorkstationSSMRole"
@@ -21,9 +23,11 @@ def validate_template(t):
     p = t["Resources"]["Workstation"]["Properties"]
     assert t["Parameters"]["InstanceType"]["AllowedValues"] == ["g4dn.xlarge"]
     assert t["Parameters"]["ClientCidr"]["Default"] == "127.0.0.1/32"
+    assert p["ImageId"] == {"Ref": "ImageId"}
     assert p["MetadataOptions"]["HttpTokens"] == "required"
     assert p["InstanceInitiatedShutdownBehavior"] == "terminate"
     assert p["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"] is True
+    assert p["BlockDeviceMappings"][0]["Ebs"]["Encrypted"] is True
     tags = {v["Key"]: v["Value"] for v in p["Tags"]}
     assert tags["Task7"] == "PR61" and tags["Issue"] == "60"
     u = p["UserData"]["Fn::Base64"]["Fn::Sub"]
@@ -105,7 +109,7 @@ def main():
     a=ap.parse_args()
     import boto3
     s3=boto3.client("s3",region_name=REGION)
-    data=s3.get_object(Bucket=BUCKET,Key=TEMPLATE)["Body"].read()
+    data=s3.get_object(Bucket=BUCKET,Key=TEMPLATE,VersionId=TEMPLATE_VERSION)["Body"].read()
     t=json.loads(data)
     validate_template(t)
     if not a.execute:
@@ -113,6 +117,9 @@ def main():
                           "sha256":hashlib.sha256(data).hexdigest(),"launch":"disabled"}))
         return
     ec2=boto3.client("ec2",region_name=REGION)
+    images=ec2.describe_images(ImageIds=[AMI])["Images"]
+    if len(images)!=1 or images[0]["State"]!="available" or images[0]["OwnerId"]!="401233741942":
+        raise RuntimeError("Pinned 0.1.11 GPU AMI unavailable or unexpected owner")
     scheduler=boto3.client("scheduler",region_name=REGION)
     print(json.dumps(launch(ec2,scheduler,t,a.minutes)))
 
