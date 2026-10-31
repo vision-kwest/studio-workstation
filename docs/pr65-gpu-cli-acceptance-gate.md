@@ -61,7 +61,7 @@ The CLI's dry-run validates the template through AWS and prints deployment input
 
 ## Explicit NO-GO blockers
 
-1. Validate the **exact rendered** GPU template with original RES user-data, not a reconstructed placeholder.
+1. **RESOLVED 2026-10-31:** AWS ValidateTemplate passed for the exact rendered scoped GPU template including original RES user-data. This is a syntax/structure validation, not a runtime launch guarantee.
 2. Validate that the EC2 instance + LaunchTemplate + block-device properties are accepted at actual creation, and that root EBS is tagged at creation; `ValidateTemplate` alone is insufficient.
 3. Verify least-privilege IAM effective permissions with simulation or equivalent controlled review. `cloudformation:DeleteStack` can cause downstream resource deletion; the stack must contain only approved resources.
 4. Add independent Scheduler delivery-failure monitoring (e.g. DLQ and alarm) or explicitly approve a verified equivalent.
@@ -70,3 +70,11 @@ The CLI's dry-run validates the template through AWS and prints deployment input
 7. Confirm that cleanup can finish under rollback, DELETE_FAILED, stop/start, and orphaned EBS in AWS; mock tests do not prove service behavior.
 
 **Stop here.** Task 8 is a separate approval gate. No AWS deployment, EC2 launch, PR merge or Image Builder change is authorized by this document.
+
+## Blocker-resolution phase — Task 1 evidence (2026-10-31)
+
+Executed `runtime/render_workstation.py` in GitHub Actions [run #41251808985](https://github.com/vision-kwest/studio-workstation/actions/runs/41251808985) with `--profile gpu --lifecycle persistent --cleanup-token unique-review-token-123 --test-stack studio-gpu-cli-review1`, the pinned release bucket/prefix and local user `workstation`. The exact generated JSON was transferred from the CI output to AWS CloudFormation `ValidateTemplate` in `us-east-1` without changing its content. **AWS returned success** and recognized seven template parameters, with `InstanceType=g4dn.xlarge` and `ClientCidr=127.0.0.1/32` defaults.
+
+Verified rendered resources: `Workstation`, `WorkstationSG`, `CleanupVolumeTagLaunchTemplate`. User-data contains 5,036 characters from the RES template. Root EBS has encrypted gp3, `DeleteOnTermination=false`, default 100 GiB; instance shutdown is `stop`. Launch Template volume `TagSpecifications` include exact test stack/token tags. SG ingress is TCP 8443 via `ClientCidr`. No EC2 instance or CloudFormation stack was created. CI now retains offline exact rendering and JSON parsing without dumping full template contents to logs.
+
+**Still NO-GO:** AWS ValidateTemplate does not prove EC2 launch-time behavior or effective IAM authorization. Continue with IAM simulation, Scheduler delivery-failure monitoring, archive integrity and EBS ownership checks, each behind separate approval.
