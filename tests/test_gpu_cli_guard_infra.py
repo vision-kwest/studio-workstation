@@ -69,9 +69,9 @@ class GuardInfrastructureTests(unittest.TestCase):
 
     def test_scheduler_cannot_invoke_other_functions(self):
         statements = TEMPLATE["Resources"]["ScheduleRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
-        self.assertEqual(len(statements), 1)
-        self.assertEqual(statements[0]["Resource"], {"Fn::GetAtt": ["CleanupFunction", "Arn"]})
-        self.assertEqual(statements[0]["Action"], "lambda:InvokeFunction")
+        invokes = [s for s in statements if s["Action"] == "lambda:InvokeFunction"]
+        self.assertEqual(len(invokes), 1)
+        self.assertEqual(invokes[0]["Resource"], {"Fn::GetAtt": ["CleanupFunction", "Arn"]})
 
     def test_lambda_cannot_create_or_tag_ec2(self):
         statements = TEMPLATE["Resources"]["CleanupRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
@@ -81,6 +81,35 @@ class GuardInfrastructureTests(unittest.TestCase):
         self.assertNotIn("ec2:RunInstances", actions)
         self.assertNotIn("iam:PassRole", actions)
         self.assertNotIn("*", actions)
+
+    def test_scheduler_dlq_is_independent_and_retained(self):
+        resources = TEMPLATE["Resources"]
+        queue = resources["SchedulerDLQ"]
+        self.assertEqual(queue["Type"], "AWS::SQS::Queue")
+        self.assertEqual(queue["Properties"]["MessageRetentionPeriod"], 1209600)
+        self.assertTrue(queue["Properties"]["SqsManagedSseEnabled"])
+        schedule = resources["CleanupSchedule"]["Properties"]
+        self.assertEqual(schedule["Target"]["DeadLetterConfig"]["Arn"],
+                         {"Fn::GetAtt": ["SchedulerDLQ", "Arn"]})
+
+    def test_scheduler_role_can_send_only_to_dlq(self):
+        policy = TEMPLATE["Resources"]["ScheduleRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+        send = [s for s in policy if s["Action"] == "sqs:SendMessage"]
+        self.assertEqual(len(send), 1)
+        self.assertEqual(send[0]["Resource"], {"Fn::GetAtt": ["SchedulerDLQ", "Arn"]})
+        self.assertNotIn("sqs:*", json.dumps(policy))
+
+    def test_scheduler_delivery_and_dlq_alarms(self):
+        resources = TEMPLATE["Resources"]
+        self.assertEqual(resources["SchedulerDLQAlarm"]["Properties"]["MetricName"],
+                         "ApproximateNumberOfMessagesVisible")
+        self.assertEqual(resources["SchedulerDeliveryFailuresAlarm"]["Properties"]["MetricName"],
+                         "TargetErrorCount")
+        for name in ("SchedulerDLQAlarm", "SchedulerDeliveryFailuresAlarm"):
+            alarm = resources[name]["Properties"]
+            self.assertEqual(alarm["Threshold"], 0)
+            self.assertEqual(alarm["ComparisonOperator"], "GreaterThanThreshold")
+            self.assertEqual(alarm["AlarmActions"], [{"Ref": "AlarmTopic"}])
 
     def test_deadline_requires_timezone(self):
         # Naive deadline is rejected before any boto3 client is created.
