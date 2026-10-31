@@ -91,6 +91,34 @@ class StandaloneBehavior(TestCase):
             configure.assert_called_once()
             poll.assert_called_once()
 
+    def test_ready_semaphore_only_after_console_success(self):
+        m=importlib.import_module("ideavirtualdesktop.app.linux.post_reboot")
+        for status in ("ERROR","READY"):
+            written=[]
+            def record_open(path, mode="r", *args, **kwargs):
+                written.append(path)
+                return mock.mock_open()(path,mode,*args,**kwargs)
+            with mock.patch.dict(os.environ,{"STUDIO_STANDALONE":"true","AWS_REGION":"us-east-1"}), \
+                 mock.patch.object(m.os.path,"isfile",return_value=False), \
+                 mock.patch.object(m.os,"makedirs"), \
+                 mock.patch.object(m.bootstrap_common,"set_reboot_required"), \
+                 mock.patch("builtins.open",side_effect=record_open), \
+                 mock.patch.object(m.dcv,"configure_automatic_console_session",return_value=True), \
+                 mock.patch.object(m.dcv,"poll_dcv_session_ready",return_value=status):
+                if status == "ERROR":
+                    with self.assertRaises(RuntimeError):
+                        m.run()
+                    self.assertEqual(written,[])
+                else:
+                    m.run()
+                    self.assertEqual(written,[m.LINUX_VDI_CONFIG_HOST_READY_LOCK])
+
+    def test_dcv_configuration_failure_propagates_in_standalone(self):
+        m=importlib.import_module("ideabootstrap.dcv.dcv")
+        with mock.patch.dict(os.environ,{"STUDIO_STANDALONE":"true"}), \
+             mock.patch.object(m.dcv.disable_wayland_protocol,"configure",side_effect=RuntimeError("wayland failure")):
+            with self.assertRaisesRegex(RuntimeError,"wayland failure"):
+                m.configure()
     def test_original_res_branch_remains_available(self):
         m=importlib.import_module("ideavirtualdesktop.app.linux.post_reboot")
         with mock.patch.dict(os.environ,{"STUDIO_STANDALONE":"false"},clear=False), \
