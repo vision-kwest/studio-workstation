@@ -25,7 +25,8 @@ class StandaloneBehavior(TestCase):
              mock.patch.object(m.bootstrap_common,"source_launch_env_file"), \
              mock.patch.object(m.post_reboot,"run",side_effect=lambda:events.append("post")), \
              mock.patch.object(m.gnome_utils,"configure",side_effect=lambda:events.append("gnome")), \
-             mock.patch.object(m.dcv,"configure",side_effect=lambda:events.append("dcv")),\n             mock.patch("ideabootstrap.dcv.linux.x_server._x_server_validated",return_value=True), \
+             mock.patch.object(m.dcv,"configure",side_effect=lambda:events.append("dcv")), \
+             mock.patch("ideabootstrap.dcv.linux.x_server._x_server_validated",return_value=True), \
              mock.patch.object(m.dcv,"is_dcvserver_ready",return_value=True):
             preserved=[(m.amazon_ssm_agent,"configure"),(m.cloudwatch_agent,"setup"),
                        (m.idea_service_account,"setup_account"),(m.restrict_ssh,"configure"),
@@ -53,7 +54,8 @@ class StandaloneBehavior(TestCase):
              mock.patch.object(m.os.path,"isfile",return_value=False), \
              mock.patch.object(m.bootstrap_common,"set_reboot_required"), \
              mock.patch.object(m.gnome_utils,"configure"), \
-             mock.patch.object(m.dcv,"configure"),\n             mock.patch("ideabootstrap.dcv.linux.x_server._x_server_validated",return_value=True), \
+             mock.patch.object(m.dcv,"configure"), \
+             mock.patch("ideabootstrap.dcv.linux.x_server._x_server_validated",return_value=True), \
              mock.patch.object(m.dcv,"is_dcvserver_ready",return_value=False):
             from contextlib import ExitStack
             with ExitStack() as stack:
