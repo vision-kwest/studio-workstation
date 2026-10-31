@@ -91,3 +91,11 @@ python3 -m unittest discover -s tests -p test_gpu_cli_test_cleanup.py -v
 python3 -m unittest discover -s tests -p test_gpu_profile_contract.py -v
 python3 -m unittest discover -s tests -p test_studio_workstation_cli.py -v
 ```
+
+## Task 3 hardening (offline, not deployed)
+
+The reconciler now checks both ownership tags on each discovered instance, volume, security group, and Launch Template, and on the stack itself. It follows EC2 pagination, refuses unknown stack statuses and ownership mismatches, and never tags unverified EBS volumes. ROLLBACK_COMPLETE and DELETE_FAILED request stack deletion; in-progress states wait. DELETE_COMPLETE is not considered proof of absence. EC2 termination, volume deletion, SG deletion, and Launch Template deletion remain pending until subsequent inventory confirms absence.
+
+**Deployment blockers:** The CLI destroy resource allowlist must include the scoped Launch Template. Task 4 must add tightly scoped EC2 DescribeLaunchTemplates/DeleteLaunchTemplate IAM permissions and independently monitored scheduling. Creation-time root EBS tag behavior must be verified against EC2. A tag-filtered inventory cannot detect untagged orphans; capture expected resource identities independently before live acceptance. A stuck CREATE_IN_PROGRESS or repeated DELETE_FAILED requires escalation, not a success result.
+
+Offline mock suite: `python3 -m unittest discover -s tests -p test_gpu_cli_test_cleanup.py -v` (21 scenarios). AWS CloudFormation and Lambda have not been exercised.
