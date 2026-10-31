@@ -88,7 +88,7 @@ class RuntimeTests(unittest.TestCase):
              patch.object(runtime, "ensure_permissions", return_value="/tmp/idea.perm"), \
              patch.object(runtime, "assert_gpu_gl"), \
              patch.object(runtime.Path, "mkdir"), \
-             patch.object(runtime.Path, "chown"):
+             patch.object(runtime.os, "chown"):
             # The storage path is fixed, but filesystem mutations are mocked.
             runtime.initialize(m)
         self.assertEqual(calls, ["wayland", "gl", "xorg", "console", "service", "ready"])
@@ -104,7 +104,7 @@ class RuntimeTests(unittest.TestCase):
              patch.object(runtime, "ensure_permissions", return_value="/tmp/idea.perm"), \
              patch.object(runtime, "assert_gpu_gl"), \
              patch.object(runtime.Path, "mkdir"), \
-             patch.object(runtime.Path, "chown"):
+             patch.object(runtime.os, "chown"):
             with self.assertRaises(runtime.ReadinessError):
                 runtime.initialize(m)
 
