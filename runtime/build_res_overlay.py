@@ -29,6 +29,23 @@ EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf"""
         raise ValueError("Pinned RES DPMS source anchor changed")
     return raw.replace(old, new)
 
+def patch_post_reboot_dpms(raw):
+    """Repair preinstalled DCV/Xorg configuration in standalone mode.
+
+    RES skips package installation on an AMI with DCV already installed;
+    patching the package installer alone therefore cannot fix existing files.
+    """
+    old = b'      /bin/bash "${SCRIPT_DIR}/../../dcv/linux/dcv_server.sh" -o $BASE_OS -g $GPU_FAMILY -s "${SCRIPT_DIR}/.."'
+    fix = b"""      if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
+        # The base AMI may contain a malformed DPMS file even when DCV install is skipped.
+        mkdir -p /etc/X11/xorg.conf.d
+        printf '%s\\n' 'Section "Extensions"' '    Option "DPMS" "Disable"' 'EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf
+      fi"""
+    if raw.count(old) != 1:
+        raise ValueError("Pinned RES post-reboot DCV install anchor changed")
+    return raw.replace(old, old + b"\\n" + fix)
+
+
 def patch_xserver_dcv_access(raw):
     """Grant only the local DCV service user, only in standalone mode."""
     old = b'        return "SI:localuser:dcv" in xhost_output'
@@ -114,7 +131,16 @@ def main():
             if len(matches)!=1:
                 raise ValueError("Cannot locate unique RES Ubuntu DCV installer")
             original=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==matches[0])).read()
-        output=rewrite(raw,mapping,replacements={matches[0]:patch_dcv_dpms(original)})
+        with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as tf:
+            post=[m.name.removeprefix("./") for m in tf if m.isfile()
+                  and m.name.removeprefix("./").endswith("scripts/virtual-desktop-host/linux/install_post_reboot.sh")]
+            if len(post)!=1:
+                raise ValueError("Cannot locate unique RES post-reboot installer")
+            post_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==post[0])).read()
+        output=rewrite(raw,mapping,replacements={
+            matches[0]:patch_dcv_dpms(original),
+            post[0]:patch_post_reboot_dpms(post_raw),
+        })
     else:
         with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as tf:
             members={m.name.removeprefix("./"):tf.extractfile(m).read() for m in tf if m.isfile()}
