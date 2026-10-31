@@ -12,9 +12,10 @@ class SafeLauncherTests(unittest.TestCase):
         self.t={"Parameters":{"InstanceType":{"AllowedValues":["g4dn.xlarge"]},
                                "ClientCidr":{"Default":"127.0.0.1/32"}},
           "Resources":{"Workstation":{"Properties":{
+            "ImageId":{"Ref":"ImageId"},
             "MetadataOptions":{"HttpTokens":"required"},
             "InstanceInitiatedShutdownBehavior":"terminate",
-            "BlockDeviceMappings":[{"Ebs":{"DeleteOnTermination":True}}],
+            "BlockDeviceMappings":[{"Ebs":{"DeleteOnTermination":True,"Encrypted":True}}],
             "Tags":[{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}],
             "UserData":{"Fn::Base64":{"Fn::Sub":"STUDIO_STANDALONE=true -g NVIDIA s3://x/releases/task7-pr61-postreboot-a8ec326/res-2026.06/installation-scripts.tar.gz virtual-desktop.tar.gz"}}}}}}
         self.ec2=Mock()
@@ -33,7 +34,13 @@ class SafeLauncherTests(unittest.TestCase):
         self.assertEqual(result["instance_id"],"i-test")
         self.assertEqual(self.s.create_schedule.call_args.kwargs["Name"],"studio-task7-pr61-i-test")
         self.ec2.terminate_instances.assert_not_called()
-        self.assertEqual(self.ec2.run_instances.call_args.kwargs["SecurityGroupIds"],["sg-test"])
+        args=self.ec2.run_instances.call_args.kwargs
+        self.assertEqual(args["SecurityGroupIds"],["sg-test"])
+        self.assertEqual(args["ImageId"],"ami-027c98f85b155c2ac")
+        self.assertTrue(args["BlockDeviceMappings"][0]["Ebs"]["Encrypted"])
+        self.assertTrue(args["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
+        self.assertEqual(args["MetadataOptions"]["HttpTokens"],"required")
+        self.ec2.authorize_security_group_ingress.assert_not_called()
 
     def test_schedule_creation_failure_terminates(self):
         self.s.create_schedule.side_effect=RuntimeError("scheduler denied")
@@ -53,6 +60,20 @@ class SafeLauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,"capacity"):
             m.launch(self.ec2,self.s,self.t)
         self.ec2.delete_security_group.assert_called_once_with(GroupId="sg-test")
+
+    def test_template_rejects_unencrypted_root(self):
+        self.t["Resources"]["Workstation"]["Properties"]["BlockDeviceMappings"][0]["Ebs"]["Encrypted"]=False
+        with self.assertRaises(AssertionError):
+            m.validate_template(self.t)
+
+    def test_template_requires_image_parameter(self):
+        self.t["Resources"]["Workstation"]["Properties"]["ImageId"]="ami-084caad6c89407d25"
+        with self.assertRaises(AssertionError):
+            m.validate_template(self.t)
+
+    def test_pinned_ami_and_template_version(self):
+        self.assertEqual(m.AMI,"ami-027c98f85b155c2ac")
+        self.assertEqual(m.TEMPLATE_VERSION,"SA7FH5Yp5FSVmFRyih2Fr3vqvi5FKECi")
 
     def test_unapproved_deadline_rejected(self):
         with self.assertRaises(ValueError):
