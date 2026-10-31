@@ -76,7 +76,8 @@
                     "ec2:DescribeInstances",
                     "ec2:DescribeVolumes",
                     "ec2:DescribeSecurityGroups",
-                    "ec2:DescribeLaunchTemplates"
+                    "ec2:DescribeLaunchTemplates",
+                    "cloudformation:ListStackResources"
                   ],
                   "Resource": "*"
                 },
@@ -170,6 +171,20 @@
                   "Resource": {
                     "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/studio-gpu-cli-cleanup-${TestStack}:*"
                   }
+                },
+                {
+                  "Sid": "OneDurableInventory",
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:GetItem",
+                    "dynamodb:UpdateItem"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "CleanupInventory",
+                      "Arn"
+                    ]
+                  }
                 }
               ]
             }
@@ -214,9 +229,13 @@
             "STUDIO_NOT_BEFORE_UTC": {
               "Ref": "DeadlineUtc"
             },
-            "STUDIO_FAIL_PENDING": "true"
+            "STUDIO_FAIL_PENDING": "true",
+            "STUDIO_INVENTORY_TABLE": {
+              "Ref": "CleanupInventory"
+            }
           }
-        }
+        },
+        "ReservedConcurrentExecutions": 1
       }
     },
     "CleanupLogGroup": {
@@ -413,6 +432,29 @@
           }
         ]
       }
+    },
+    "CleanupInventory": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BillingMode": "PAY_PER_REQUEST",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "Scope",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "Scope",
+            "KeyType": "HASH"
+          }
+        ],
+        "PointInTimeRecoverySpecification": {
+          "PointInTimeRecoveryEnabled": true
+        }
+      }
     }
   },
   "Outputs": {
@@ -440,6 +482,11 @@
     "SchedulerDLQUrl": {
       "Value": {
         "Ref": "SchedulerDLQ"
+      }
+    },
+    "InventoryTableName": {
+      "Value": {
+        "Ref": "CleanupInventory"
       }
     }
   }
