@@ -38,7 +38,117 @@ def pages(ec2, method, key, filters):
             raise RuntimeError("Repeated pagination token")
         seen.add(next_token)
 
-def reconcile(cf, ec2, stack, token):
+RESOURCE_TYPES = {
+    "AWS::EC2::Instance": "Instances",
+    "AWS::EC2::SecurityGroup": "SecurityGroups",
+    "AWS::EC2::LaunchTemplate": "LaunchTemplates",
+}
+INVENTORY_KEYS = ("Instances", "SecurityGroups", "LaunchTemplates", "Volumes")
+
+def durable_inventory(ddb, table, cf, stack, token, info, instances, volumes, groups, templates):
+    """Accumulate independently retained physical IDs before CloudFormation deletion.
+
+    Missing or changed ownership tags are never used as authorization to delete.
+    """
+    scope = stack + "#" + token
+    key = {"Scope": {"S": scope}}
+    existing = ddb.get_item(TableName=table, Key=key, ConsistentRead=True).get("Item", {})
+    recorded = {name: set(existing.get(name, {}).get("SS", [])) for name in INVENTORY_KEYS}
+    stack_id = info.get("StackId") if info else None
+    previous_id = existing.get("StackId", {}).get("S")
+    if previous_id and stack_id and previous_id != stack_id:
+        raise RuntimeError("CloudFormation stack ID changed under cleanup scope")
+    found = {name: set() for name in INVENTORY_KEYS}
+    if info:
+        next_token = None
+        while True:
+            args = {"StackName": stack}
+            if next_token:
+                args["NextToken"] = next_token
+            response = cf.list_stack_resources(**args)
+            for resource in response.get("StackResourceSummaries", []):
+                category = RESOURCE_TYPES.get(resource.get("ResourceType"))
+                if category and resource.get("PhysicalResourceId"):
+                    found[category].add(resource["PhysicalResourceId"])
+            next_token = response.get("NextToken")
+            if not next_token:
+                break
+    for category, resources, field in (
+        ("Instances", instances, "InstanceId"),
+        ("Volumes", volumes, "VolumeId"),
+        ("SecurityGroups", groups, "GroupId"),
+        ("LaunchTemplates", templates, "LaunchTemplateId"),
+    ):
+        found[category].update(x[field] for x in resources)
+    for instance in instances:
+        for mapping in instance.get("BlockDeviceMappings", []):
+            volume_id = mapping.get("Ebs", {}).get("VolumeId")
+            if volume_id:
+                found["Volumes"].add(volume_id)
+    # Capture all observed IDs durably, including CFN-discovered IDs with absent tags.
+    # Such resources will block cleanup until ownership is independently verified.
+    for category in INVENTORY_KEYS:
+        new = found[category] - recorded[category]
+        if new:
+            ddb.update_item(
+                TableName=table, Key=key,
+                UpdateExpression="ADD #ids :ids",
+                ExpressionAttributeNames={"#ids": category},
+                ExpressionAttributeValues={":ids": {"SS": sorted(new)}},
+            )
+            recorded[category].update(new)
+    if stack_id and not previous_id:
+        ddb.update_item(
+            TableName=table, Key=key,
+            UpdateExpression="SET #sid = if_not_exists(#sid, :sid)",
+            ExpressionAttributeNames={"#sid": "StackId"},
+            ExpressionAttributeValues={":sid": {"S": stack_id}},
+        )
+    return recorded
+
+def verify_inventory(ec2, recorded, instances, volumes, groups, templates):
+    observed = {
+        "Instances": {x["InstanceId"]: x for x in instances},
+        "Volumes": {x["VolumeId"]: x for x in volumes},
+        "SecurityGroups": {x["GroupId"]: x for x in groups},
+        "LaunchTemplates": {x["LaunchTemplateId"]: x for x in templates},
+    }
+    # An ID missing from the tagged inventory must not silently disappear:
+    # verify via direct, unfiltered Describe; mismatch is a hard error.
+    methods = {
+        "Instances": ("describe_instances", "InstanceIds"),
+        "Volumes": ("describe_volumes", "VolumeIds"),
+        "SecurityGroups": ("describe_security_groups", "GroupIds"),
+        "LaunchTemplates": ("describe_launch_templates", "LaunchTemplateIds"),
+    }
+    for category, ids in recorded.items():
+        for physical_id in ids - observed[category].keys():
+            method, argument = methods[category]
+            try:
+                result = getattr(ec2, method)(**{argument: [physical_id]})
+            except Exception as exc:
+                # An unknown API error cannot be interpreted as absence.
+                code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+                absent = {
+                    "Instances": "InvalidInstanceID.NotFound",
+                    "Volumes": "InvalidVolume.NotFound",
+                    "SecurityGroups": "InvalidGroup.NotFound",
+                    "LaunchTemplates": "InvalidLaunchTemplateId.NotFound",
+                }
+                if code == absent[category]:
+                    continue
+                raise
+            if category == "Instances":
+                items = [x for reservation in result.get("Reservations", [])
+                         for x in reservation.get("Instances", [])]
+            else:
+                items = result.get(category, [])
+            if items:
+                raise RuntimeError("Recorded resource missing ownership tags: " + physical_id)
+            # A successful but empty Describe response is not reliable absence.
+            raise RuntimeError("Recorded resource not verifiably absent: " + physical_id)
+
+def reconcile(cf, ec2, stack, token, ddb=None, table=None):
     if not re.fullmatch(r"studio-gpu-cli-[a-z0-9-]{1,110}", stack or ""):
         raise ValueError("Invalid test stack")
     if not re.fullmatch(r"[a-z0-9-]{12,64}", token or ""):
@@ -66,6 +176,20 @@ def reconcile(cf, ec2, stack, token):
     templates = list(pages(ec2, "describe_launch_templates", "LaunchTemplates", filters))
     for item in instances + volumes + groups + templates:
         verify(item, stack, token)
+    if ddb is not None:
+        if not table:
+            raise ValueError("Durable inventory table is required")
+        recorded = durable_inventory(ddb, table, cf, stack, token, info,
+                                     instances, volumes, groups, templates)
+        verify_inventory(ec2, recorded, instances, volumes, groups, templates)
+        # Never initiate stack deletion until all resource classes were
+        # inventoried, including the retained root EBS volume.
+        if info and info["StackStatus"] in DELETABLE and any(
+                not recorded[name] for name in INVENTORY_KEYS):
+            return {"complete": False, "reason": "durable inventory incomplete"}
+        if not info and any(not recorded[name] for name in INVENTORY_KEYS):
+            return {"complete": False, "reason": "durable inventory incomplete"}
+
     if info:
         state = info["StackStatus"]
         if state in BUSY:
@@ -114,7 +238,8 @@ def handler(event, context):
     if datetime.now(timezone.utc) < deadline:
         return {"complete": False, "reason": "deadline not reached"}
     import boto3
-    result = reconcile(boto3.client("cloudformation"), boto3.client("ec2"), stack, token)
+    result = reconcile(boto3.client("cloudformation"), boto3.client("ec2"), stack, token,
+                       boto3.client("dynamodb"), os.environ["STUDIO_INVENTORY_TABLE"])
     # A successful invocation must mean independently verified absence.
     # Pending after the deadline raises to trigger Lambda Errors alarm/retries.
     if not result["complete"] and os.environ.get("STUDIO_FAIL_PENDING") == "true":
