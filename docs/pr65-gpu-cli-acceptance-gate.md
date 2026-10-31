@@ -90,3 +90,16 @@ Executed read-only AWS IAM `SimulateCustomPolicy` on the proposed cleanup Lambda
 The guard CloudFormation template now defines a dedicated SQS dead-letter queue with SQS-managed encryption and 14-day message retention, attached to `AWS::Scheduler::Schedule.Target.DeadLetterConfig`. Its Scheduler execution role can send messages only to that queue, while retaining permission to invoke only the guard Lambda. A queue-depth alarm and a Scheduler `TargetErrorCount` alarm notify the existing SNS topic. These are independent of the Lambda Errors alarm. This is a *proposed* configuration, not deployed infrastructure.
 
 **Before deployment:** verify the exact `AWS/Scheduler` metric dimensions and alarm signal against AWS documentation and live telemetry; queue alarms do not prove scheduler delivery when no DLQ messages exist. Confirm SNS subscription, queue access policy/service behavior, and run a controlled failure-injection test. Preserve the queue and its contents until all failures are investigated. Ensure alarm coverage and the guard's continued operation through workstation stop/start and CloudFormation failure states. The guard template must pass AWS read-only `ValidateTemplate`; this alone cannot prove Scheduler delivery or Lambda execution.
+
+## Blocker-resolution phase — Task 4 archive integrity and race audit (2026-10-31)
+
+The validated RES release manifest records SHA-256 digests:
+
+| Object | S3 VersionId | Published SHA-256 |
+|---|---|---|
+| installation-scripts.tar.gz | `dlOKXdRAEJqpeNZNBotj87q0bdNlI5VC` | `7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1` |
+| virtual-desktop.tar.gz | `nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53` | `e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147` |
+
+Read-only S3 `HeadObject` with explicit VersionId and `ChecksumMode=ENABLED` verified the requested versions still exist and returned full-object CRC64NVME checksums, **not SHA-256**. S3 did not expose SHA-256 metadata; published SHA-256 values have not yet been recomputed from the actual versioned object bytes in this task. The current bootstrap template uses `aws s3 cp` against an **unversioned** `s3://` URI. The RES virtual-desktop application package URI is likewise unversioned. Preflight `HeadObject` latest-version equality cannot prevent a replacement after preflight and before consumption. The two new regression tests explicitly preserve the manifest pins and flag the current unversioned behavior.
+
+**NO-GO: race not eliminated.** A safe minimal patch must fetch **both** objects with `aws s3api get-object --version-id`, check the actual downloaded bytes with `sha256sum -c` before extraction/installation, and prove the original RES application-package loader accepts the verified local file path (or provide a narrow version-aware adapter). Do not assume an S3 URI with `?versionId=` is understood by the existing loader, and do not silently replace the RES installer. Until the downstream loader contract is traced and offline-tested, speculative changes to the proven reboot path are deliberately withheld. No AWS resources created.
