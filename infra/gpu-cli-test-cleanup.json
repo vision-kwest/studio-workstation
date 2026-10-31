@@ -26,7 +26,7 @@
       ]}}]
     }},
     "CleanupFunction": {"Type": "AWS::Lambda::Function", "Properties": {
-      "Runtime": "python3.12", "Handler": "gpu_cli_test_cleanup.handler", "Timeout": 120,
+      "FunctionName": {"Fn::Sub": "studio-gpu-cli-cleanup-\${TestStack}"}, "Runtime": "python3.12", "Handler": "gpu_cli_test_cleanup.handler", "Timeout": 120,
       "Role": {"Fn::GetAtt": ["CleanupRole", "Arn"]},
       "Code": {"S3Bucket": {"Ref": "LambdaZipBucket"}, "S3Key": {"Ref": "LambdaZipKey"}, "S3ObjectVersion": {"Ref": "LambdaZipVersion"}},
       "Environment": {"Variables": {"STUDIO_TEST_STACK": {"Ref": "TestStack"}, "STUDIO_CLEANUP_TOKEN": {"Ref": "CleanupToken"}, "STUDIO_NOT_BEFORE_UTC": {"Ref": "DeadlineUtc"}, "STUDIO_FAIL_PENDING": "true"}}
