@@ -34,7 +34,7 @@ class GuardInfrastructureTests(unittest.TestCase):
     def test_write_actions_are_scoped(self):
         statements = TEMPLATE["Resources"]["CleanupRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
         for s in statements:
-            if s["Sid"] == "ReadInventory" or s["Sid"] == "OwnLogs":
+            if s["Sid"] in ("ReadInventory", "OwnLogs", "OneDurableInventory"):
                 continue
             self.assertNotEqual(s["Resource"], "*")
             if s["Action"] != "cloudformation:DeleteStack":
@@ -110,6 +110,21 @@ class GuardInfrastructureTests(unittest.TestCase):
             self.assertEqual(alarm["Threshold"], 0)
             self.assertEqual(alarm["ComparisonOperator"], "GreaterThanThreshold")
             self.assertEqual(alarm["AlarmActions"], [{"Ref": "AlarmTopic"}])
+
+    def test_inventory_is_durable_and_role_scoped(self):
+        resources = TEMPLATE["Resources"]
+        table = resources["CleanupInventory"]
+        self.assertEqual(table["Type"], "AWS::DynamoDB::Table")
+        self.assertEqual(table["DeletionPolicy"], "Retain")
+        self.assertEqual(table["UpdateReplacePolicy"], "Retain")
+        self.assertTrue(table["Properties"]["PointInTimeRecoverySpecification"]["PointInTimeRecoveryEnabled"])
+        policy = resources["CleanupRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+        statement = next(x for x in policy if x["Sid"] == "OneDurableInventory")
+        self.assertEqual(statement["Resource"], {"Fn::GetAtt": ["CleanupInventory", "Arn"]})
+        self.assertEqual(set(statement["Action"]), {"dynamodb:GetItem", "dynamodb:UpdateItem"})
+        env = resources["CleanupFunction"]["Properties"]["Environment"]["Variables"]
+        self.assertEqual(env["STUDIO_INVENTORY_TABLE"], {"Ref": "CleanupInventory"})
+        self.assertEqual(resources["CleanupFunction"]["Properties"]["ReservedConcurrentExecutions"], 1)
 
     def test_deadline_requires_timezone(self):
         # Naive deadline is rejected before any boto3 client is created.
