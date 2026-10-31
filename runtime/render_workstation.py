@@ -64,6 +64,7 @@ def main():
         template["Parameters"]["InstanceType"]["Default"] = "g4dn.xlarge"
         template["Parameters"]["InstanceType"]["AllowedValues"] = ["g4dn.xlarge"]
         template["Resources"]["Workstation"]["Properties"]["Tags"][0]["Value"] = "studio-workstation-res-gpu"
+        instance["Tags"].extend([{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}])
     template["Resources"]["Workstation"]["Properties"]["UserData"]={"Fn::Base64":{"Fn::Sub":render(a.bucket,a.prefix,a.user,a.profile)}}
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(template,indent=2)+"\n")
