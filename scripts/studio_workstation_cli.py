@@ -21,6 +21,13 @@ DEFAULT_VPC = "vpc-01bbe5d01838f70b2"
 DEFAULT_SUBNET = "subnet-0986937ce71fb97cb"
 DEFAULT_PROFILE = "StudioWorkstationSSMRole"
 DEFAULT_REGION = "us-east-1"
+GPU_AMI = "ami-027c98f85b155c2ac"
+GPU_PREFIX = "releases/task7-pr61-postreboot-a8ec326/res-2026.06"
+GPU_VERSIONS = {
+    "installation-scripts.tar.gz": "dlOKXdRAEJqpeNZNBotj87q0bdNlI5VC",
+    "virtual-desktop.tar.gz": "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
+}
+
 
 def run(args, *, capture=True):
     if capture:
@@ -47,6 +54,18 @@ def require_approval(args, expected, supplied):
     if not args.yes or supplied != expected:
         raise ValueError(f"Refusing mutation: pass --yes --confirm-{'instance' if expected.startswith('i-') else 'stack'} {expected}")
 
+def gpu_release_preflight(args):
+    """Read-only preflight of pinned AMI and S3 object versions."""
+    images = aws(args.region, "ec2", "describe-images", "--image-ids", GPU_AMI)["Images"]
+    if len(images) != 1 or images[0]["State"] != "available" or images[0]["OwnerId"] != "401233741942":
+        raise ValueError("Validated GPU AMI unavailable or unexpected owner")
+    for name, version in GPU_VERSIONS.items():
+        obj = aws(args.region, "s3api", "head-object", "--bucket", args.bucket,
+                  "--key", GPU_PREFIX + "/" + name, "--version-id", version)
+        if obj.get("VersionId") != version:
+            raise ValueError("GPU release object version mismatch: " + name)
+
+
 def command(args):
     if args.action == "create":
         if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9-]{0,127}", args.stack):
@@ -54,12 +73,20 @@ def command(args):
         if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", args.version):
             raise ValueError("Release must be a version such as v0.1.3")
         ipaddress.IPv4Network(args.client_cidr, strict=False)
-        prefix = f"releases/{args.version}/res-2026.06"
+        gpu = args.profile == "gpu"
+        if gpu:
+            if args.region != "us-east-1" or args.image_id != GPU_AMI or args.instance_type != "g4dn.xlarge":
+                raise ValueError("GPU profile requires us-east-1, validated AMI and g4dn.xlarge")
+            if args.version != "v0.1.3" or args.bucket != DEFAULT_BUCKET:
+                raise ValueError("GPU profile requires the pinned release; --version is CPU-only")
+        prefix = GPU_PREFIX if gpu else f"releases/{args.version}/res-2026.06"
         with tempfile.TemporaryDirectory(prefix="studio-cli-") as temp:
             template = Path(temp) / "workstation.json"
             render = [sys.executable, str(ROOT / "runtime/render_workstation.py"),
                       "--bucket", args.bucket, "--prefix", prefix, "--user", "workstation",
                       "--output", str(template)]
+            if gpu:
+                render.extend(["--profile", "gpu", "--lifecycle", "persistent"])
             print("Rendering:", " ".join(render), flush=True)
             run(render, capture=False)
             validate = ["aws", "cloudformation", "validate-template", "--template-body",
@@ -88,6 +115,8 @@ def command(args):
                 pass
             else:
                 raise ValueError("Stack already exists; create requires a new stack name")
+            if gpu:
+                gpu_release_preflight(args)
             run(deploy, capture=False)
             print(json.dumps(describe(args.stack, args.region), indent=2))
         return
@@ -151,14 +180,14 @@ def main(argv=None):
         if action in ("start", "stop", "destroy"):
             s.add_argument("--confirm-instance")
         if action == "create":
-            s.add_argument("--profile", choices=["cpu"], default="cpu")
+            s.add_argument("--profile", choices=["cpu", "gpu"], default="cpu")
             s.add_argument("--version", default="v0.1.3")
             s.add_argument("--bucket", default=DEFAULT_BUCKET)
-            s.add_argument("--image-id", default=DEFAULT_AMI)
+            s.add_argument("--image-id", default=None)
             s.add_argument("--vpc-id", default=DEFAULT_VPC)
             s.add_argument("--subnet-id", default=DEFAULT_SUBNET)
             s.add_argument("--instance-profile", default=DEFAULT_PROFILE)
-            s.add_argument("--instance-type", choices=["m7i.large", "m7i.xlarge"], default="m7i.large")
+            s.add_argument("--instance-type", choices=["m7i.large", "m7i.xlarge", "g4dn.xlarge"], default=None)
             s.add_argument("--disk-size", type=int, default=100)
             s.add_argument("--client-cidr", default="0.0.0.0/0")
         if action == "connect":
@@ -166,6 +195,11 @@ def main(argv=None):
         if action == "destroy":
             s.add_argument("--delete-stack", action="store_true")
     a = p.parse_args(argv)
+    if a.action == "create":
+        if a.image_id is None:
+            a.image_id = GPU_AMI if a.profile == "gpu" else DEFAULT_AMI
+        if a.instance_type is None:
+            a.instance_type = "g4dn.xlarge" if a.profile == "gpu" else "m7i.large"
     try:
         command(a)
     except (ValueError, KeyError, subprocess.CalledProcessError) as exc:
