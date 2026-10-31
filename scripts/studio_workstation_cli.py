@@ -112,6 +112,8 @@ def command(args):
                 raise ValueError("GPU profile requires us-east-1, validated AMI and g4dn.xlarge")
             if args.version != "v0.1.3" or args.bucket != DEFAULT_BUCKET:
                 raise ValueError("GPU profile requires the pinned release; --version is CPU-only")
+        if not gpu and args.instance_type not in ("m7i.large", "m7i.xlarge"):
+            raise ValueError("CPU profile only supports m7i.large or m7i.xlarge")
         prefix = GPU_PREFIX if gpu else f"releases/{args.version}/res-2026.06"
         with tempfile.TemporaryDirectory(prefix="studio-cli-") as temp:
             template = Path(temp) / "workstation.json"
