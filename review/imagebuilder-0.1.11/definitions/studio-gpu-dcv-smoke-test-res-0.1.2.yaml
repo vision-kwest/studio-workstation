@@ -1,0 +1,42 @@
+name: studio-gpu-dcv-smoke-test-res
+description: "Original DCV smoke test plus T4 hardware verification \u2014 Image Builder\
+  \ 0.1.11 review"
+schemaVersion: 1.0
+phases:
+- name: test
+  steps:
+  - name: CheckDesktop
+    action: ExecuteBash
+    onFailure: Abort
+    inputs:
+      commands:
+      - 'set -euxo pipefail
+
+        systemctl is-enabled gdm3
+
+        systemctl is-enabled dcvserver
+
+        systemctl is-active gdm3
+
+        systemctl is-active dcvserver
+
+        dpkg-query -W nice-dcv-server nice-dcv-gl
+
+        nvidia-smi -L | grep -E ''Tesla T4|NVIDIA T4|T4''
+
+        test -e /dev/nvidia0
+
+        modinfo nvidia
+
+        test -f /etc/X11/xorg.conf
+
+        grep -qi nvidia /etc/X11/xorg.conf
+
+        command -v glxinfo
+
+        test "$(passwd -S workstation | awk ''{print $2}'')" = L
+
+        # Console, Xhost, GLX rendering and READY are tested after RES postlaunch
+        initialization.
+
+        '

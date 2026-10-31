@@ -1,0 +1,43 @@
+name: studio-gpu-dcv-res-stage
+description: "CPU DCV install plus metadata-selected nice-dcv-gl (reject ambiguous\
+  \ matches) \u2014 Image Builder 0.1.11 review"
+schemaVersion: 1.0
+phases:
+- name: build
+  steps:
+  - name: InstallDCV
+    action: ExecuteBash
+    onFailure: Abort
+    inputs:
+      commands:
+      - "set -euxo pipefail\nexport DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a\n\
+        tmpdir=$(mktemp -d)\ntrap 'rm -rf \"$tmpdir\"' EXIT\ncd \"$tmpdir\"\nbase=https://d1uj6qtbmh3dt5.cloudfront.net\n\
+        curl -fLsS \"$base/nice-dcv-ubuntu2404-x86_64.tgz\" -o dcv.tgz\ncurl -fLsS\
+        \ \"$base/nice-dcv-ubuntu2404-x86_64.tgz.sha256sum\" -o checksum\nexpected=$(awk\
+        \ '{print $1}' checksum)\n[[ \"$expected\" =~ ^[a-fA-F0-9]{64}$ ]]\nprintf\
+        \ \"%s  %s\\\\n\" \"$expected\" dcv.tgz | sha256sum -c -\nmkdir packages\n\
+        tar -xzf dcv.tgz -C packages --strip-components=1\nshopt -s nullglob\nserver=(packages/nice-dcv-server_*_amd64.ubuntu2404.deb)\n\
+        viewer=(packages/nice-dcv-web-viewer_*_amd64.ubuntu2404.deb)\nxdcv=(packages/nice-xdcv_*_amd64.ubuntu2404.deb)\n\
+        \              # Inspect package metadata instead of trusting an ambiguous\
+        \ gl* filename glob.\n# The DCV distribution may also contain nice-dcv-gltest.\n\
+        gl_candidates=(packages/nice-dcv-gl*_amd64.ubuntu2404.deb)\nprintf 'DCV GL\
+        \ candidates: %s\\n' \"${gl_candidates[@]}\"\ngl=()\nfor candidate in \"${gl_candidates[@]}\"\
+        ; do\n  package_name=$(dpkg-deb -f \"$candidate\" Package)\n  printf 'DCV\
+        \ package %s: %s\\n' \"$candidate\" \"$package_name\"\n  if [[ \"$package_name\"\
+        \ == \"nice-dcv-gl\" ]]; then\n    gl+=(\"$candidate\")\n  fi\ndone\nif [[\
+        \ \"${#gl[@]}\" -ne 1 ]]; then\n  printf 'ERROR: expected exactly one nice-dcv-gl\
+        \ binary package, found %s\\n' \"${#gl[@]}\" >&2\n  exit 43\nfi\ntest \"${#server[@]}\"\
+        \ -eq 1\ntest \"${#viewer[@]}\" -eq 1\ntest \"${#xdcv[@]}\" -eq 1\n      \
+        \        # Selected by Debian package metadata above.\napt-get install -y\
+        \ \"./${server[0]}\" \"./${viewer[0]}\" \"./${xdcv[0]}\" \"./${gl[0]}\"\n\
+        usermod -aG video dcv\ninstall -d /etc/X11/xorg.conf.d /etc/dcv\nprintf '%s\\\
+        n' 'Section \"Extensions\"' ' Option \"DPMS\" \"Disable\"' 'EndSection' >\
+        \ /etc/X11/xorg.conf.d/99-disable-dpms.conf\ncat >> /etc/dcv/dcv.conf <<'DCV'\n\
+        [security]\nauthentication=\"system\"\n[session-management]\ncreate-session=true\n\
+        [session-management/automatic-console-session]\nowner=\"workstation\"\nDCV\n\
+        systemctl enable dcvserver\n"
+  - name: RebootAfterDCV
+    action: Reboot
+    onFailure: Abort
+    inputs:
+      delaySeconds: 15

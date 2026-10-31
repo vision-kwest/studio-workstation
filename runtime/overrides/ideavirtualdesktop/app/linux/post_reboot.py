@@ -74,11 +74,13 @@ def run():
         except subprocess.SubprocessError as e:
             logger.error(f"Failed to update crontab: {e}")
 
-    current_time = str(int(time.time()))
-    with open(LINUX_VDI_CONFIG_HOST_READY_LOCK, 'w') as f:
-        f.write(current_time)
+    if not standalone:
+        current_time = str(int(time.time()))
+        with open(LINUX_VDI_CONFIG_HOST_READY_LOCK, 'w') as f:
+            f.write(current_time)
 
-    logger.info(f"Created instance ready lock file: {LINUX_VDI_CONFIG_HOST_READY_LOCK}")
+        logger.info(f"Created instance ready lock file: {LINUX_VDI_CONFIG_HOST_READY_LOCK}")
+
 
     if not standalone:
         update_session_host_info()
@@ -87,6 +89,12 @@ def run():
     session_state = dcv.poll_dcv_session_ready() if configured else "ERROR"
     if standalone and session_state != "READY":
         raise RuntimeError("Standalone DCV console failed readiness check")
+    if standalone:
+        # The host-ready marker must mean the console actually reached READY.
+        current_time = str(int(time.time()))
+        with open(LINUX_VDI_CONFIG_HOST_READY_LOCK, 'w') as f:
+            f.write(current_time)
+        logger.info("Created ready lock after verified DCV console: %s", LINUX_VDI_CONFIG_HOST_READY_LOCK)
     if not standalone and configured:
         update_session_state(session_state)
     logger.info("DCV session placement complete with state: %s", session_state)

@@ -55,9 +55,16 @@ def main():
     template=json.loads((ROOT/"workstation-template.json").read_text())
     if a.profile == "gpu":
         template["Description"] = "GPU g4dn RES 2026.06 derived runtime; requires separately validated NVIDIA-capable AMI"
+        # Task 7 temporary GPU test only: no open-by-default DCV and no orphan EBS.
+        template["Parameters"]["ClientCidr"]["Default"] = "127.0.0.1/32"
+        instance = template["Resources"]["Workstation"]["Properties"]
+        instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"] = True
+        instance["InstanceInitiatedShutdownBehavior"] = "terminate"
+        instance["MetadataOptions"]["HttpPutResponseHopLimit"] = 2
         template["Parameters"]["InstanceType"]["Default"] = "g4dn.xlarge"
         template["Parameters"]["InstanceType"]["AllowedValues"] = ["g4dn.xlarge"]
         template["Resources"]["Workstation"]["Properties"]["Tags"][0]["Value"] = "studio-workstation-res-gpu"
+        instance["Tags"].extend([{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}])
     template["Resources"]["Workstation"]["Properties"]["UserData"]={"Fn::Base64":{"Fn::Sub":render(a.bucket,a.prefix,a.user,a.profile)}}
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(template,indent=2)+"\n")

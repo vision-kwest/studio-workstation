@@ -1,53 +1,41 @@
-# RES 2026.06 standalone implementation candidate
+# Standalone RES 2026.06 GPU/DCV runtime — validated implementation
 
-**Status: DRAFT / NOT DEPLOYABLE.** This branch contains concrete upstream-derived code changes for review, **not** a complete, approved workstation provisioning path. No AWS resources have been created or modified.
+**Status (2026-10-31): LIVE VALIDATED on baked GPU AMI `ami-027c98f85b155c2ac` in `us-east-1`.** The release path is the **original RES cloud-init installer, reboot continuation, Supervisor and `ideavirtualdesktop` bootstrap** with narrow standalone guards. No parallel systemd runtime coordinator is installed or enabled. This validation does not mean the PR is merged or that the GPU Image Builder pipeline has been updated.
 
-## Upstream pin and approach
+## Architecture and provenance
 
-Source: `aws/res` commit `1f526a241fb293a29fb018f08ccf81c100c05a42`. Files under `runtime/overrides/` are full copies of the corresponding original upstream files, with small guarded standalone branches. Apache-2.0 copyright headers retained. Existing non-standalone branches remain for comparison.
+Pinned upstream: `aws/res` tag `2026.06`, commit `1f526a241fb293a29fb018f08ccf81c100c05a42`. The `runtime/overrides/` tree preserves original upstream modules with targeted `STUDIO_STANDALONE=true` branches, avoiding full RES Cognito/AD, credential broker and DynamoDB cluster configuration. The original `install.sh` and `install_post_reboot.sh` preserve reboot semaphores and Supervisor startup. The post-reboot app retains original RES Xorg and automatic DCV console creation and readiness checks. The production-proven console permissions are `root:dcv` with mode `0640`; authentication is DCV `system` with local `workstation` account.
 
-**Do not deploy or import these files on a live host.** They are not wired into the RES tar archives or user-data yet. This is deliberate: packaging and app lifecycle must be reviewed before they can be used.
+The original RES installation/application source archives are hash-verified before reconstruction by `runtime/build_res_overlay.py`. The pinned derived archives tested live are:
 
-## Concrete code in this PR
+| Artifact | SHA-256 | S3 object version |
+|---|---|---|
+| `installation-scripts.tar.gz` | `7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1` | `dlOKXdRAEJqpeNZNBotj87q0bdNlI5VC` |
+| `virtual-desktop.tar.gz` | `e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147` | `nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53` |
 
-| File | Standalone change |
-|---|---|
-| `scripts/virtual-desktop-host/linux/install.sh` | Skip Cognito PAM/NSS host module install; skip broker-token file in standalone mode. Preserve first-stage packages, semaphore, reboot and post-reboot handoff. |
-| `scripts/common/linux/install_app.sh` | Skip RES broker, use `STUDIO_APP_PACKAGE_URI` instead of DynamoDB for original application archive; pass standalone environment to Supervisor. **Original `resserver` startup is still present and is not validated standalone.** |
-| `ideavirtualdesktop/app/linux/bootstrap.py` | Skip Cognito PAM/NSS configuration. **Other RES-specific calls remain and will fail without cluster services.** |
-| `ideavirtualdesktop/app/linux/post_reboot.py` | Skip RES idle cron and session-state reporting, retain console creation/readiness and existing semaphore. |
-| `ideabootstrap/dcv/linux/dcv_host.py` | Use local timeout inputs and `authentication="system"` instead of RES ALB verifier. |
-| `ideabootstrap/dcv/dcv.py` | Use owner-only candidate permissions, skip RES state reporting; preserve console configuration and polling. |
-| `ideabootstrap/dcv/linux/gl.py` | Use local GPU family list, preserve upstream GL actions. |
+S3 prefix: `s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-postreboot-a8ec326/res-2026.06/`.
 
-## Remaining blockers for this SAME implementation PR
+The reviewed GPU launch template is `gpu-template.json` at the same prefix, S3 VersionId `SA7FH5Yp5FSVmFRyih2Fr3vqvi5FKECi`. `runtime/task7_safe_launcher.py` pins this version and AMI, requires IMDSv2, launches a temporary encrypted delete-on-termination gp3 volume and verifies an independent one-time EventBridge termination schedule immediately after instance creation. It is a **supervised Task 7 test launcher**, not a general production lifecycle manager. The launcher starts with zero ingress; public DCV TCP 8443 was separately authorized for the temporary login test and removed with cleanup.
 
-1. **Partially implemented:** selectively guard RES-only storage, AD, sudo, proxy, tagging, identity and customization calls in `bootstrap.py`; mocked standalone behavior and preservation of essential host setup still require proof.
-2. **Candidate implemented, not proven:** use original Supervisor installation to invoke a small Python entrypoint calling upstream `bootstrap.run()` instead of the `ResApp` event loop. Verify execution/reboot behavior and all remaining imports and environment inputs.
-3. **Implemented, CI pending:** build both derived archives from SHA-256-verified original RES packages, replacing selected existing modules and adding the standalone entrypoint inside the original Python source distribution. The new integration workflow checks untouched members remain byte-identical. Neither archive is uploaded or deployed.
-4. Establish exact safe `STUDIO_STANDALONE` input propagation from original SDK user-data through both reboot stages and Python process.
-5. Verify DCV version-specific PAM, permissions grammar, file modes, TLS, and Option A interactive SSM account enrollment. Validate proposed timeout values and local owner existence.
-6. Run archive integration CI, then add mocked standalone-branch and unchanged-RES-branch behavioral tests and rerun T0–T4. Archive integration is not a runtime test.
-7. Before a controlled EC2 deployment, obtain explicit AWS/IAM approval and verify the standalone role can read the original archives.
+## Image Builder and acceptance
 
-## Review gates
+Recipe `studio-gpu-ubuntu2404-dcv/0.1.11` contains original GDM and desktop stages, AWS CLI, pinned NVIDIA stage `0.1.7/1`, corrected DCV stage `0.1.4/1`, and bake-time smoke `0.1.2/1`. AWS Image Builder image `0.1.11/1` is **AVAILABLE**, AMI `ami-027c98f85b155c2ac`. The existing GPU pipeline remains **DISABLED and points to recipe 0.1.10**; the CPU pipeline was not changed.
 
-- No claim of working standalone runtime, real DCV login, or GPU rendering.
-- No IAM, EC2, CloudFormation or Image Builder changes.
-- Do not merge this draft until the blockers are resolved and tests pass.
-- Preserve D-006 (original NVIDIA/DCV/GNOME/Xorg behavior) and D-007 (original cloud-init, semaphore and reboot continuation).
+Live Task 7/8 acceptance confirmed:
+- RES installation and both setup reboots, cloud-init completion without errors, Supervisor/bootstrap, `linux_vdi_config_host_ready.lock` and automatic DCV `console` READY.
+- NVIDIA Tesla T4, direct OpenGL 4.6 renderer, Xorg :0, GDM3 and DCV server; DCV local system authentication and owner `workstation`.
+- Real user-confirmed password login through DCV, graphical Ubuntu/Blender desktop, remote audio, and user-confirmed reconnect after an additional explicit reboot.
+- Original RES/DCV display resolution is automatic (commonly 2560×1600); do not force 1920×1080.
+- Temporary EC2, root EBS, security group and EventBridge schedule cleaned up. See [Issue #60](https://github.com/vision-kwest/studio-workstation/issues/60) for command IDs, acceptance evidence and cleanup.
 
-## Final pre-deployment review — 2026-10-23
+## Release limitations and deferred work
 
-**Deployment authorization: BLOCKED.** CI confirms syntax, archive construction, and mocked behaviors, not a functioning workstation.
+- The source AMI snapshot is **unencrypted**. Temporary test instances explicitly used encrypted EBS; production image/snapshot encryption needs a separate release-hardening decision.
+- Access from changing client networks and optional IP restrictions: [Issue #62](https://github.com/vision-kwest/studio-workstation/issues/62). Public DCV ingress must never be enabled implicitly.
+- Slight YouTube audio/video synchronization offset observed by the user; latency and browser/client performance not yet measured.
+- The Task 7 launcher does not automatically reconcile every orphaned SG/schedule after abnormal process failure; always supervise cleanup.
+- PR #61 remains draft until final source review and CI pass. Do not merge or update pipelines without explicit approval.
 
-Verified gaps from repository inspection:
+## Offline verification
 
-1. `infra/workstation.yaml` still accepts an already prepared `ImageId`. It does not render the original RES SDK workstation user-data template, provide a derived bootstrap archive URI, or invoke the original runtime `install.sh -p false` sequence. This is a missing deployment integration, not a reason to replace the RES template.
-2. The derived installation and application archives exist only as local/CI outputs. There is no approved S3 publishing workflow or versioned, integrity-checked deployment input for the modified archives. Original artifact hashes are verified, but modified artifact identity and EC2 `s3:GetObject` permissions are not yet established.
-3. `STUDIO_STANDALONE` and related inputs must survive both original cloud-init reentries and reach the Supervisor process. This is not demonstrated by mocked tests.
-4. Option A requires provisioning a dedicated, non-root local account with a locked password, followed by interactive SSM enrollment. Current deployment infrastructure does not create that account. The Python entrypoint now fails fast when the account is missing or root; it does not create or activate credentials.
-5. The application installer now fails on missing archive URI, failed S3 download, and failed Supervisor restart. Its `app_installed.lock` means installation finished, **not** successful DCV console login.
-6. DCV version-specific PAM, TLS, permissions file ownership, and real console readiness remain acceptance gates.
-
-**Required next implementation:** integrate the original SDK workstation user-data template and artifact URI inputs into a minimal, reviewed CloudFormation launch path; provide a secure locked-account creation mechanism; verify original reboot continuity and modified archive delivery. Do not deploy until those are implemented and explicitly approved.
+Run `python3 -m unittest discover -s tests -v` and review the focused GitHub Actions contracts. Only the original RES/Supervisor path is part of the validated runtime. The abandoned alternative systemd coordinator and its mocked-only tests were retired from this release PR.

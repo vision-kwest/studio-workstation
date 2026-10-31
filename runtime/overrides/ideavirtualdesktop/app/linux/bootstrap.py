@@ -85,6 +85,11 @@ def run():
         if os.environ.get("IDEA_SESSION_ID", "NONE") != "NONE":
             gnome_utils.configure()
             dcv.configure()
+            if os.environ.get("STUDIO_STANDALONE") == "true":
+                # The upstream Xorg loop may time out without raising.
+                from ideabootstrap.dcv.linux import x_server
+                if not x_server._x_server_validated():
+                    raise RuntimeError("Standalone Xorg failed readiness validation")
             if os.environ.get("STUDIO_STANDALONE") == "true" and not dcv.is_dcvserver_ready():
                 raise RuntimeError("Standalone DCV server failed initial readiness check")
 

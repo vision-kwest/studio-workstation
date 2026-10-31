@@ -39,6 +39,8 @@ def _configure_gl(base_os: str) -> None:
     try:
         os.makedirs(constants.IDEA_SERVICES_LOGS_PATH, exist_ok=True)
         dcvgladmin = which("dcvgladmin")
+        if not dcvgladmin and os.environ.get("STUDIO_STANDALONE") == "true":
+            raise RuntimeError("dcvgladmin executable is required for standalone GPU GL")
 
         gl_log_redirect = f"{constants.IDEA_SERVICES_LOGS_PATH}/idea-reboot-do-not-edit-or-delete-idea-gl.log 2>&1"
         script_content = f"""#!/bin/bash
@@ -61,6 +63,8 @@ echo "GLADMIN END" >> {gl_log_redirect}"""
         logger.info("Successfully configured GL")
     except Exception as e:
         logger.error(f"Error when configuring GL: {e}")
+        if os.environ.get("STUDIO_STANDALONE") == "true":
+            raise
 
 
 def _configure_rc_service(rc_path: str) -> None:
@@ -86,6 +90,8 @@ WantedBy=multi-user.target
         logger.info("Successfully configured rc-local.service")
     except Exception as e:
         logger.error(f"Error when configuring rc-local.service: {e}")
+        if os.environ.get("STUDIO_STANDALONE") == "true":
+            raise
 
 
 def configure() -> None:

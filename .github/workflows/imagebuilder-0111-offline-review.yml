@@ -1,0 +1,65 @@
+name: Image Builder 0.1.11 offline candidate review
+on:
+  push:
+    branches:
+      - feature/res-2026-06-standalone-runtime
+    paths:
+      - 'scripts/prepare_imagebuilder_0111_review.py'
+      - 'review/imagebuilder-0.1.11/**'
+      - '.github/workflows/imagebuilder-0111-offline-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install offline review parser dependencies
+        run: python -m pip install 'boto3>=1.35,<2' 'PyYAML>=6,<7'
+      - name: Execute generator on live AWS source snapshot
+        run: |
+          python scripts/prepare_imagebuilder_0111_review.py \
+            --snapshot review/imagebuilder-0.1.11/source-snapshot.json \
+            --output-dir /tmp/imagebuilder-0111
+      - name: Verify exact recipe, shell syntax and minimal delta
+        run: |
+          python - <<'PY'
+          import json, pathlib, subprocess, yaml
+          root=pathlib.Path('/tmp/imagebuilder-0111')
+          recipe=json.loads((root/'image-recipe-0.1.11.json').read_text())
+          manifest=json.loads((root/'source-manifest.json').read_text())
+          assert recipe['semanticVersion']=='0.1.11'
+          assert recipe['parentImage']=='ami-0d6dd9e8265d48906'
+          assert len(recipe['components'])==6
+          assert sum(not c['unchanged'] for c in manifest['components'] if 'unchanged' in c)==0
+          assert sum('file' in c for c in manifest['components'])==3
+          for item in manifest['components']:
+            if 'file' not in item: continue
+            doc=yaml.safe_load((root/item['file']).read_text())
+            for phase in doc['phases']:
+              for step in phase['steps']:
+                if step['action']!='ExecuteBash': continue
+                for command in step['inputs']['commands']:
+                  subprocess.run(['bash','-n'],input=command,text=True,check=True)
+                  assert 'task7-pr61-postreboot-a8ec326' in command or 'releases/' not in command
+                  assert '1920x1080' not in command
+            if doc['name']=='studio-gpu-dcv-res-stage':
+              cmd=doc['phases'][0]['steps'][0]['inputs']['commands'][0]
+              assert "printf '%s\\n' 'Section" in cmd
+              assert 'create-session=true' in cmd
+            if doc['name']=='studio-gpu-dcv-smoke-test-res':
+              cmd=doc['phases'][0]['steps'][0]['inputs']['commands'][0]
+              assert 'dcv list-sessions' not in cmd
+              assert 'xhost' not in cmd
+          print('PASS: exact six-component recipe, 3 modified components, bash -n, resolution and lifecycle contracts')
+          PY
+      - name: Upload review-only definitions
+        uses: actions/upload-artifact@v4
+        with:
+          name: imagebuilder-0111-review-definitions
+          path: /tmp/imagebuilder-0111/
+          retention-days: 14
