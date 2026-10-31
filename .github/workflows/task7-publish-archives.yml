@@ -1,0 +1,59 @@
+name: Task 7 publish immutable PR61 archives
+on:
+  push:
+    branches:
+      - feature/res-2026-06-standalone-runtime
+    paths:
+      - 'runtime/overrides/**'
+      - 'tests/test_task7_efs_skip.py'
+      - 'runtime/build_res_overlay.py'
+      - '.github/workflows/task7-publish-archives.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: task7-pr61-publisher
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'vision-kwest/studio-workstation' && github.ref == 'refs/heads/feature/res-2026-06-standalone-runtime'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve and hash-check official RES 2026.06 archives
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/res-original dist/task7
+          curl -fLsS --retry 2 --max-time 120 https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/res-installation-scripts.tar.gz -o /tmp/res-original/installation-scripts.tar.gz
+          curl -fLsS --retry 2 --max-time 120 https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/idea-virtual-desktop-2026.06.tar.gz -o /tmp/res-original/virtual-desktop.tar.gz
+          echo '2e3b0e4b198582ea03b1926aaaf76da21688f2e6809ad4d153b95a9417c72658  /tmp/res-original/installation-scripts.tar.gz' | sha256sum -c -
+          echo 'f5d2297537bda746fe74411c18140bcd0f2d4322852fa9d32ce7606a93aed7a8  /tmp/res-original/virtual-desktop.tar.gz' | sha256sum -c -
+      - name: Build and verify exact approved archives
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_task7_efs_skip.py -v
+          python3 -m unittest discover -s tests -p test_task7_xorg_fixes.py -v
+          python3 -m unittest discover -s tests -p test_task7_dcv_permissions.py -v
+          python3 tests/test_res_overlay_archives.py /tmp/res-original
+          python3 runtime/build_res_overlay.py --input /tmp/res-original/installation-scripts.tar.gz --output dist/task7/installation-scripts.tar.gz
+          python3 runtime/build_res_overlay.py --input /tmp/res-original/virtual-desktop.tar.gz --output dist/task7/virtual-desktop.tar.gz
+          echo '7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1  dist/task7/installation-scripts.tar.gz' | sha256sum -c -
+          echo 'e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147  dist/task7/virtual-desktop.tar.gz' | sha256sum -c -
+      - name: Configure temporary GitHub OIDC credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::401233741942:role/studio-task7-pr61-oidc-publisher
+          aws-region: us-east-1
+          role-session-name: task7-pr61-publish
+      - name: Upload exact objects and verify S3 readback
+        run: |
+          set -euo pipefail
+          prefix='s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-postreboot-a8ec326/res-2026.06'
+          for name in installation-scripts.tar.gz virtual-desktop.tar.gz; do
+            aws s3 cp "dist/task7/$name" "$prefix/$name" --sse AES256 --no-progress
+            aws s3 cp "$prefix/$name" "/tmp/task7-$name" --no-progress
+            cmp "dist/task7/$name" "/tmp/task7-$name"
+            sha256sum "dist/task7/$name" "/tmp/task7-$name"
+          done

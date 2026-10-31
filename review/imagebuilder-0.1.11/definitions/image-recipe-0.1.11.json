@@ -1,0 +1,36 @@
+{
+  "name": "studio-gpu-ubuntu2404-dcv",
+  "semanticVersion": "0.1.11",
+  "parentImage": "ami-0d6dd9e8265d48906",
+  "components": [
+    {
+      "componentArn": "arn:aws:imagebuilder:us-east-1:401233741942:component/studio-cpu-gdm-first/0.5.0/1"
+    },
+    {
+      "componentArn": "arn:aws:imagebuilder:us-east-1:401233741942:component/studio-gpu-desktop-res-stage/0.1.2/1"
+    },
+    {
+      "componentArn": "arn:aws:imagebuilder:us-east-1:aws:component/aws-cli-version-2-linux/1.0.5/1"
+    },
+    {
+      "componentArn": "arn:aws:imagebuilder:us-east-1:401233741942:component/studio-gpu-nvidia-res-stage/0.1.7/1"
+    },
+    {
+      "componentArn": "arn:aws:imagebuilder:us-east-1:401233741942:component/studio-gpu-dcv-res-stage/0.1.4/1"
+    },
+    {
+      "componentArn": "arn:aws:imagebuilder:us-east-1:401233741942:component/studio-gpu-dcv-smoke-test-res/0.1.2/1"
+    }
+  ],
+  "blockDeviceMappings": [
+    {
+      "deviceName": "/dev/sda1",
+      "ebs": {
+        "deleteOnTermination": true,
+        "volumeSize": 100,
+        "volumeType": "gp3"
+      }
+    }
+  ],
+  "description": "GPU 0.1.11 candidate; preserve RES launch-time console lifecycle"
+}

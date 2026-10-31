@@ -17,6 +17,46 @@ EXPECTED = {
  "virtual-desktop.tar.gz":"f5d2297537bda746fe74411c18140bcd0f2d4322852fa9d32ce7606a93aed7a8",
 }
 ROOT=Path(__file__).resolve().parent/"overrides"
+
+def patch_dcv_dpms(raw):
+    """Fix Ubuntu echo -e portability in the original RES 2026.06 installer."""
+    old = b"""  echo -e '
+Section "Extensions"
+    Option      "DPMS" "Disable"
+EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf"""
+    new = b"""  printf '%s\\n' 'Section "Extensions"' '    Option "DPMS" "Disable"' 'EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf"""
+    if raw.count(old) != 1:
+        raise ValueError("Pinned RES DPMS source anchor changed")
+    return raw.replace(old, new)
+
+def patch_post_reboot_dpms(raw):
+    """Repair preinstalled DCV/Xorg configuration in standalone mode.
+
+    RES skips package installation on an AMI with DCV already installed;
+    patching the package installer alone therefore cannot fix existing files.
+    """
+    old = b'      /bin/bash "${SCRIPT_DIR}/../../dcv/linux/dcv_server.sh" -o $BASE_OS -g $GPU_FAMILY -s "${SCRIPT_DIR}/.."'
+    fix = b"""      if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
+        # The base AMI may contain a malformed DPMS file even when DCV install is skipped.
+        mkdir -p /etc/X11/xorg.conf.d
+        printf '%s\\n' 'Section "Extensions"' '    Option "DPMS" "Disable"' 'EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf
+      fi"""
+    if raw.count(old) != 1:
+        raise ValueError("Pinned RES post-reboot DCV install anchor changed")
+    return raw.replace(old, old + b"\n" + fix)
+
+
+def patch_xserver_dcv_access(raw):
+    """Grant only the local DCV service user, only in standalone mode."""
+    old = b'        return "SI:localuser:dcv" in xhost_output'
+    new = b'''        if os.getenv("STUDIO_STANDALONE") == "true" and "SI:localuser:dcv" not in xhost_output:
+            subprocess.check_output(["xhost", "+SI:localuser:dcv"], env=env, text=True)
+            xhost_output = subprocess.check_output(["xhost"], env=env, text=True)
+
+        return "SI:localuser:dcv" in xhost_output'''
+    if raw.count(old) != 1:
+        raise ValueError("Pinned RES Xorg validator anchor changed")
+    return raw.replace(old, new)
 def rewrite(raw, mapping, additions=None, replacements=None):
     """Copy a tarball, changing only explicitly listed members.
 
@@ -85,14 +125,29 @@ def main():
             "scripts/virtual-desktop-host/linux/install.sh":ROOT/"scripts/virtual-desktop-host/linux/install.sh",
             "scripts/common/linux/install_app.sh":ROOT/"scripts/common/linux/install_app.sh",
         }
-        output=rewrite(raw,mapping)
+        with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as tf:
+            matches=[m.name.removeprefix("./") for m in tf if m.isfile()
+                     and m.name.removeprefix("./").endswith("scripts/dcv/linux/debian/dcv_server.sh")]
+            if len(matches)!=1:
+                raise ValueError("Cannot locate unique RES Ubuntu DCV installer")
+            original=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==matches[0])).read()
+        with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as tf:
+            post=[m.name.removeprefix("./") for m in tf if m.isfile()
+                  and m.name.removeprefix("./").endswith("scripts/virtual-desktop-host/linux/install_post_reboot.sh")]
+            if len(post)!=1:
+                raise ValueError("Cannot locate unique RES post-reboot installer")
+            post_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==post[0])).read()
+        output=rewrite(raw,mapping,replacements={
+            matches[0]:patch_dcv_dpms(original),
+            post[0]:patch_post_reboot_dpms(post_raw),
+        })
     else:
         with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as tf:
             members={m.name.removeprefix("./"):tf.extractfile(m).read() for m in tf if m.isfile()}
         nested={}
         for package,prefix,files in [
             ("idea-bootstrap-lib.tar.gz","ideabootstrap",[
-                "dcv/linux/dcv_host.py","dcv/linux/gl.py","dcv/dcv.py"]),
+                "dcv/linux/dcv_host.py","dcv/linux/gl.py","dcv/linux/x_server.py","dcv/dcv.py"]),
             ("idea-virtual-desktop-lib.tar.gz","ideavirtualdesktop",[
                 "app/linux/bootstrap.py","app/linux/post_reboot.py"])]:
             with tarfile.open(fileobj=io.BytesIO(members[package]),mode="r:gz") as tf:
@@ -103,7 +158,16 @@ def main():
                 if len(matches)!=1:
                     raise ValueError("Cannot locate unique original module "+relative)
                 mapping[matches[0]]=ROOT/prefix/relative
-            if prefix=="ideavirtualdesktop":
+            if prefix=="ideabootstrap":
+                xmatches=[n for n in names if n.endswith("/ideabootstrap/dcv/linux/x_server.py")]
+                if len(xmatches)!=1:
+                    raise ValueError("Cannot locate unique pinned RES Xorg validator")
+                with tarfile.open(fileobj=io.BytesIO(members[package]),mode="r:gz") as tf:
+                    original=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==xmatches[0])).read()
+                mapping.pop(xmatches[0])
+                nested[package]=rewrite(members[package],mapping,
+                    replacements={xmatches[0]:patch_xserver_dcv_access(original)})
+            elif prefix=="ideavirtualdesktop":
                 # Keep original source distribution layout and setup metadata.
                 # setuptools package discovery includes this .py in the existing
                 # ideavirtualdesktop.app package; no new package is introduced.
@@ -116,8 +180,6 @@ def main():
                     raise ValueError("Standalone entry already exists in source archive")
                 nested[package]=rewrite(members[package],mapping,
                     additions={entry:ROOT/"ideavirtualdesktop/app/standalone_bootstrap.py"})
-            else:
-                nested[package]=rewrite(members[package],mapping)
         # Replace only the two modified nested source distributions. Other
         # original application archive members remain unchanged.
         output=rewrite(raw,{},replacements=nested)
