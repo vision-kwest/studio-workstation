@@ -156,7 +156,7 @@ class CleanupTests(unittest.TestCase):
     def test_terminated_instance_does_not_trigger_termination(self):
         self.absent()
         self.instance("terminated")
-        self.assertTrue(self.run_cleanup()["complete"])
+        self.assertFalse(self.run_cleanup()["complete"])
         self.ec2.terminate_instances.assert_not_called()
 
     def test_stop_start_transitions_remain_scoped(self):
@@ -206,6 +206,27 @@ class CleanupTests(unittest.TestCase):
         self.ec2.delete_volume.side_effect = PermissionError("denied")
         with self.assertRaises(PermissionError):
             self.run_cleanup()
+
+    def test_terminated_instance_must_disappear_before_completion(self):
+        self.absent()
+        self.instance("terminated")
+        self.assertFalse(self.run_cleanup()["complete"])
+        self.ec2.describe_instances.return_value = {"Reservations": []}
+        self.assertTrue(self.run_cleanup()["complete"])
+
+    def test_rollback_and_stopped_instance_never_claim_complete(self):
+        self.state("ROLLBACK_COMPLETE")
+        self.instance("stopped")
+        self.assertFalse(self.run_cleanup()["complete"])
+        self.cf.delete_stack.assert_called_once()
+
+    def test_delete_failed_with_retained_volume_never_claims_complete(self):
+        self.state("DELETE_FAILED")
+        self.ec2.describe_volumes.return_value = {"Volumes": [
+            {"VolumeId": "vol-retained", "State": "available", "Tags": TAGS}]}
+        self.assertFalse(self.run_cleanup()["complete"])
+        self.ec2.delete_volume.assert_not_called()
+        self.cf.delete_stack.assert_called_once()
 
     def test_invalid_scope(self):
         with self.assertRaises(ValueError):
