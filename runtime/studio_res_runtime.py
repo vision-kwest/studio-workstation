@@ -133,7 +133,7 @@ def initialize(modules=None):
     storage = Path("/home") / EXPECTED_OWNER / "storage-root"
     storage.mkdir(parents=True, exist_ok=True)
     user = pwd.getpwnam(EXPECTED_OWNER)
-    storage.chown(user.pw_uid, user.pw_gid)
+    os.chown(storage, user.pw_uid, user.pw_gid)
     permissions = ensure_permissions()
     m["host"].apply_automatic_console_session_config(EXPECTED_OWNER, str(storage), permissions)
     assert_system_auth()
