@@ -48,6 +48,8 @@ def main():
     p=argparse.ArgumentParser()
     p.add_argument("--profile",choices=["cpu","gpu"],default="cpu")
     p.add_argument("--lifecycle",choices=["temporary","persistent"],default="temporary",help="GPU only; persistent enables stop/start")
+    p.add_argument("--cleanup-token",default=None)
+    p.add_argument("--test-stack",default=None)
     p.add_argument("--bucket",required=True)
     p.add_argument("--prefix",required=True)
     p.add_argument("--user",default="workstation")
@@ -70,6 +72,15 @@ def main():
             instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"] = False
         else:
             instance["Tags"].extend([{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}])
+        if a.cleanup_token:
+            if a.lifecycle != "persistent" or not a.test_stack or not re.fullmatch(r"[a-z0-9-]{12,64}", a.cleanup_token):
+                raise ValueError("cleanup scope requires persistent GPU and exact test stack")
+            tags = [{"Key":"StudioCleanupToken","Value":a.cleanup_token},
+                    {"Key":"StudioStack","Value":a.test_stack}]
+            instance["Tags"].extend(tags)
+            template["Resources"]["WorkstationSG"]["Properties"]["Tags"] = list(tags)
+    elif a.cleanup_token:
+        raise ValueError("cleanup scope only supported for GPU")
     elif a.lifecycle != "temporary":
         raise ValueError("persistent lifecycle is only supported for GPU")
     template["Resources"]["Workstation"]["Properties"]["UserData"]={"Fn::Base64":{"Fn::Sub":render(a.bucket,a.prefix,a.user,a.profile)}}
