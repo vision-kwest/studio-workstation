@@ -135,6 +135,16 @@ class GpuProfileContracts(unittest.TestCase):
         self.assertIn('sha256sum --check --status', source)
         self.assertIn('s3 cp', source)  # Original managed RES path remains.
 
+    def test_scoped_gpu_launch_blocked_until_new_archive_published(self):
+        from scripts import studio_workstation_cli as cli
+        source = (ROOT / "scripts/studio_workstation_cli.py").read_text()
+        self.assertIn("Scoped GPU acceptance blocked:", source)
+        manifest = json.loads((ROOT / "runtime/pr65-staged-release-manifest.json").read_text())
+        self.assertEqual(manifest["status"], "STAGED_OFFLINE_NOT_PUBLISHED")
+        self.assertIsNone(manifest["archives"]["installation-scripts.tar.gz"]["s3_version_id"])
+        self.assertNotEqual(manifest["archives"]["installation-scripts.tar.gz"]["sha256"],
+                            "7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1")
+
     def test_invalid_profile_fails(self):
         with self.assertRaises(ValueError):
             render("studio-release-bucket","releases/v0.1.3/res-2026.06","workstation","unknown")
