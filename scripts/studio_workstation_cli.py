@@ -129,8 +129,10 @@ def command(args):
             if gpu:
                 render.extend(["--profile", "gpu", "--lifecycle", "persistent"])
                 if args.cleanup_token:
-                    if not args.stack.startswith("studio-gpu-cli-") or not re.fullmatch(r"[a-z0-9-]{12,64}", args.cleanup_token):
+                    if not re.fullmatch(r"studio-gpu-cli-[a-z0-9-]{1,25}", args.stack) or not re.fullmatch(r"[a-z0-9-]{12,64}", args.cleanup_token):
                         raise ValueError("Cleanup scope requires studio-gpu-cli-* stack and safe token")
+                    if args.client_cidr == "0.0.0.0/0":
+                        raise ValueError("Scoped GPU acceptance test requires explicit restricted --client-cidr")
                     render.extend(["--cleanup-token", args.cleanup_token, "--test-stack", args.stack])
             print("Rendering:", " ".join(render), flush=True)
             run(render, capture=False)
@@ -205,7 +207,10 @@ def command(args):
         resources = aws(args.region, "cloudformation", "list-stack-resources",
                         "--stack-name", args.stack)["StackResourceSummaries"]
         kinds = {r["ResourceType"] for r in resources}
-        if not kinds.issubset({"AWS::EC2::Instance", "AWS::EC2::SecurityGroup"}):
+        allowed = {"AWS::EC2::Instance", "AWS::EC2::SecurityGroup"}
+        if args.stack.startswith("studio-gpu-cli-"):
+            allowed.add("AWS::EC2::LaunchTemplate")
+        if not kinds.issubset(allowed):
             raise ValueError(f"Unexpected stack resource types: {sorted(kinds)}")
         print("Deleting CloudFormation stack; retained EBS volumes require separate audit.", flush=True)
         run(["aws", "cloudformation", "delete-stack", "--stack-name", args.stack,
