@@ -228,6 +228,45 @@ class CleanupTests(unittest.TestCase):
         self.ec2.delete_volume.assert_not_called()
         self.cf.delete_stack.assert_called_once()
 
+    def test_durable_inventory_refuses_stack_delete_until_all_ids_captured(self):
+        ddb = Mock()
+        ddb.get_item.return_value = {"Item": {}}
+        self.cf.list_stack_resources.return_value = {"StackResourceSummaries": [
+            {"ResourceType": "AWS::EC2::Instance", "PhysicalResourceId": "i-test"},
+            {"ResourceType": "AWS::EC2::SecurityGroup", "PhysicalResourceId": "sg-test"},
+            {"ResourceType": "AWS::EC2::LaunchTemplate", "PhysicalResourceId": "lt-test"}]}
+        # No root EBS ID yet: do not delete the stack.
+        result = reconcile(self.cf, self.ec2, STACK, TOKEN, ddb, "inventory-table")
+        self.assertEqual(result["reason"], "durable inventory incomplete")
+        self.cf.delete_stack.assert_not_called()
+        self.assertEqual(ddb.update_item.call_count, 3)
+
+    def test_durable_inventory_detects_untagged_cfn_instance(self):
+        ddb = Mock()
+        ddb.get_item.return_value = {"Item": {}}
+        self.cf.list_stack_resources.return_value = {"StackResourceSummaries": [
+            {"ResourceType": "AWS::EC2::Instance", "PhysicalResourceId": "i-test"}]}
+        self.ec2.describe_instances.side_effect = [
+            {"Reservations": []},
+            {"Reservations": [{"Instances": [
+                {"InstanceId": "i-test", "State": {"Name": "stopped"}, "Tags": []}]}]}]
+        with self.assertRaisesRegex(RuntimeError, "missing ownership tags"):
+            reconcile(self.cf, self.ec2, STACK, TOKEN, ddb, "inventory-table")
+        self.cf.delete_stack.assert_not_called()
+
+    def test_durable_inventory_rejects_stack_identity_reuse(self):
+        ddb = Mock()
+        ddb.get_item.return_value = {"Item": {"StackId": {"S": "original-stack-id"}}}
+        self.cf.describe_stacks.return_value["Stacks"][0]["StackId"] = "replacement-stack-id"
+        with self.assertRaisesRegex(RuntimeError, "stack ID changed"):
+            reconcile(self.cf, self.ec2, STACK, TOKEN, ddb, "inventory-table")
+        self.cf.delete_stack.assert_not_called()
+
+    def test_durable_inventory_requires_table(self):
+        with self.assertRaises(ValueError):
+            reconcile(self.cf, self.ec2, STACK, TOKEN, Mock(), None)
+        self.cf.delete_stack.assert_not_called()
+
     def test_invalid_scope(self):
         with self.assertRaises(ValueError):
             reconcile(self.cf, self.ec2, "production", TOKEN)
