@@ -4,6 +4,8 @@ on:
     paths:
       - 'studio'
       - 'scripts/studio_workstation_cli.py'
+      - 'runtime/render_workstation.py'
+      - 'tests/test_gpu_profile_contract.py'
       - 'tests/test_studio_workstation_cli.py'
       - '.github/workflows/studio-cli.yml'
   workflow_dispatch:
@@ -14,5 +16,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - run: python3 -m pip install 'jinja2>=3,<4'
       - run: python3 -m unittest discover -s tests -p test_studio_workstation_cli.py -v
+      - run: python3 -m unittest discover -s tests -p test_gpu_profile_contract.py -v
+      - run: python3 -m py_compile scripts/studio_workstation_cli.py runtime/render_workstation.py
       - run: python3 studio workstation --help
