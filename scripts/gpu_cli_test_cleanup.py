@@ -81,7 +81,9 @@ def reconcile(cf, ec2, stack, token):
         if state not in ("terminated", "shutting-down"):
             ec2.terminate_instances(InstanceIds=[instance["InstanceId"]])
             pending.append(instance["InstanceId"])
-        elif state == "shutting-down":
+        else:
+            # Even terminated EC2 instances can remain visible for a while.
+            # Never report complete while an owned instance is still listed.
             pending.append(instance["InstanceId"])
     if pending:
         return {"complete": False, "reason": "instance termination pending"}
