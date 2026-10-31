@@ -35,6 +35,8 @@ def configure() -> None:
             dcv.start_dcv_service.configure()
     except Exception as e:
         logger.error(f"Failed to configure DCV for base_os {BASE_OS}: {e}")
+        if os.environ.get("STUDIO_STANDALONE") == "true":
+            raise
 
 
 def is_dcvserver_ready(timeout_seconds: int = 300, retry_interval: int = 5) -> bool:
@@ -84,6 +86,8 @@ def configure_automatic_console_session() -> bool:
         permissions_file_path = f"{permissions_dir}{constants.DCV_PERMISSIONS_FILE_NAME}"
         with open(permissions_file_path, "w", newline="") as f:
             f.write(permissions_content)
+        if standalone:
+            os.chmod(permissions_file_path, 0o600)
         logger.info(f"Wrote permissions file to {permissions_file_path}")
 
         dcv.dcv_host.apply_automatic_console_session_config(
