@@ -242,9 +242,47 @@ class CleanupTests(unittest.TestCase):
             {"LaunchTemplateId": "lt-test", "Tags": TAGS}]}
         # No root EBS ID yet: do not delete the stack.
         result = reconcile(self.cf, self.ec2, STACK, TOKEN, ddb, "inventory-table")
-        self.assertEqual(result["reason"], "durable inventory incomplete")
+        self.assertEqual(result["reason"], "root volume identity unverified")
         self.cf.delete_stack.assert_not_called()
         self.assertEqual(ddb.update_item.call_count, 3)
+
+    def test_never_launched_create_failed_can_delete_stack(self):
+        ddb = Mock()
+        ddb.get_item.return_value = {"Item": {}}
+        self.state("CREATE_FAILED")
+        self.cf.describe_stacks.return_value["Stacks"][0]["StackId"] = "stack-unique-id"
+        self.cf.list_stack_resources.return_value = {"StackResourceSummaries": []}
+        result = reconcile(self.cf, self.ec2, STACK, TOKEN, ddb, "inventory-table")
+        self.assertEqual(result["reason"], "stack deletion requested")
+        self.cf.delete_stack.assert_called_once_with(StackName=STACK)
+
+    def test_partial_rollback_without_instance_can_delete_stack(self):
+        ddb = Mock()
+        ddb.get_item.return_value = {"Item": {}}
+        self.state("ROLLBACK_COMPLETE")
+        self.cf.describe_stacks.return_value["Stacks"][0]["StackId"] = "stack-unique-id"
+        self.cf.list_stack_resources.return_value = {"StackResourceSummaries": [
+            {"ResourceType": "AWS::EC2::SecurityGroup", "PhysicalResourceId": "sg-test"}]}
+        self.ec2.describe_security_groups.return_value = {"SecurityGroups": [
+            {"GroupId": "sg-test", "Tags": TAGS}]}
+        result = reconcile(self.cf, self.ec2, STACK, TOKEN, ddb, "inventory-table")
+        self.assertEqual(result["reason"], "stack deletion requested")
+        self.cf.delete_stack.assert_called_once_with(StackName=STACK)
+
+    def test_absent_stack_without_durable_provenance_is_not_success(self):
+        ddb = Mock()
+        ddb.get_item.return_value = {"Item": {}}
+        self.absent()
+        result = reconcile(self.cf, self.ec2, STACK, TOKEN, ddb, "inventory-table")
+        self.assertEqual(result["reason"], "stack provenance unverified")
+        self.assertFalse(result["complete"])
+
+    def test_absent_stack_with_prior_identity_can_complete(self):
+        ddb = Mock()
+        ddb.get_item.return_value = {"Item": {"StackId": {"S": "prior-stack-id"}}}
+        self.absent()
+        result = reconcile(self.cf, self.ec2, STACK, TOKEN, ddb, "inventory-table")
+        self.assertTrue(result["complete"])
 
     def test_durable_inventory_detects_untagged_cfn_instance(self):
         ddb = Mock()
