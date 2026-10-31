@@ -153,6 +153,60 @@ class CleanupTests(unittest.TestCase):
             self.run_cleanup()
         self.ec2.delete_volume.assert_not_called()
 
+    def test_terminated_instance_does_not_trigger_termination(self):
+        self.absent()
+        self.instance("terminated")
+        self.assertTrue(self.run_cleanup()["complete"])
+        self.ec2.terminate_instances.assert_not_called()
+
+    def test_stop_start_transitions_remain_scoped(self):
+        self.absent()
+        for state in ("stopped", "pending", "running", "stopping"):
+            with self.subTest(state=state):
+                self.ec2.terminate_instances.reset_mock()
+                self.instance(state)
+                self.assertFalse(self.run_cleanup()["complete"])
+                self.ec2.terminate_instances.assert_called_once_with(InstanceIds=["i-test"])
+
+    def test_resource_deletion_requires_second_inventory(self):
+        self.absent()
+        self.ec2.describe_volumes.side_effect = [
+            {"Volumes": [{"VolumeId": "vol-test", "State": "available", "Tags": TAGS}]},
+            {"Volumes": []}]
+        self.assertFalse(self.run_cleanup()["complete"])
+        self.assertTrue(self.run_cleanup()["complete"])
+        self.ec2.delete_volume.assert_called_once()
+
+    def test_wrong_launch_template_tags_fail_closed(self):
+        self.absent()
+        self.ec2.describe_launch_templates.return_value = {"LaunchTemplates": [
+            {"LaunchTemplateId": "lt-test", "Tags": []}]}
+        with self.assertRaises(RuntimeError):
+            self.run_cleanup()
+        self.ec2.delete_launch_template.assert_not_called()
+
+    def test_wrong_security_group_tags_fail_closed(self):
+        self.absent()
+        self.ec2.describe_security_groups.return_value = {"SecurityGroups": [
+            {"GroupId": "sg-test", "Tags": []}]}
+        with self.assertRaises(RuntimeError):
+            self.run_cleanup()
+        self.ec2.delete_security_group.assert_not_called()
+
+    def test_unknown_stack_status_fails_closed(self):
+        self.state("SOMETHING_UNEXPECTED")
+        with self.assertRaises(RuntimeError):
+            self.run_cleanup()
+        self.cf.delete_stack.assert_not_called()
+
+    def test_delete_api_failure_not_success(self):
+        self.absent()
+        self.ec2.describe_volumes.return_value = {"Volumes": [
+            {"VolumeId": "vol-test", "State": "available", "Tags": TAGS}]}
+        self.ec2.delete_volume.side_effect = PermissionError("denied")
+        with self.assertRaises(PermissionError):
+            self.run_cleanup()
+
     def test_invalid_scope(self):
         with self.assertRaises(ValueError):
             reconcile(self.cf, self.ec2, "production", TOKEN)
