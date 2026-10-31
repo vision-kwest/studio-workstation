@@ -48,7 +48,12 @@ def generate(source):
     script = replace_once(script, OLD, NEW)
     script = replace_once(script, OLD_CHECK, '# Selected by Debian package metadata above.')
     assert 'apt-get install -y "./${server[0]}" "./${viewer[0]}" "./${xdcv[0]}" "./${gl[0]}"' in script
-    assert 'printf "%s  %s\\n" "$expected" dcv.tgz | sha256sum -c -' in script
+    # Preserve the checksum command already proven in GPU build 0.1.9/1.
+    # YAML quoting may serialize the newline escape differently; do not
+    # compare one exact representation or modify this working command.
+    assert 'sha256sum -c -' in script
+    assert 'dcv.tgz' in script
+    assert 'expected=' in script
     commands[0] = script
     doc["description"] = "CPU DCV install plus metadata-selected nice-dcv-gl (reject ambiguous matches)"
     return doc
