@@ -1,0 +1,125 @@
+name: studio-gpu-nvidia-res-stage
+description: "RES 2026.06 NVIDIA GRID with Nouveau reboot and pinned verified driver\
+  \ \u2014 Image Builder 0.1.11 review"
+schemaVersion: 1.0
+phases:
+- name: build
+  steps:
+  - name: PrepareResAndDisableNouveau
+    action: ExecuteBash
+    onFailure: Abort
+    inputs:
+      commands:
+      - 'set -euxo pipefail
+
+        export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
+
+        test "$(uname -m)" = x86_64
+
+        lspci | grep -qi NVIDIA
+
+        apt-get update -o Acquire::Retries=3
+
+        apt-get install -y mesa-utils gcc make binutils pciutils "linux-headers-$(uname
+        -r)"
+
+        dpkg --audit
+
+        mkdir -p /root/bootstrap/latest /root/bootstrap/logs
+
+        aws s3 cp s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-postreboot-a8ec326/res-2026.06/installation-scripts.tar.gz
+        /tmp/res-installation-scripts.tar.gz --region us-east-1
+
+        echo ''7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1  /tmp/res-installation-scripts.tar.gz''
+        | sha256sum -c -
+
+        tar -xzf /tmp/res-installation-scripts.tar.gz -C /root/bootstrap/latest
+
+        test -f /root/bootstrap/latest/scripts/common/linux/debian/grub_configuration.sh
+
+        test -f /root/bootstrap/latest/scripts/dcv/linux/gpu_drivers.sh
+
+        RES_SCRIPTS=/root/bootstrap/latest/scripts/dcv
+
+        /bin/bash /root/bootstrap/latest/scripts/common/linux/yq.sh -s "$RES_SCRIPTS"
+
+        /bin/bash /root/bootstrap/latest/scripts/common/linux/jq.sh -o ubuntu2404
+        -s "$RES_SCRIPTS"
+
+        command -v yq
+
+        command -v jq
+
+        source /root/bootstrap/latest/scripts/common/linux/config_common.sh
+
+        test "$(get_string package_config.gpu_driver.nvidia.s3_bucket_path)" = "s3://ec2-linux-nvidia-drivers/latest/"
+
+        /bin/bash /root/bootstrap/latest/scripts/common/linux/disable_nouveau_drivers.sh
+        -o ubuntu2404 -g NVIDIA -s "$RES_SCRIPTS"
+
+        test "$(cat /root/bootstrap/reboot_required.txt)" = yes
+
+        update-initramfs -u -k "$(uname -r)"
+
+        '
+  - name: RebootAfterNouveau
+    action: Reboot
+    onFailure: Abort
+    inputs:
+      delaySeconds: 15
+  - name: InstallResNvidiaGrid
+    action: ExecuteBash
+    onFailure: Abort
+    inputs:
+      commands:
+      - "set -euxo pipefail\nexport DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a\
+        \ NEEDRESTART_SUSPEND=1\nif lsmod | awk '$1 == \"nouveau\" {found=1} END {exit\
+        \ !found}'; then\n  echo 'ERROR: nouveau remains loaded after reboot' >&2\n\
+        \  exit 42\nfi\ncommand -v aws\ncommand -v python3\ncommand -v yq\ncommand\
+        \ -v jq\ntest -f /root/bootstrap/latest/scripts/dcv/linux/gpu_drivers.sh\n\
+        python3 - <<'PATCH'\nfrom pathlib import Path\np = Path(\"/root/bootstrap/latest/scripts/dcv/linux/gpu_drivers.sh\"\
+        )\ns = p.read_text()\na = s.index(\"function install_nvidia_grid_drivers ()\
+        \ {\")\nb = s.index(\"function install_nvidia_public_drivers()\", a)\nf =\
+        \ s[a:b]\nold = '$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive\
+        \ $NVIDIA_S3_BUCKET_PATH .'\nnew = \"\"\"$AWS --region us-east-1 s3api get-object\
+        \ --bucket studio-workstation-releases-401233741942-us-east-1 --key dependencies/nvidia-grid/595.91.07/NVIDIA-Linux-x86_64-595.91.07-grid-aws.run\
+        \ --version-id b94g7u7FkVYD9m63G6RE3xHNLZSXrz3r NVIDIA-Linux-x86_64-595.91.07-grid-aws.run\n\
+        \  echo 'cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156\
+        \  NVIDIA-Linux-x86_64-595.91.07-grid-aws.run' | sha256sum -c -\"\"\"\nassert\
+        \ f.count(old) == 1\nf = f.replace(old, new)\nold = 'local x_server_pid=$(cat\
+        \ /tmp/.X0-lock)'\nnew = chr(10).join([\n    'local x_server_pid=\"\"',\n\
+        \    '  if [[ -f /tmp/.X0-lock ]]; then',\n    '    x_server_pid=$(cat /tmp/.X0-lock)',\n\
+        \    '  fi',\n])\nassert f.count(old) == 1\nf = f.replace(old, new)\nold =\
+        \ '/bin/sh NVIDIA-Linux-x86_64*.run --no-precompiled-interface --run-nvidia-xconfig\
+        \ --accept-license --silent'\nnew = '/bin/sh NVIDIA-Linux-x86_64-595.91.07-grid-aws.run\
+        \ --no-precompiled-interface --run-nvidia-xconfig --accept-license --silent\
+        \ || return $?'\nassert f.count(old) == 1\nf = f.replace(old, new)\nold =\
+        \ '$NVIDIAXCONFIG --preserve-busid --enable-all-gpus'\nnew = '$NVIDIAXCONFIG\
+        \ --preserve-busid --enable-all-gpus || return $?'\nassert f.count(old) ==\
+        \ 1\nf = f.replace(old, new)\np.write_text(s[:a] + f + s[b:])\nPATCH\n/bin/bash\
+        \ /root/bootstrap/latest/scripts/dcv/linux/gpu_drivers.sh -o ubuntu2404 -g\
+        \ NVIDIA -s /root/bootstrap/latest/scripts/dcv\ncommand -v nvidia-smi\ncommand\
+        \ -v nvidia-xconfig\n"
+  - name: RebootAfterNvidia
+    action: Reboot
+    onFailure: Abort
+    inputs:
+      delaySeconds: 15
+  - name: ConfirmNvidia
+    action: ExecuteBash
+    onFailure: Abort
+    inputs:
+      commands:
+      - 'set -euxo pipefail
+
+        nvidia-smi -L | grep -E ''Tesla T4|NVIDIA T4|T4''
+
+        test -e /dev/nvidia0
+
+        modinfo nvidia
+
+        test -f /etc/X11/xorg.conf
+
+        grep -qi nvidia /etc/X11/xorg.conf
+
+        '
