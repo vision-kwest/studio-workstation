@@ -6,6 +6,8 @@ on:
       - 'scripts/studio_workstation_cli.py'
       - 'runtime/render_workstation.py'
       - 'tests/test_gpu_profile_contract.py'
+      - 'scripts/gpu_cli_test_cleanup.py'
+      - 'tests/test_gpu_cli_test_cleanup.py'
       - 'tests/test_studio_workstation_cli.py'
       - '.github/workflows/studio-cli.yml'
   workflow_dispatch:
@@ -19,5 +21,6 @@ jobs:
       - run: python3 -m pip install 'jinja2>=3,<4'
       - run: python3 -m unittest discover -s tests -p test_studio_workstation_cli.py -v
       - run: python3 -m unittest discover -s tests -p test_gpu_profile_contract.py -v
+      - run: python3 -m unittest discover -s tests -p test_gpu_cli_test_cleanup.py -v
       - run: python3 -m py_compile scripts/studio_workstation_cli.py runtime/render_workstation.py
       - run: python3 studio workstation --help
