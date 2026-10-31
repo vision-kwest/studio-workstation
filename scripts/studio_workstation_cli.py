@@ -165,6 +165,13 @@ def command(args):
             else:
                 raise ValueError("Stack already exists; create requires a new stack name")
             if gpu:
+                # PR #65 staged installer differs from the older published
+                # installation-scripts S3 version. Never launch it as though
+                # the new SHA-256 enforcement were present.
+                if args.cleanup_token:
+                    raise ValueError(
+                        "Scoped GPU acceptance blocked: new immutable RES installation "
+                        "archive has not been published and pinned by S3 VersionId")
                 gpu_release_preflight(args)
             run(deploy, capture=False)
             print(json.dumps(describe(args.stack, args.region), indent=2))
