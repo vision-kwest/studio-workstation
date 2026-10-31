@@ -116,14 +116,24 @@ class GpuProfileContracts(unittest.TestCase):
             self.assertEqual(len(digest), 64)
             self.assertIn(digest, (ROOT / "runtime/README.md").read_text())
 
-    def test_current_bootstrap_has_unversioned_download_race(self):
-        # A deliberately failing-closed *audit* of the remaining blocker:
-        # do not treat S3 HeadObject preflight as immutable consumption.
-        source = (ROOT / "runtime/upstream/bootstrap_userdata_linux_base_non_substitution.sh.jinja2").read_text()
-        self.assertIn("s3 cp", source)
-        self.assertNotIn("--version-id", source)
-        renderer = (ROOT / "runtime/render_workstation.py").read_text()
-        self.assertIn("s3://", renderer)
+    def test_pinned_gpu_bootstrap_and_app_archive(self):
+        from render_workstation import GPU_ARCHIVES, PINNED_GPU_BUCKET, PINNED_GPU_PREFIX
+        data = render(PINNED_GPU_BUCKET, PINNED_GPU_PREFIX, "workstation", "gpu")
+        for version, digest in GPU_ARCHIVES.values():
+            self.assertIn(version, data)
+            self.assertIn(digest, data)
+        self.assertIn("s3api get-object", data)
+        self.assertIn("sha256sum --check --status", data)
+        self.assertIn("STUDIO_APP_VERSION_ID=", data)
+        self.assertIn("STUDIO_APP_SHA256=", data)
+
+    def test_res_app_loader_pins_version_and_hash(self):
+        source = (ROOT / "runtime/overrides/scripts/common/linux/install_app.sh").read_text()
+        self.assertIn('s3api get-object', source)
+        self.assertIn('STUDIO_APP_VERSION_ID', source)
+        self.assertIn('STUDIO_APP_SHA256', source)
+        self.assertIn('sha256sum --check --status', source)
+        self.assertIn('s3 cp', source)  # Original managed RES path remains.
 
     def test_invalid_profile_fails(self):
         with self.assertRaises(ValueError):
