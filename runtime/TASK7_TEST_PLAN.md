@@ -1,4 +1,6 @@
-# Task 7 controlled GPU test — staging and launch gate
+# Task 7 controlled GPU test — historical staging and launch record
+
+> **Historical planning record — superseded 2026-10-31.** The earlier staging-only statements and old AMI/archive prefixes below describe the preparation history, not current launch instructions. The final tested GPU AMI is `ami-027c98f85b155c2ac`; validated immutable RES archives are under `releases/task7-pr61-postreboot-a8ec326/res-2026.06/`. Both Image Builder `0.1.11/1` and live GPU/DCV/password/reboot acceptance passed; all Task 7/8 temporary resources were cleaned up. See [runtime/README.md](README.md) and [Issue #60](https://github.com/vision-kwest/studio-workstation/issues/60) for the authoritative current state. Do not reuse the obsolete examples below to launch resources.
 
 Status: **STAGING ONLY — NO INSTANCE LAUNCH AUTHORIZED BY THIS DOCUMENT.**
 
