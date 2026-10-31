@@ -33,6 +33,20 @@ def reconcile(cf, ec2, stack, token):
         if tags.get("StudioCleanupToken") != token:
             raise RuntimeError("Refusing to touch stack without matching cleanup token")
         state = info["StackStatus"]
+        # Capture retained EBS identity before stack deletion.
+        attached = ec2.describe_instances(Filters=[
+            {"Name": "tag:StudioCleanupToken", "Values": [token]},
+            {"Name": "tag:StudioStack", "Values": [stack]},
+        ])
+        for reservation in attached.get("Reservations", []):
+            for instance in reservation.get("Instances", []):
+                for mapping in instance.get("BlockDeviceMappings", []):
+                    vol = mapping.get("Ebs", {}).get("VolumeId")
+                    if vol:
+                        ec2.create_tags(Resources=[vol], Tags=[
+                            {"Key": "StudioCleanupToken", "Value": token},
+                            {"Key": "StudioStack", "Value": stack},
+                        ])
         if state in ACTIVE:
             return {"complete": False, "reason": "stack busy", "status": state}
         if state not in GONE:
