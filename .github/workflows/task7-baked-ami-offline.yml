@@ -1,0 +1,42 @@
+name: Task 7 baked AMI offline launch review
+on:
+  push:
+    branches:
+      - feature/res-2026-06-standalone-runtime
+    paths:
+      - 'runtime/task7_safe_launcher.py'
+      - 'tests/test_task7_safe_launcher.py'
+      - '.github/workflows/task7-baked-ami-offline.yml'
+  pull_request:
+    paths:
+      - 'runtime/task7_safe_launcher.py'
+      - 'tests/test_task7_safe_launcher.py'
+      - '.github/workflows/task7-baked-ami-offline.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check launcher syntax and focused regression tests
+        run: |
+          python3 -m py_compile runtime/task7_safe_launcher.py tests/test_task7_safe_launcher.py
+          python3 -m unittest discover -s tests -p test_task7_safe_launcher.py -v
+      - name: Verify immutable baked-AMI and RES pins without AWS access
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('launcher',Path('runtime/task7_safe_launcher.py'))
+          mod=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          assert mod.AMI=='ami-027c98f85b155c2ac'
+          assert mod.REGION=='us-east-1'
+          assert mod.TEMPLATE=='releases/task7-pr61-postreboot-a8ec326/res-2026.06/gpu-template.json'
+          assert mod.TEMPLATE_VERSION=='SA7FH5Yp5FSVmFRyih2Fr3vqvi5FKECi'
+          assert mod.PROFILE=='StudioWorkstationSSMRole'
+          assert mod.ROLE=='arn:aws:iam::401233741942:role/studio-task7-pr61-terminator'
+          print('PASS: baked AMI, pinned template version, RES release and independent termination role')
+          PY
