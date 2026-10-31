@@ -8,12 +8,19 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 ROOT=Path(__file__).resolve().parent
 REGION=chr(36)+"{AWS::Region}"
+PINNED_GPU_PREFIX="releases/task7-pr61-postreboot-a8ec326/res-2026.06"
+PINNED_GPU_BUCKET="studio-workstation-releases-401233741942-us-east-1"
+GPU_ARCHIVES={
+    "installation-scripts.tar.gz": ("dlOKXdRAEJqpeNZNBotj87q0bdNlI5VC", "7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1"),
+    "virtual-desktop.tar.gz": ("nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53", "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
+}
 def render(bucket,prefix,user,profile="cpu"):
     if not re.fullmatch(r"[a-z0-9.-]{3,63}",bucket): raise ValueError("bucket")
     if not re.fullmatch(r"[A-Za-z0-9_./-]+",prefix) or ".." in prefix: raise ValueError("prefix")
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,30}",user): raise ValueError("user")
     if profile not in ("cpu", "gpu"): raise ValueError("profile")
     gpu_family = "NVIDIA" if profile == "gpu" else "NONE"
+    pinned = profile == "gpu" and bucket == PINNED_GPU_BUCKET and prefix.strip("/") == PINNED_GPU_PREFIX
     prefix=prefix.strip("/")
     app="s3://"+bucket+"/"+prefix+"/virtual-desktop.tar.gz"
     boot="s3://"+bucket+"/"+prefix+"/installation-scripts.tar.gz"
@@ -28,17 +35,23 @@ STUDIO_APP_PACKAGE_URI=APPURI
 STUDIO_GPU_FAMILIES=g4dn,g5,g6
 STUDIO_DCV_IDLE_TIMEOUT=0
 STUDIO_DCV_IDLE_WARNING=0
+APP_VERSION_LINE
+APP_SHA_LINE
 CONFIG
 chmod 600 /etc/studio-standalone.env
 set -a
 source /etc/studio-standalone.env
 set +a
 /bin/bash scripts/virtual-desktop-host/linux/install.sh -p false -m vdi-app -g GPUFAMILY -e standalone -n standalone -o USERNAME -d CONSOLE -i standalone-console -a REGION
-""".replace("USERNAME",user).replace("APPURI",app).replace("REGION",REGION).replace("GPUFAMILY",gpu_family)
+""".replace("USERNAME",user).replace("APPURI",app).replace("REGION",REGION).replace("GPUFAMILY",gpu_family).replace(
+        "APP_VERSION_LINE", "STUDIO_APP_VERSION_ID="+GPU_ARCHIVES["virtual-desktop.tar.gz"][0] if pinned else "").replace(
+        "APP_SHA_LINE", "STUDIO_APP_SHA256="+GPU_ARCHIVES["virtual-desktop.tar.gz"][1] if pinned else "")
     env=Environment(loader=FileSystemLoader(str(ROOT/"upstream")),undefined=StrictUndefined,keep_trailing_newline=True)
     userdata=env.get_template("bootstrap_userdata_linux_base_non_substitution.sh.jinja2").render(
         base_os="ubuntu2404",aws_region=REGION,bootstrap_package_uri=boot,
-        install_commands=[command],infra_config=None,proxy_config=None)
+        install_commands=[command],infra_config=None,proxy_config=None,
+        bootstrap_version_id=GPU_ARCHIVES["installation-scripts.tar.gz"][0] if pinned else None,
+        bootstrap_sha256=GPU_ARCHIVES["installation-scripts.tar.gz"][1] if pinned else None)
     # Fn::Sub must not interpolate original RES shell variables.
     # Preserve only CloudFormation's AWS::Region pseudo parameter.
     userdata=re.sub(r"\$\{(?!AWS::Region\})([^}]+)\}",lambda m: chr(36)+"{!"+m.group(1)+"}",userdata)
