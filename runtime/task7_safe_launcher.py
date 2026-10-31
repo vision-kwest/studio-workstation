@@ -71,14 +71,14 @@ def launch(ec2, scheduler, t, minutes=90):
         schedule_name = "studio-task7-pr61-" + instance_id
         deadline = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=minutes)
         schedule = scheduler.create_schedule(
-            Name=schedule_name, GroupName="default", State="ENABLED",
+            Name=schedule_name, GroupName="studio-task7-pr61", State="ENABLED",
             ScheduleExpression="at(" + deadline.strftime("%Y-%m-%dT%H:%M:%S") + ")",
             ScheduleExpressionTimezone="UTC",
             FlexibleTimeWindow={"Mode":"OFF"}, ActionAfterCompletion="DELETE",
             Target={"Arn":"arn:aws:scheduler:::aws-sdk:ec2:terminateInstances",
                     "RoleArn":ROLE, "Input":json.dumps({"InstanceIds":[instance_id]}),
                     "RetryPolicy":{"MaximumRetryAttempts":3,"MaximumEventAgeInSeconds":3600}})
-        got = scheduler.get_schedule(Name=schedule_name, GroupName="default")
+        got = scheduler.get_schedule(Name=schedule_name, GroupName="studio-task7-pr61")
         target = got["Target"]
         if not (got["State"]=="ENABLED" and got["ScheduleExpression"] ==
                 "at(" + deadline.strftime("%Y-%m-%dT%H:%M:%S") + ")" and
