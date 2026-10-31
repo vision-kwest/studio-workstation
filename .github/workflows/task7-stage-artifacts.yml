@@ -1,0 +1,42 @@
+name: Task 7 stage verified RES archives (no AWS upload)
+on:
+  pull_request:
+    paths:
+      - 'runtime/**'
+      - '.github/workflows/task7-stage-artifacts.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve pinned upstream archives
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/res-original dist/task7
+          curl -fLsS --retry 2 --max-time 120 https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/res-installation-scripts.tar.gz -o /tmp/res-original/installation-scripts.tar.gz
+          curl -fLsS --retry 2 --max-time 120 https://research-engineering-studio-us-east-1.s3.us-east-1.amazonaws.com/releases/2026.06/idea-virtual-desktop-2026.06.tar.gz -o /tmp/res-original/virtual-desktop.tar.gz
+          echo '2e3b0e4b198582ea03b1926aaaf76da21688f2e6809ad4d153b95a9417c72658  /tmp/res-original/installation-scripts.tar.gz' | sha256sum -c -
+          echo 'f5d2297537bda746fe74411c18140bcd0f2d4322852fa9d32ce7606a93aed7a8  /tmp/res-original/virtual-desktop.tar.gz' | sha256sum -c -
+      - name: Verify source overlay and build both archives
+        run: |
+          set -euo pipefail
+          python3 tests/test_res_overlay_archives.py /tmp/res-original
+          python3 runtime/build_res_overlay.py --input /tmp/res-original/installation-scripts.tar.gz --output dist/task7/installation-scripts.tar.gz
+          python3 runtime/build_res_overlay.py --input /tmp/res-original/virtual-desktop.tar.gz --output dist/task7/virtual-desktop.tar.gz
+          (cd dist/task7 && sha256sum installation-scripts.tar.gz virtual-desktop.tar.gz > SHA256SUMS)
+          python3 - <<'PY'
+          import json,os,pathlib
+          p=pathlib.Path('dist/task7')
+          (p/'provenance.json').write_text(json.dumps({'source_commit':os.environ['GITHUB_SHA'],'source_ref':os.environ['GITHUB_REF'],'res_tag':'2026.06','deployment_status':'UNPUBLISHED_DO_NOT_LAUNCH'},indent=2)+'\n')
+          PY
+          sha256sum -c dist/task7/SHA256SUMS --ignore-missing || (cd dist/task7 && sha256sum -c SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: task7-verified-res-archives
+          path: dist/task7/
+          if-no-files-found: error
+          retention-days: 7
