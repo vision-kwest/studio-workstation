@@ -2,14 +2,13 @@
 import json
 import tempfile
 from unittest import mock
-from render_workstation import main as render_main
 import sys
 import unittest
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"runtime"))
-from render_workstation import render
+from render_workstation import render, main as render_main
 
 class GpuProfileContracts(unittest.TestCase):
     def test_gpu_uses_upstream_nvidia_flag(self):
