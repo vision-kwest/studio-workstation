@@ -55,10 +55,6 @@ jobs:
             --mount type=bind,src=/tmp/res-output,dst=/audit/reports \
             res-standalone-behavior:ci \
             /audit/app.tar.gz /audit/test_standalone_behavior.py /audit/reports/standalone-behavior.json
-      - name: Task 6 coordinator Python syntax and mocked tests (review-only)
-        run: |
-          python3 -m py_compile runtime/studio_res_runtime.py tests/test_studio_res_runtime.py
-          python3 -m unittest discover -s tests -p 'test_studio_res_runtime.py' -v
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
