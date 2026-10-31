@@ -54,6 +54,13 @@ def reconcile(cf, ec2, stack, token):
     for reservation in instances.get("Reservations", []):
         for instance in reservation.get("Instances", []):
             state = instance["State"]["Name"]
+            for mapping in instance.get("BlockDeviceMappings", []):
+                vol = mapping.get("Ebs", {}).get("VolumeId")
+                if vol:
+                    ec2.create_tags(Resources=[vol], Tags=[
+                        {"Key": "StudioCleanupToken", "Value": token},
+                        {"Key": "StudioStack", "Value": stack},
+                    ])
             if state not in ("terminated", "shutting-down"):
                 ec2.terminate_instances(InstanceIds=[instance["InstanceId"]])
                 pending.append(instance["InstanceId"])
