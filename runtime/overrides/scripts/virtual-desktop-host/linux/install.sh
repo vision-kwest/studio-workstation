@@ -99,7 +99,13 @@ if [[ ! -f ${INSTALL_FINISHED_LOCK} ]]; then
     source /etc/environment
 
     # Begin: Install NFS Utils and dependency items
-    /bin/bash "${SCRIPT_DIR}/../../common/linux/nfs_utils.sh" -o $BASE_OS -s "${SCRIPT_DIR}/.."
+    # A standalone local-user workstation has no RES EFS/NFS mount.
+    # Keep the original RES path unchanged for managed deployments.
+    if [[ "${STUDIO_STANDALONE}" != "true" ]]; then
+      /bin/bash "${SCRIPT_DIR}/../../common/linux/nfs_utils.sh" -o $BASE_OS -s "${SCRIPT_DIR}/.."
+    else
+      echo "Standalone: skipping unused NFS/EFS mount helper"
+    fi
     # End: Install NFS Utils and dependency items
 
     # Begin : Install SSSD packages
