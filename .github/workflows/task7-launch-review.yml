@@ -14,6 +14,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  id-token: write
 jobs:
   review:
     runs-on: ubuntu-24.04
@@ -51,6 +52,23 @@ jobs:
           assert tags['Task7']=='PR61' and tags['Issue']=='60'
           print('PASS: offline GPU launch template checks; external schedule still required before launch')
           PY
+      - name: Hash reviewed template
+        run: sha256sum dist/task7-review/gpu-template.json
+      - name: Configure restricted OIDC for exact template publication
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/res-2026-06-standalone-runtime'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::401233741942:role/studio-task7-pr61-oidc-publisher
+          aws-region: us-east-1
+      - name: Publish and verify reviewed template without deploying
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/res-2026-06-standalone-runtime'
+        run: |
+          set -euo pipefail
+          uri='s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-c73e905/res-2026.06/gpu-template.json'
+          aws s3 cp dist/task7-review/gpu-template.json "$uri" --sse AES256 --no-progress
+          aws s3 cp "$uri" /tmp/task7-gpu-template.json --no-progress
+          cmp dist/task7-review/gpu-template.json /tmp/task7-gpu-template.json
+          sha256sum dist/task7-review/gpu-template.json /tmp/task7-gpu-template.json
       - uses: actions/upload-artifact@v4
         with:
           name: task7-reviewed-gpu-template
