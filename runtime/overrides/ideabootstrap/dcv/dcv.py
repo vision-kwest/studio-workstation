@@ -2,6 +2,8 @@
 #  SPDX-License-Identifier: Apache-2.0
 
 import os
+import grp
+import stat
 import json
 import subprocess
 import time
@@ -47,6 +49,37 @@ def is_dcvserver_ready(timeout_seconds: int = 300, retry_interval: int = 5) -> b
         return False
 
 
+def _secure_standalone_permissions_file(path: str) -> None:
+    """Allow only root and the local DCV group to read the console policy."""
+    dcv_gid = grp.getgrnam("dcv").gr_gid
+    os.chown(path, 0, dcv_gid)
+    os.chmod(path, 0o640)
+
+    info = os.stat(path, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode) or os.path.islink(path):
+        raise RuntimeError("DCV permissions path must be a regular, non-symlink file")
+    if info.st_uid != 0 or info.st_gid != dcv_gid or stat.S_IMODE(info.st_mode) != 0o640:
+        raise RuntimeError("DCV permissions file ownership or mode is incorrect")
+
+    # DCV must traverse every ancestor; check without opening any directory.
+    parent = os.path.dirname(os.path.abspath(path))
+    while True:
+        entry = os.stat(parent)
+        mode = stat.S_IMODE(entry.st_mode)
+        if not stat.S_ISDIR(entry.st_mode):
+            raise RuntimeError("DCV permissions parent is not a directory")
+        can_traverse = (
+            (entry.st_uid == 0 and bool(mode & stat.S_IXUSR))
+            or (entry.st_gid == dcv_gid and bool(mode & stat.S_IXGRP))
+            or bool(mode & stat.S_IXOTH)
+        )
+        if not can_traverse:
+            raise RuntimeError(f"DCV service cannot traverse permissions directory: {parent}")
+        if parent == "/":
+            break
+        parent = os.path.dirname(parent)
+
+
 def configure_automatic_console_session() -> bool:
     """Generate the permissions file, apply platform config, restart dcvserver, and transition session state.
 
@@ -87,7 +120,7 @@ def configure_automatic_console_session() -> bool:
         with open(permissions_file_path, "w", newline="") as f:
             f.write(permissions_content)
         if standalone:
-            os.chmod(permissions_file_path, 0o600)
+            _secure_standalone_permissions_file(permissions_file_path)
         logger.info(f"Wrote permissions file to {permissions_file_path}")
 
         dcv.dcv_host.apply_automatic_console_session_config(
