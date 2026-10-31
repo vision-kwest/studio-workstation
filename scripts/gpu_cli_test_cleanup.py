@@ -1,115 +1,114 @@
-"""Independent, bounded cleanup reconciler for ONE disposable GPU CLI test stack.
-
-Run as a scheduled Lambda with a dedicated IAM role. No deployment in this module.
-A stack must carry StudioCleanupToken=<token>; EC2 and EBS cleanup requires
-the same token. Never enumerate or delete arbitrary account resources.
-"""
+"""Independent fail-closed cleanup for one GPU CLI acceptance stack."""
 import os
+import re
 from datetime import datetime, timezone
 
-ACTIVE = {"CREATE_IN_PROGRESS", "UPDATE_IN_PROGRESS", "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS",
-          "UPDATE_ROLLBACK_IN_PROGRESS", "UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS",
-          "DELETE_IN_PROGRESS", "REVIEW_IN_PROGRESS", "IMPORT_IN_PROGRESS"}
-FAILED = {"CREATE_FAILED", "ROLLBACK_FAILED", "UPDATE_ROLLBACK_FAILED",
-          "DELETE_FAILED", "IMPORT_ROLLBACK_FAILED"}
-GONE = {"DELETE_COMPLETE", "ROLLBACK_COMPLETE"}
+BUSY = {"CREATE_IN_PROGRESS", "ROLLBACK_IN_PROGRESS", "DELETE_IN_PROGRESS",
+        "UPDATE_IN_PROGRESS", "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS",
+        "UPDATE_ROLLBACK_IN_PROGRESS", "UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS",
+        "IMPORT_IN_PROGRESS", "IMPORT_ROLLBACK_IN_PROGRESS",
+        "IMPORT_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS", "REVIEW_IN_PROGRESS"}
+DELETABLE = {"CREATE_COMPLETE", "CREATE_FAILED", "ROLLBACK_COMPLETE",
+             "ROLLBACK_FAILED", "UPDATE_COMPLETE", "UPDATE_ROLLBACK_COMPLETE",
+             "UPDATE_ROLLBACK_FAILED", "DELETE_FAILED", "IMPORT_COMPLETE",
+             "IMPORT_ROLLBACK_FAILED"}
 
+def verify(resource, stack, token):
+    tags = {}
+    for item in resource.get("Tags", []):
+        key, value = item["Key"], item["Value"]
+        if key in tags and tags[key] != value:
+            raise RuntimeError("Conflicting ownership tags")
+        tags[key] = value
+    if tags.get("StudioCleanupToken") != token or tags.get("StudioStack") != stack:
+        raise RuntimeError("Resource ownership mismatch")
+
+def pages(ec2, method, key, filters):
+    seen, next_token = set(), None
+    while True:
+        kwargs = {"Filters": filters}
+        if next_token:
+            kwargs["NextToken"] = next_token
+        response = getattr(ec2, method)(**kwargs)
+        yield from response.get(key, [])
+        next_token = response.get("NextToken")
+        if not next_token:
+            break
+        if next_token in seen:
+            raise RuntimeError("Repeated pagination token")
+        seen.add(next_token)
 
 def reconcile(cf, ec2, stack, token):
-    """One bounded attempt. Retry on future scheduler invocation until complete."""
-    if not stack or not token or not stack.startswith("studio-gpu-cli-"):
-        raise ValueError("Missing or invalid exact test stack/token")
+    if not re.fullmatch(r"studio-gpu-cli-[a-z0-9-]{1,110}", stack or ""):
+        raise ValueError("Invalid test stack")
+    if not re.fullmatch(r"[a-z0-9-]{12,64}", token or ""):
+        raise ValueError("Invalid cleanup token")
     try:
-        result = cf.describe_stacks(StackName=stack)["Stacks"]
-    except cf.exceptions.ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") == "ValidationError" and "does not exist" in str(exc):
-            result = []
-        else:
+        records = cf.describe_stacks(StackName=stack)["Stacks"]
+    except Exception as exc:
+        error = getattr(exc, "response", {}).get("Error", {})
+        if error.get("Code") != "ValidationError" or "does not exist" not in error.get("Message", ""):
             raise
-    if result:
-        info = result[0]
+        records = []
+    if len(records) > 1:
+        raise RuntimeError("Ambiguous stack")
+    info = records[0] if records else None
+    if info:
         if info["StackName"] != stack:
-            raise RuntimeError("Stack identity mismatch")
-        tags = {t["Key"]: t["Value"] for t in info.get("Tags", [])}
-        if tags.get("StudioCleanupToken") != token:
-            raise RuntimeError("Refusing to touch stack without matching cleanup token")
+            raise RuntimeError("Stack name mismatch")
+        verify(info, stack, token)
+    filters = [{"Name": "tag:StudioCleanupToken", "Values": [token]},
+               {"Name": "tag:StudioStack", "Values": [stack]}]
+    instances = [i for r in pages(ec2, "describe_instances", "Reservations", filters)
+                 for i in r.get("Instances", [])]
+    volumes = list(pages(ec2, "describe_volumes", "Volumes", filters))
+    groups = list(pages(ec2, "describe_security_groups", "SecurityGroups", filters))
+    templates = list(pages(ec2, "describe_launch_templates", "LaunchTemplates", filters))
+    for item in instances + volumes + groups + templates:
+        verify(item, stack, token)
+    if info:
         state = info["StackStatus"]
-        # Capture retained EBS identity before stack deletion.
-        attached = ec2.describe_instances(Filters=[
-            {"Name": "tag:StudioCleanupToken", "Values": [token]},
-            {"Name": "tag:StudioStack", "Values": [stack]},
-        ])
-        for reservation in attached.get("Reservations", []):
-            for instance in reservation.get("Instances", []):
-                for mapping in instance.get("BlockDeviceMappings", []):
-                    vol = mapping.get("Ebs", {}).get("VolumeId")
-                    if vol:
-                        ec2.create_tags(Resources=[vol], Tags=[
-                            {"Key": "StudioCleanupToken", "Value": token},
-                            {"Key": "StudioStack", "Value": stack},
-                        ])
-        if state in ACTIVE:
+        if state in BUSY:
             return {"complete": False, "reason": "stack busy", "status": state}
-        if state not in GONE:
-            # DELETE_FAILED is retried, with retained resources reconciled below.
-            try:
-                cf.delete_stack(StackName=stack)
-            except Exception as exc:
-                if state not in FAILED:
-                    raise
-                return {"complete": False, "reason": "delete retry pending", "error": str(exc)}
+        if state in DELETABLE:
+            cf.delete_stack(StackName=stack)
             return {"complete": False, "reason": "stack deletion requested", "status": state}
-
-    # CloudFormation is absent or terminal; only explicitly tagged resources.
-    instances = ec2.describe_instances(Filters=[
-        {"Name": "tag:StudioCleanupToken", "Values": [token]},
-        {"Name": "tag:StudioStack", "Values": [stack]},
-    ])
+        if state != "DELETE_COMPLETE":
+            raise RuntimeError("Unrecognized stack status: " + state)
     pending = []
-    for reservation in instances.get("Reservations", []):
-        for instance in reservation.get("Instances", []):
-            state = instance["State"]["Name"]
-            for mapping in instance.get("BlockDeviceMappings", []):
-                vol = mapping.get("Ebs", {}).get("VolumeId")
-                if vol:
-                    ec2.create_tags(Resources=[vol], Tags=[
-                        {"Key": "StudioCleanupToken", "Value": token},
-                        {"Key": "StudioStack", "Value": stack},
-                    ])
-            if state not in ("terminated", "shutting-down"):
-                ec2.terminate_instances(InstanceIds=[instance["InstanceId"]])
-                pending.append(instance["InstanceId"])
-            elif state == "shutting-down":
-                pending.append(instance["InstanceId"])
+    for instance in instances:
+        state = instance["State"]["Name"]
+        if state not in ("terminated", "shutting-down"):
+            ec2.terminate_instances(InstanceIds=[instance["InstanceId"]])
+            pending.append(instance["InstanceId"])
+        elif state == "shutting-down":
+            pending.append(instance["InstanceId"])
     if pending:
-        return {"complete": False, "reason": "instance termination pending", "instances": pending}
-
-    volumes = ec2.describe_volumes(Filters=[
-        {"Name": "tag:StudioCleanupToken", "Values": [token]},
-        {"Name": "tag:StudioStack", "Values": [stack]},
-    ])
-    for volume in volumes.get("Volumes", []):
-        if volume["State"] != "available":
-            return {"complete": False, "reason": "EBS not detached", "volume": volume["VolumeId"]}
+        return {"complete": False, "reason": "instance termination pending"}
+    if any(v["State"] != "available" for v in volumes):
+        return {"complete": False, "reason": "volume not detached"}
+    for volume in volumes:
         ec2.delete_volume(VolumeId=volume["VolumeId"])
-
-    groups = ec2.describe_security_groups(Filters=[
-        {"Name": "tag:StudioCleanupToken", "Values": [token]},
-        {"Name": "tag:StudioStack", "Values": [stack]},
-    ])
-    for group in groups.get("SecurityGroups", []):
+    if volumes:
+        return {"complete": False, "reason": "volume deletion verification pending"}
+    for group in groups:
         ec2.delete_security_group(GroupId=group["GroupId"])
-
-    if volumes.get("Volumes") or groups.get("SecurityGroups"):
-        return {"complete": False, "reason": "resource deletion verification pending"}
-    return {"complete": True, "reason": "all tagged test resources absent"}
-
+    if groups:
+        return {"complete": False, "reason": "security group deletion verification pending"}
+    for template in templates:
+        ec2.delete_launch_template(LaunchTemplateId=template["LaunchTemplateId"])
+    if templates:
+        return {"complete": False, "reason": "launch template deletion verification pending"}
+    if info:
+        return {"complete": False, "reason": "stack deletion verification pending"}
+    return {"complete": True, "reason": "stack and scoped resources absent"}
 
 def handler(event, context):
-    """Requires a dedicated scheduled invocation; no client-provided arbitrary scope."""
     stack = os.environ["STUDIO_TEST_STACK"]
     token = os.environ["STUDIO_CLEANUP_TOKEN"]
     deadline = datetime.fromisoformat(os.environ["STUDIO_NOT_BEFORE_UTC"].replace("Z", "+00:00"))
+    if deadline.tzinfo is None:
+        raise ValueError("UTC deadline must be timezone-aware")
     if datetime.now(timezone.utc) < deadline:
         return {"complete": False, "reason": "deadline not reached"}
     import boto3
