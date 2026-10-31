@@ -3,6 +3,7 @@
 
 import os
 import grp
+import pwd
 import stat
 import json
 import subprocess
@@ -52,6 +53,7 @@ def is_dcvserver_ready(timeout_seconds: int = 300, retry_interval: int = 5) -> b
 def _secure_standalone_permissions_file(path: str) -> None:
     """Allow only root and the local DCV group to read the console policy."""
     dcv_gid = grp.getgrnam("dcv").gr_gid
+    dcv_uid = pwd.getpwnam("dcv").pw_uid
     os.chown(path, 0, dcv_gid)
     os.chmod(path, 0o640)
 
@@ -69,7 +71,7 @@ def _secure_standalone_permissions_file(path: str) -> None:
         if not stat.S_ISDIR(entry.st_mode):
             raise RuntimeError("DCV permissions parent is not a directory")
         can_traverse = (
-            (entry.st_uid == 0 and bool(mode & stat.S_IXUSR))
+            (entry.st_uid == dcv_uid and bool(mode & stat.S_IXUSR))
             or (entry.st_gid == dcv_gid and bool(mode & stat.S_IXGRP))
             or bool(mode & stat.S_IXOTH)
         )
