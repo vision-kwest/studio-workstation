@@ -91,9 +91,25 @@ if [[ -z "${APP_PACKAGE_DOWNLOAD_URI}" ]]; then
   exit 1
 fi
 
-if ! $AWS --region "${INSTANCE_REGION}" s3 cp "${APP_PACKAGE_DOWNLOAD_URI}" "${BOOTSTRAP_DIR}/"; then
-  echo "ERROR: Failed to download application archive" >&2
-  exit 1
+if [[ "${STUDIO_STANDALONE}" == "true" && "${COMPONENT}" == "virtual-desktop-app" && -n "${STUDIO_APP_VERSION_ID:-}" ]]; then
+  # Preserve the RES installer; only pin and verify its standalone S3 fetch.
+  APP_KEY="${APP_PACKAGE_DOWNLOAD_URI#s3://}"
+  APP_BUCKET="${APP_KEY%%/*}"
+  APP_KEY="${APP_KEY#*/}"
+  PACKAGE_ARCHIVE="${APP_KEY##*/}"
+  if ! $AWS --region "${INSTANCE_REGION}" s3api get-object --bucket "${APP_BUCKET}" --key "${APP_KEY}" --version-id "${STUDIO_APP_VERSION_ID}" "${BOOTSTRAP_DIR}/${PACKAGE_ARCHIVE}"; then
+    echo "ERROR: Version-pinned RES application download failed" >&2
+    exit 1
+  fi
+  if ! echo "${STUDIO_APP_SHA256:?required}  ${BOOTSTRAP_DIR}/${PACKAGE_ARCHIVE}" | sha256sum --check --status; then
+    echo "ERROR: RES application SHA-256 mismatch" >&2
+    exit 1
+  fi
+else
+  if ! $AWS --region "${INSTANCE_REGION}" s3 cp "${APP_PACKAGE_DOWNLOAD_URI}" "${BOOTSTRAP_DIR}/"; then
+    echo "ERROR: Failed to download application archive" >&2
+    exit 1
+  fi
 fi
 
 APP_DEPLOY_DIR="/opt/idea/app"
