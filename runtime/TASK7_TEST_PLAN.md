@@ -32,3 +32,25 @@ Capture SSM status, cloud-init, Supervisor/bootstrap and post-reboot logs, semap
 4. The user must separately approve the **actual instance launch** after the above gates are satisfied.
 
 No AMI pipeline modifications, merge, or GPU launch are part of this preparation.
+
+## Launch-readiness review — 2026-10-31
+
+**Do not launch as part of this review.** The pinned derived archives are published under `releases/task7-pr61-c73e905/res-2026.06/` and the GitHub publishing run 41179637293 attempt 2 passed OIDC, S3 upload and byte-for-byte readback. Pin source commit and both S3 object versions/digests in the execution record.
+
+### Exact launch parameters
+
+- AMI `ami-084caad6c89407d25`, region `us-east-1`, instance type `g4dn.xlarge`, example default VPC `vpc-01bbe5d01838f70b2`, subnet `subnet-0986937ce71fb97cb` (us-east-1a). Check AZ capacity and public egress at launch time.
+- IAM instance profile `StudioWorkstationSSMRole` has `AmazonSSMManagedInstanceCore` and S3 GetObject permission on the two named archives in the release prefix. A live instance-role GetObject remains an acceptance check.
+- Render `runtime/render_workstation.py --profile gpu --bucket studio-workstation-releases-401233741942-us-east-1 --prefix releases/task7-pr61-c73e905/res-2026.06 --user workstation --output <reviewed-file>`. Never use the placeholder template directly. The original RES cloud-init multipart and bootstrap script must be preserved.
+- GPU-only output enforces IMDSv2, g4dn.xlarge, 100 GiB encrypted gp3, root DeleteOnTermination, terminate-on-shutdown, and instance tags `Task7=PR61` plus `Issue=60`. The template creates a fresh SG with TCP 8443 only, no SSH; its default `127.0.0.1/32` denies remote DCV. Supply a *currently verified trusted* /32 only if a real client login is required. Never open 0.0.0.0/0 for this test.
+- The local account is created with a locked password; only set a temporary strong password through SSM after verifying the instance is managed. Do not embed secrets in user-data or GitHub logs.
+
+### Fail-safe launch-and-schedule transaction (future, separately approved)
+
+1. Before creating any instance, verify the Scheduler execution role `studio-task7-pr61-terminator` and policy. Its only termination permission requires both `Task7=PR61` and `Issue=60` tags on the instance. Verify scheduler service trust and source-account/schedule ARN restrictions.
+2. Create one tagged EC2 instance through the reviewed CloudFormation template. **Treat the period between instance creation and schedule confirmation as a critical section**; no diagnostics or unattended waits in between. Capture the actual EC2 instance ID immediately (CloudFormation stack event/resource lookup as needed). Set a short bounded deadline, e.g. 90 minutes after launch.
+3. Immediately call EventBridge Scheduler `CreateSchedule` with a unique name `studio-task7-pr61-<instance-id>`, `ScheduleExpression=at(<UTC deadline>)`, `ScheduleExpressionTimezone=UTC`, `FlexibleTimeWindow.Mode=OFF`, `ActionAfterCompletion=DELETE`, and `Target.Arn=arn:aws:scheduler:::aws-sdk:ec2:terminateInstances`, `Target.RoleArn=arn:aws:iam::401233741942:role/studio-task7-pr61-terminator`, `Target.Input={"InstanceIds":["<instance-id>"]}`. Use a bounded retry policy. **Do not** use the old Terraform/CodeBuild expiration role.
+4. Read the schedule back with `GetSchedule` and verify exact instance ID, execution role, state ENABLED, UTC deadline, and action. Verify the instance tags, EBS DeleteOnTermination, and security group. If CreateSchedule or verification fails, **immediately TerminateInstances**, wait for terminated state, delete the CloudFormation stack and inspect any orphaned EBS/SG. Never leave the instance running without a verified independent schedule.
+5. Only after schedule confirmation proceed with SSM, GPU, Xorg, DCV, PAM, OpenGL and reboot tests. Monitor the deadline; do not assume schedule execution is proof of termination. Terminate early after evidence capture, confirm instance terminated and root EBS deleted, delete CloudFormation stack and any leftover resources, then delete temporary archive objects only after evidence is preserved.
+
+**Caveat:** CloudFormation stack creation may take time and is not itself an atomic instance+schedule transaction. The actual launcher must monitor EC2 creation promptly, fail closed on errors, and perform cleanup. The Scheduler role is scoped by tags, not a pre-known instance ID; the schedule itself must bind the actual ID. No independent schedule can yet be verified because the test instance does not exist.
