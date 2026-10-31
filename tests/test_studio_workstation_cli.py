@@ -96,6 +96,43 @@ class StudioCliTests(unittest.TestCase):
         self.assertNotIn("--profile", render)
         self.assertNotIn("--lifecycle", render)
 
+    @mock.patch.object(cli, "run")
+    def test_scoped_gpu_refuses_public_ingress(self, run):
+        with self.assertRaises(SystemExit):
+            self.invoke(["create", "--stack", "studio-gpu-cli-test1", "--profile", "gpu",
+                         "--cleanup-token", "unique-test-token-123"])
+        run.assert_not_called()
+
+    @mock.patch.object(cli, "run")
+    def test_scoped_gpu_requires_guard_compatible_stack_name(self, run):
+        with self.assertRaises(SystemExit):
+            self.invoke(["create", "--stack", "studio-gpu-cli-" + "x" * 40,
+                         "--profile", "gpu", "--cleanup-token", "unique-test-token-123",
+                         "--client-cidr", "127.0.0.1/32"])
+        run.assert_not_called()
+
+    @mock.patch.object(cli, "run")
+    def test_scoped_gpu_accepts_restricted_ingress_dry_run(self, run):
+        self.invoke(["create", "--stack", "studio-gpu-cli-test1", "--profile", "gpu",
+                     "--cleanup-token", "unique-test-token-123",
+                     "--client-cidr", "127.0.0.1/32"])
+        calls = [c.args[0] for c in run.call_args_list]
+        self.assertTrue(any("--cleanup-token" in c for c in calls))
+        self.assertFalse(any("deploy" in c for c in calls))
+
+    @mock.patch.object(cli, "run")
+    @mock.patch.object(cli, "aws")
+    @mock.patch.object(cli, "describe", return_value=STATE)
+    def test_scoped_destroy_accepts_launch_template(self, describe, aws, run):
+        aws.return_value = {"StackResourceSummaries": [
+            {"ResourceType": "AWS::EC2::Instance"},
+            {"ResourceType": "AWS::EC2::SecurityGroup"},
+            {"ResourceType": "AWS::EC2::LaunchTemplate"}]}
+        self.invoke(["destroy", "--stack", "studio-gpu-cli-test1", "--yes",
+                     "--confirm-stack", "studio-gpu-cli-test1",
+                     "--confirm-instance", INSTANCE, "--delete-stack"])
+        self.assertTrue(any("delete-stack" in c.args[0] for c in run.call_args_list))
+
     @mock.patch.object(cli, "aws")
     def test_gpu_preflight_checks_exact_s3_versions(self, aws):
         aws.side_effect = [
