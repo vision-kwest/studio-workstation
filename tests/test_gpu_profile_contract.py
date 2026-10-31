@@ -101,6 +101,30 @@ class GpuProfileContracts(unittest.TestCase):
             self.assertTrue(p["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
             self.assertIn("Task7", {tag["Key"] for tag in p["Tags"]})
 
+    def test_release_archive_pins_match_validated_sha256_manifest(self):
+        from scripts import studio_workstation_cli as cli
+        expected = {
+            "installation-scripts.tar.gz": (
+                "dlOKXdRAEJqpeNZNBotj87q0bdNlI5VC",
+                "7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1"),
+            "virtual-desktop.tar.gz": (
+                "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
+                "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
+        }
+        for name, (version, digest) in expected.items():
+            self.assertEqual(cli.GPU_VERSIONS[name], version)
+            self.assertEqual(len(digest), 64)
+            self.assertIn(digest, (ROOT / "runtime/README.md").read_text())
+
+    def test_current_bootstrap_has_unversioned_download_race(self):
+        # A deliberately failing-closed *audit* of the remaining blocker:
+        # do not treat S3 HeadObject preflight as immutable consumption.
+        source = (ROOT / "runtime/upstream/bootstrap_userdata_linux_base_non_substitution.sh.jinja2").read_text()
+        self.assertIn("s3 cp", source)
+        self.assertNotIn("--version-id", source)
+        renderer = (ROOT / "runtime/render_workstation.py").read_text()
+        self.assertIn("s3://", renderer)
+
     def test_invalid_profile_fails(self):
         with self.assertRaises(ValueError):
             render("studio-release-bucket","releases/v0.1.3/res-2026.06","workstation","unknown")
