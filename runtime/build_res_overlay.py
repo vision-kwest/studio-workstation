@@ -24,7 +24,7 @@ def patch_dcv_dpms(raw):
 Section "Extensions"
     Option      "DPMS" "Disable"
 EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf"""
-    new = b"""  printf 'Section "Extensions"\\n    Option "DPMS" "Disable"\\nEndSection\\n' > /etc/X11/xorg.conf.d/99-disable-dpms.conf"""
+    new = b"""  printf '%s\\n' 'Section "Extensions"' '    Option "DPMS" "Disable"' 'EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf"""
     if raw.count(old) != 1:
         raise ValueError("Pinned RES DPMS source anchor changed")
     return raw.replace(old, new)
