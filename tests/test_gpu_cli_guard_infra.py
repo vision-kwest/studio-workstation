@@ -48,6 +48,18 @@ class GuardInfrastructureTests(unittest.TestCase):
         self.assertEqual(env["STUDIO_FAIL_PENDING"], "true")
         self.assertIn("STUDIO_NOT_BEFORE_UTC", env)
 
+    def test_logs_policy_has_no_lambda_resource_cycle(self):
+        statements = TEMPLATE["Resources"]["CleanupRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+        logs = next(x for x in statements if x["Sid"] == "OwnLogs")
+        self.assertNotIn("${CleanupFunction}", logs["Resource"]["Fn::Sub"])
+        self.assertIn("${TestStack}", logs["Resource"]["Fn::Sub"])
+
+    def test_guard_template_names_fit_aws_limits(self):
+        pattern = TEMPLATE["Parameters"]["TestStack"]["AllowedPattern"]
+        import re
+        self.assertTrue(re.fullmatch(pattern, "studio-gpu-cli-test1"))
+        self.assertFalse(re.fullmatch(pattern, "studio-gpu-cli-" + "x" * 40))
+
     def test_deadline_requires_timezone(self):
         # Naive deadline is rejected before any boto3 client is created.
         with patch.dict("os.environ", {"STUDIO_TEST_STACK": "studio-gpu-cli-test",
