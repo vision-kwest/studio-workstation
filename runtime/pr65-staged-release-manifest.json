@@ -1,0 +1,16 @@
+{
+  "status": "STAGED_OFFLINE_NOT_PUBLISHED",
+  "res_tag": "2026.06",
+  "source_commit": "aeabda642ed9f8c99bb6f7aa838cdd445daa03bd",
+  "archives": {
+    "installation-scripts.tar.gz": {
+      "sha256": "084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5",
+      "s3_version_id": null
+    },
+    "virtual-desktop.tar.gz": {
+      "sha256": "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147",
+      "s3_version_id": "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53"
+    }
+  },
+  "publication": "REQUIRES_SEPARATE_APPROVAL_NO_S3_UPLOAD"
+}
