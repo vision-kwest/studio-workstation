@@ -33,5 +33,4 @@ jobs:
         run: |
           python3 runtime/render_workstation.py --profile gpu --lifecycle persistent --bucket studio-workstation-releases-401233741942-us-east-1 --prefix releases/task7-pr61-postreboot-a8ec326/res-2026.06 --user workstation --cleanup-token unique-review-token-123 --test-stack studio-gpu-cli-review1 --output /tmp/scoped-gpu-template.json
           python3 -m json.tool /tmp/scoped-gpu-template.json >/dev/null
-          python3 -c 'import base64; print("EXACT_RENDER_BASE64_START"); print(base64.b64encode(open("/tmp/scoped-gpu-template.json","rb").read()).decode()); print("EXACT_RENDER_BASE64_END")'
       - run: python3 studio workstation --help
