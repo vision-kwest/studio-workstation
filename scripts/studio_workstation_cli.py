@@ -66,6 +66,39 @@ def gpu_release_preflight(args):
             raise ValueError("GPU release object version mismatch: " + name)
 
 
+def gpu_ready(stack, region):
+    """Read-only guest readiness via bounded SSM diagnostics; no secrets."""
+    import time
+    iid = instance_id(stack, region)
+    commands = [
+        "set -e",
+        "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
+        "systemctl is-active gdm3 dcvserver",
+        "dcv describe-session console",
+        "nvidia-smi -L | grep -q 'Tesla T4'",
+        "pgrep -x Xorg",
+        "DISPLAY=:0 XAUTHORITY=/run/user/119/gdm/Xauthority __GLX_VENDOR_LIBRARY_NAME=nvidia glxinfo -B | grep -q 'OpenGL renderer string: Tesla T4'",
+    ]
+    response = aws(region, "ssm", "send-command", "--instance-ids", iid,
+                   "--document-name", "AWS-RunShellScript",
+                   "--parameters", json.dumps({"commands": commands, "executionTimeout": ["45"]}),
+                   "--timeout-seconds", "60", "--comment", "Studio GPU readiness: no credentials")
+    cid = response["Command"]["CommandId"]
+    for _ in range(18):
+        time.sleep(5)
+        try:
+            result = aws(region, "ssm", "get-command-invocation",
+                         "--command-id", cid, "--instance-id", iid)
+        except subprocess.CalledProcessError:
+            continue
+        if result["Status"] == "Success":
+            print("GPU READY: RES, GDM, DCV, Xorg and Tesla T4 OpenGL")
+            return
+        if result["Status"] in ("Failed", "Cancelled", "TimedOut"):
+            raise ValueError("GPU readiness failed: " + result.get("StandardErrorContent", "")[-1200:])
+    raise ValueError("GPU readiness timed out; inspect SSM and RES bootstrap logs")
+
+
 def command(args):
     if args.action == "create":
         if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9-]{0,127}", args.stack):
@@ -120,6 +153,9 @@ def command(args):
             run(deploy, capture=False)
             print(json.dumps(describe(args.stack, args.region), indent=2))
         return
+    if args.action == "check-ready":
+        gpu_ready(args.stack, args.region)
+        return
     if args.action == "status":
         print(json.dumps(describe(args.stack, args.region), indent=2))
         return
@@ -168,7 +204,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="studio workstation",
                                 description="Validated CPU RES workstation lifecycle wrapper")
     sub = p.add_subparsers(dest="action", required=True)
-    for action in ("create", "status", "start", "stop", "connect", "destroy"):
+    for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready"):
         s = sub.add_parser(action)
         s.add_argument("--stack", default=DEFAULT_STACK if action != "create" else None,
                        required=action == "create")
