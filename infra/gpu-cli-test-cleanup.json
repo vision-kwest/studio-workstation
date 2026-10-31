@@ -168,7 +168,7 @@
                     "logs:PutLogEvents"
                   ],
                   "Resource": {
-                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CleanupFunction}:*"
+                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/studio-gpu-cli-cleanup-${TestStack}:*"
                   }
                 }
               ]
