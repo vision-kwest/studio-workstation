@@ -79,6 +79,28 @@ def main():
                     {"Key":"StudioStack","Value":a.test_stack}]
             instance["Tags"].extend(tags)
             template["Resources"]["WorkstationSG"]["Properties"]["Tags"] = list(tags)
+            # EC2 instance tags do NOT automatically tag its root EBS volume.
+            # Launch-time volume TagSpecifications persist even if EC2 terminates
+            # before the first independent cleanup invocation.
+            template["Resources"]["CleanupVolumeTagLaunchTemplate"] = {
+                "Type": "AWS::EC2::LaunchTemplate",
+                "Properties": {
+                    "LaunchTemplateData": {
+                        "TagSpecifications": [{
+                            "ResourceType": "volume",
+                            "Tags": list(tags),
+                        }]
+                    },
+                    "TagSpecifications": [{
+                        "ResourceType": "launch-template",
+                        "Tags": list(tags),
+                    }],
+                },
+            }
+            instance["LaunchTemplate"] = {
+                "LaunchTemplateId": {"Ref": "CleanupVolumeTagLaunchTemplate"},
+                "Version": {"Fn::GetAtt": ["CleanupVolumeTagLaunchTemplate", "LatestVersionNumber"]},
+            }
     elif a.cleanup_token:
         raise ValueError("cleanup scope only supported for GPU")
     elif a.lifecycle != "temporary":
