@@ -34,11 +34,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_task7_efs_skip.py -v
+          python3 -m unittest discover -s tests -p test_task7_xorg_fixes.py -v
           python3 tests/test_res_overlay_archives.py /tmp/res-original
           python3 runtime/build_res_overlay.py --input /tmp/res-original/installation-scripts.tar.gz --output dist/task7/installation-scripts.tar.gz
           python3 runtime/build_res_overlay.py --input /tmp/res-original/virtual-desktop.tar.gz --output dist/task7/virtual-desktop.tar.gz
-          echo '12d103a69e03697d8eea75fc39a770a059b684d5aaecbef8448a679d0227a2db  dist/task7/installation-scripts.tar.gz' | sha256sum -c -
-          echo 'cb439f3bbdbfc527cf8b07385cd8988bd66a71ab802a3872b84391dc3a3daf08  dist/task7/virtual-desktop.tar.gz' | sha256sum -c -
+          echo '4bae0c946041731da6ab3b94f986fa3e29275b0fed43b96fda0a14bfc4834452  dist/task7/installation-scripts.tar.gz' | sha256sum -c -
+          echo 'e0a1bf9b493341f74fe152d97d4701ee3ed27d90333e63f5134fccbb6b065471  dist/task7/virtual-desktop.tar.gz' | sha256sum -c -
       - name: Configure temporary GitHub OIDC credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -48,7 +49,7 @@ jobs:
       - name: Upload exact objects and verify S3 readback
         run: |
           set -euo pipefail
-          prefix='s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-efsfix-aab7a466/res-2026.06'
+          prefix='s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-xorgfix-6a6bba9/res-2026.06'
           for name in installation-scripts.tar.gz virtual-desktop.tar.gz; do
             aws s3 cp "dist/task7/$name" "$prefix/$name" --sse AES256 --no-progress
             aws s3 cp "$prefix/$name" "/tmp/task7-$name" --no-progress
