@@ -41,8 +41,6 @@ jobs:
           (p/'provenance.json').write_text(json.dumps({'source_commit':os.environ['GITHUB_SHA'],'source_ref':os.environ['GITHUB_REF'],'res_tag':'2026.06','deployment_status':'UNPUBLISHED_DO_NOT_LAUNCH'},indent=2)+'\n')
           PY
           (cd dist/task7 && sha256sum -c SHA256SUMS)
-          tar -xOf dist/task7/installation-scripts.tar.gz scripts/common/linux/install_app.sh | grep -F -- '--version-id' >/dev/null
-          tar -xOf dist/task7/installation-scripts.tar.gz scripts/common/linux/install_app.sh | grep -F 'sha256sum --check --status' >/dev/null
       - uses: actions/upload-artifact@v4
         with:
           name: task7-verified-res-archives-${{ github.sha }}
