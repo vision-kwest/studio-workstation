@@ -5,6 +5,7 @@ A stack must carry StudioCleanupToken=<token>; EC2 and EBS cleanup requires
 the same token. Never enumerate or delete arbitrary account resources.
 """
 import os
+from datetime import datetime, timezone
 
 ACTIVE = {"CREATE_IN_PROGRESS", "UPDATE_IN_PROGRESS", "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS",
           "UPDATE_ROLLBACK_IN_PROGRESS", "UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS",
@@ -108,5 +109,8 @@ def handler(event, context):
     """Requires a dedicated scheduled invocation; no client-provided arbitrary scope."""
     stack = os.environ["STUDIO_TEST_STACK"]
     token = os.environ["STUDIO_CLEANUP_TOKEN"]
+    deadline = datetime.fromisoformat(os.environ["STUDIO_NOT_BEFORE_UTC"].replace("Z", "+00:00"))
+    if datetime.now(timezone.utc) < deadline:
+        return {"complete": False, "reason": "deadline not reached"}
     import boto3
     return reconcile(boto3.client("cloudformation"), boto3.client("ec2"), stack, token)
