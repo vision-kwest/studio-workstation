@@ -114,3 +114,13 @@ Offline test command:
 ```bash
 python3 -m unittest discover -s tests -p test_gpu_cli_guard_infra.py -v
 ```
+
+## Task 6 read-only verification (2026-10-31)
+
+AWS `DescribeImages` in us-east-1 confirmed AMI `ami-027c98f85b155c2ac` available and owned by `401233741942`. S3 `HeadObject` for both pinned object versions and both current keys confirmed exact matching version IDs: installation scripts `dlOKXdRAEJqpeNZNBotj87q0bdNlI5VC` (42,537 bytes), virtual desktop `nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53` (426,437 bytes). This is not a SHA-256 integrity check; the bootstrap still references unversioned URIs and a race after preflight remains possible.
+
+AWS CloudFormation `ValidateTemplate` succeeded for the **exact committed guard JSON**. A second `ValidateTemplate` succeeded for a **structurally reconstructed scoped workstation template** with placeholder user data; this is not validation of the exact renderer output. The actual rendered GPU user-data and GPU parameter overrides must be validated separately before deployment. ValidateTemplate is read-only and cannot establish runtime property compatibility or IAM behavior.
+
+Scoped GPU CLI now rejects public `0.0.0.0/0` ingress, requires a guard-compatible stack name and permits LaunchTemplate in the scoped destroy allowlist. Unscoped legacy CLI defaults remain unchanged. The acceptance operator must explicitly choose a restricted IPv4 CIDR (prefer a single approved client /32), and approve the exact temporary TCP 8443 rule; no live ingress was opened.
+
+Task 6 CLI test run [GitHub Actions #41251353576](https://github.com/vision-kwest/studio-workstation/actions/runs/41251353576) passed 64 offline tests (20 CLI, 8 GPU, 28 cleanup, 8 guard). Still **NO-GO** for deployment until exact rendered template validation, IAM simulation, root EBS tagging behavior, and Scheduler delivery-failure monitoring are resolved.
