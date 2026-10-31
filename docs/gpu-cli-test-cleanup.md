@@ -9,8 +9,13 @@ Choose a unique stack `studio-gpu-cli-<unique>` and a random, nonsecret
 12–64 character lowercase token. Render the GPU CLI with
 `--cleanup-token TOKEN`; it tags the CloudFormation stack, EC2 instance and
 security group with both `StudioCleanupToken` and `StudioStack`.
-The cleanup reconciler tags any root EBS volume it finds while the instance
-still exists, **before** requesting stack deletion.
+For the scoped acceptance-test variant, the renderer now creates a dedicated
+CloudFormation-managed EC2 LaunchTemplate containing a volume TagSpecification.
+EC2 applies the two ownership tags to the root EBS volume **at launch**, before
+the cleanup Lambda's first invocation. The LaunchTemplate itself receives the
+same tags. The reconciler's subsequent volume tagging is supplementary, not
+the primary provenance mechanism. This adds a third CloudFormation resource
+(LaunchTemplate) that must be included in the scoped test teardown review.
 
 Before CLI create, separately deploy a dedicated Lambda execution role,
 the code in `scripts/gpu_cli_test_cleanup.py`, and a recurring EventBridge
@@ -44,11 +49,14 @@ scope tags. After each operation, run another invocation to confirm absence.
 - A stack that remains indefinitely CREATE_IN_PROGRESS or a volume that
   remains attached will require operator intervention. This code deliberately
   does not force-delete unknown CloudFormation resources.
-- If EC2 is terminated before the first EBS-tagging pass, the retained
-  volume can lose its provenance. **Before launch, prove that the root
-  volume receives cleanup tags at creation time or establish a separate
-  independent inventory of the volume ID.** The present tagging-on-first-run
-  design alone does not guarantee that failure case.
+- **Before deployment**, verify that EC2 applies the LaunchTemplate volume
+  TagSpecification to the root EBS volume with the chosen AMI and that the
+  CloudFormation template accepts the LaunchTemplate/Instance property mix.
+  CloudFormation ValidateTemplate alone does not prove EC2 launch behavior.
+- The current CLI destroy guard accepts only Instance and SecurityGroup
+  resources; it must be updated to allow the scoped LaunchTemplate in Task 3.
+  The independent reconciler must also verify the LaunchTemplate is gone
+  before reporting completion. Do not deploy this Task 2 intermediate state.
 - Test the exact IAM policy, Scheduler and Lambda permissions, stack
   status transitions and rollback behavior before treating this as a
   fail-closed mechanism. The offline tests exercise mocks, not AWS behavior.
