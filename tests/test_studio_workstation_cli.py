@@ -83,6 +83,13 @@ class StudioCliTests(unittest.TestCase):
         run.assert_not_called()
 
     @mock.patch.object(cli, "run")
+    def test_cpu_rejects_gpu_instance_type(self, run):
+        with self.assertRaises(SystemExit):
+            self.invoke(["create", "--stack", "studio-cpu-test", "--profile", "cpu",
+                         "--instance-type", "g4dn.xlarge"])
+        run.assert_not_called()
+
+    @mock.patch.object(cli, "run")
     def test_cpu_dry_run_does_not_select_gpu(self, run):
         self.invoke(["create", "--stack", "studio-cpu-test", "--profile", "cpu"])
         render = run.call_args_list[0].args[0]
