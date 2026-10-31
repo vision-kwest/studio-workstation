@@ -1,5 +1,8 @@
 name: Studio CLI tests
 on:
+  push:
+    branches:
+      - feature/issue-46-gpu-cli
   pull_request:
     paths:
       - 'studio'
