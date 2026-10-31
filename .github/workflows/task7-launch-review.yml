@@ -47,8 +47,9 @@ jobs:
           assert t['Parameters']['InstanceType']['AllowedValues']==['g4dn.xlarge']
           assert all(rule['FromPort']==8443 and rule['ToPort']==8443 for rule in t['Resources']['WorkstationSG']['Properties']['SecurityGroupIngress'])
           assert not any(rule['FromPort']==22 for rule in t['Resources']['WorkstationSG']['Properties']['SecurityGroupIngress'])
-          assert 'Task7' not in {tag['Key'] for tag in a['Tags']}, 'Launcher must add Task7=PR61 tag before launch'
-          print('PASS: offline GPU launch template checks; instance tag and external schedule are required before launch')
+          tags={tag['Key']:tag['Value'] for tag in a['Tags']}
+          assert tags['Task7']=='PR61' and tags['Issue']=='60'
+          print('PASS: offline GPU launch template checks; external schedule still required before launch')
           PY
       - uses: actions/upload-artifact@v4
         with:
