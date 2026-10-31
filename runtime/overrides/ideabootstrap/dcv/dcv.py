@@ -54,6 +54,8 @@ def _secure_standalone_permissions_file(path: str) -> None:
     """Allow only root and the local DCV group to read the console policy."""
     dcv_gid = grp.getgrnam("dcv").gr_gid
     dcv_uid = pwd.getpwnam("dcv").pw_uid
+    if os.path.islink(path) or not stat.S_ISREG(os.stat(path, follow_symlinks=False).st_mode):
+        raise RuntimeError("DCV permissions path must be a regular, non-symlink file")
     os.chown(path, 0, dcv_gid)
     os.chmod(path, 0o640)
 
