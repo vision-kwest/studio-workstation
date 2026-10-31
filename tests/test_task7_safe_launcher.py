@@ -16,7 +16,7 @@ class SafeLauncherTests(unittest.TestCase):
             "InstanceInitiatedShutdownBehavior":"terminate",
             "BlockDeviceMappings":[{"Ebs":{"DeleteOnTermination":True}}],
             "Tags":[{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}],
-            "UserData":{"Fn::Base64":{"Fn::Sub":"STUDIO_STANDALONE=true -g NVIDIA s3://x/releases/task7-pr61-dpms-preinstalled-d5b6679/res-2026.06/installation-scripts.tar.gz virtual-desktop.tar.gz"}}}}}}
+            "UserData":{"Fn::Base64":{"Fn::Sub":"STUDIO_STANDALONE=true -g NVIDIA s3://x/releases/task7-pr61-postreboot-a8ec326/res-2026.06/installation-scripts.tar.gz virtual-desktop.tar.gz"}}}}}}
         self.ec2=Mock()
         self.ec2.create_security_group.return_value={"GroupId":"sg-test"}
         self.ec2.run_instances.return_value={"Instances":[{"InstanceId":"i-test"}]}
