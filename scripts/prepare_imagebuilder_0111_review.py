@@ -123,12 +123,28 @@ def generate(client, output):
     (output / "source-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 
+class SnapshotClient:
+    """Offline replay of the exact read-only live AWS Image Builder snapshot."""
+    def __init__(self, path):
+        self.snapshot = json.loads(Path(path).read_text())
+
+    def get_image_recipe(self, imageRecipeArn):
+        if imageRecipeArn != RECIPE:
+            raise ValueError("Unexpected image recipe ARN")
+        return {"imageRecipe": self.snapshot["imageRecipe"]}
+
+    def get_component(self, componentBuildVersionArn):
+        return {"component": {"data": self.snapshot["components"][componentBuildVersionArn]}}
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--output-dir", type=Path, required=True)
+    p.add_argument("--snapshot", type=Path, help="Replay exact live read-only AWS snapshot without credentials")
     args = p.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    manifest = generate(boto3.client("imagebuilder", region_name=REGION), args.output_dir)
+    client = SnapshotClient(args.snapshot) if args.snapshot else boto3.client("imagebuilder", region_name=REGION)
+    manifest = generate(client, args.output_dir)
     print(json.dumps(manifest, indent=2))
     print("Review only: no AWS resource was registered or built.")
 
