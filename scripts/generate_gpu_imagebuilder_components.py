@@ -105,8 +105,17 @@ grep -qi nvidia /etc/X11/xorg.conf
     dcv["name"]="studio-gpu-dcv-res-stage"
     dcv["description"]="CPU DCV stage plus original RES GPU nice-dcv-gl package"
     src,commands=script(dcv,"InstallDCV")
-    src=replace_once(src,'xdcv=(packages/nice-xdcv_*_amd64.ubuntu2404.deb)','xdcv=(packages/nice-xdcv_*_amd64.ubuntu2404.deb)\n              gl=(packages/nice-dcv-gl*_amd64.ubuntu2404.deb)')
-    src=replace_once(src,'test "${#xdcv[@]}" -eq 1','test "${#xdcv[@]}" -eq 1\n              test "${#gl[@]}" -eq 1')
+    src=replace_once(src,'xdcv=(packages/nice-xdcv_*_amd64.ubuntu2404.deb)',
+        'xdcv=(packages/nice-xdcv_*_amd64.ubuntu2404.deb)\\n'
+        '              gl_candidates=(packages/nice-dcv-gl*_amd64.ubuntu2404.deb)\\n'
+        '              gl=()\\n'
+        '              for candidate in "${gl_candidates[@]}"; do\\n'
+        '                package_name=$(dpkg-deb -f "$candidate" Package)\\n'
+        '                if [[ "$package_name" == "nice-dcv-gl" ]]; then gl+=("$candidate"); fi\\n'
+        '              done')
+    src=replace_once(src,'test "${#xdcv[@]}" -eq 1',
+        'test "${#xdcv[@]}" -eq 1\\n'
+        '              test "${#gl[@]}" -eq 1')
     src=replace_once(src,'"./${xdcv[0]}"','"./${xdcv[0]}" "./${gl[0]}"')
     commands[0]=src
     smoke=copy.deepcopy(docs[3])
