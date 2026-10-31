@@ -26,6 +26,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -s tests -p test_task7_efs_skip.py -v
           python3 -m unittest discover -s tests -p test_task7_xorg_fixes.py -v
+          python3 -m unittest discover -s tests -p test_task7_dcv_permissions.py -v
           python3 tests/test_res_overlay_archives.py /tmp/res-original
           python3 runtime/build_res_overlay.py --input /tmp/res-original/installation-scripts.tar.gz --output dist/task7/installation-scripts.tar.gz
           python3 runtime/build_res_overlay.py --input /tmp/res-original/virtual-desktop.tar.gz --output dist/task7/virtual-desktop.tar.gz
