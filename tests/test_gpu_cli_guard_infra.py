@@ -60,6 +60,28 @@ class GuardInfrastructureTests(unittest.TestCase):
         self.assertTrue(re.fullmatch(pattern, "studio-gpu-cli-test1"))
         self.assertFalse(re.fullmatch(pattern, "studio-gpu-cli-" + "x" * 40))
 
+    def test_cloudformation_delete_only_exact_test_stack(self):
+        statements = TEMPLATE["Resources"]["CleanupRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+        delete = next(x for x in statements if x["Sid"] == "DeleteOnlyNamedStack")
+        self.assertEqual(delete["Action"], "cloudformation:DeleteStack")
+        self.assertIn(":stack/${TestStack}/*", delete["Resource"]["Fn::Sub"])
+        self.assertNotIn("cloudformation:*", json.dumps(statements))
+
+    def test_scheduler_cannot_invoke_other_functions(self):
+        statements = TEMPLATE["Resources"]["ScheduleRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+        self.assertEqual(len(statements), 1)
+        self.assertEqual(statements[0]["Resource"], {"Fn::GetAtt": ["CleanupFunction", "Arn"]})
+        self.assertEqual(statements[0]["Action"], "lambda:InvokeFunction")
+
+    def test_lambda_cannot_create_or_tag_ec2(self):
+        statements = TEMPLATE["Resources"]["CleanupRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+        actions = [a for st in statements for a in
+                   (st["Action"] if isinstance(st["Action"], list) else [st["Action"]])]
+        self.assertNotIn("ec2:CreateTags", actions)
+        self.assertNotIn("ec2:RunInstances", actions)
+        self.assertNotIn("iam:PassRole", actions)
+        self.assertNotIn("*", actions)
+
     def test_deadline_requires_timezone(self):
         # Naive deadline is rejected before any boto3 client is created.
         with patch.dict("os.environ", {"STUDIO_TEST_STACK": "studio-gpu-cli-test",
