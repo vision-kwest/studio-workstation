@@ -99,3 +99,18 @@ The reconciler now checks both ownership tags on each discovered instance, volum
 **Deployment blockers:** The CLI destroy resource allowlist must include the scoped Launch Template. Task 4 must add tightly scoped EC2 DescribeLaunchTemplates/DeleteLaunchTemplate IAM permissions and independently monitored scheduling. Creation-time root EBS tag behavior must be verified against EC2. A tag-filtered inventory cannot detect untagged orphans; capture expected resource identities independently before live acceptance. A stuck CREATE_IN_PROGRESS or repeated DELETE_FAILED requires escalation, not a success result.
 
 Offline mock suite: `python3 -m unittest discover -s tests -p test_gpu_cli_test_cleanup.py -v` (21 scenarios). AWS CloudFormation and Lambda have not been exercised.
+
+## Task 4 — independently scheduled guard (prepared, NOT DEPLOYED)
+
+`infra/gpu-cli-test-cleanup.json` is a **separate** CloudFormation template for the guard. It contains a Lambda, a dedicated execution role, a separate Scheduler invoke role, a five-minute EventBridge Scheduler schedule, a log group, an SNS email subscription, and a CloudWatch Lambda Errors alarm. It contains **no EC2 workstation or Image Builder resources**. It requires an immutable, separately packaged S3 Lambda ZIP (`gpu_cli_test_cleanup.py` at ZIP root), including an S3 object version. No packaging/upload/deployment has occurred.
+
+Before any live acceptance test, the operator must choose a unique test stack name satisfying the guard template's shorter pattern, unique cleanup token, explicit UTC deadline, immutable ZIP version, and confirmed alert email subscription. Deploy and verify the guard **first**, in a different CloudFormation stack. Ensure its stack is not deleted when the workstation is deleted. The Scheduler role trusts the scheduler service with exact source schedule ARN and account, and can invoke only the guard Lambda. Lambda may describe account inventory, but destructive EC2 calls require both matching resource tags; DeleteStack is limited to the one named stack ARN. Lambda has no EC2 CreateTags permission. The function checks stack/resource tags in code as an additional defense.
+
+Once the UTC deadline passes, any incomplete reconciliation raises an exception; the Lambda Errors alarm and Scheduler retry policy make the failure observable. The CloudWatch alarm also treats missing data as breaching. Email subscriptions require recipient confirmation. Pending work is not reported as successful. Keep schedule, function, logs and alarm until a separate final inventory verifies absence. Manual escalation is mandatory if CREATE_IN_PROGRESS, DELETE_FAILED, or resource attachment remains stuck.
+
+**Limitations and approval gates:** The JSON template passed offline JSON structural checks, not AWS ValidateTemplate or IAM simulation. CloudFormation DeleteStack can act on resources owned by the target stack; its stack ARN scope alone does not constrain each downstream service action. Confirm the stack contains only the approved resources and that no other principal can mutate the tagged resource set. Scheduler delivery failures are not yet independently alarmed via a DLQ; review whether a dedicated SQS DLQ and alarm is required before deployment. Confirm that the exact `ec2:ResourceTag` IAM conditions and resource ARNs are accepted in AWS, and that the role is not overprivileged. The new Launch Template still requires CLI destroy allowlist integration, and volume provenance must be verified. This template is **not authorization to deploy**.
+
+Offline test command:
+```bash
+python3 -m unittest discover -s tests -p test_gpu_cli_guard_infra.py -v
+```
