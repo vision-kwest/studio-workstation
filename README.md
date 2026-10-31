@@ -17,11 +17,11 @@ A lightweight AWS Ubuntu 24.04 workstation system using **EC2 Image Builder**, *
 |---|---|
 | CPU Ubuntu 24.04 + DCV | **Validated**: fresh deployment, local login, stop/start reconnection |
 | CPU Image Builder | **Validated**: staged GDM-first CPU recipe 0.5.0 |
-| GPU Image Builder | **In progress**: GPU recipe 0.1.3/1 build initiated; outcome not yet established |
-| GPU workstation DCV login | **Not yet validated** |
+| GPU Image Builder | **Validated**: recipe 0.1.11/1 built, tested and distributed; AMI `ami-027c98f85b155c2ac` available in us-east-1 |
+| GPU workstation DCV login | **Validated**: RES automatic console, local `workstation` password login and reconnect after reboot |
 | Trusted public TLS hostname | Deferred |
 
-The CPU and GPU AMIs are **separate**. Do not deploy a CPU AMI as a GPU workstation. A registered Image Builder recipe or running build is not proof that a GPU AMI works.
+The CPU and GPU AMIs are **separate**. Do not deploy a CPU AMI as a GPU workstation. The GPU AMI was validated in a separate live `g4dn.xlarge` acceptance test; see [Issue #60](https://github.com/vision-kwest/studio-workstation/issues/60). The GPU Image Builder pipeline remains disabled and still references recipe 0.1.10; the successful 0.1.11/1 build was user-initiated directly.
 
 ## Quick start and operations
 
@@ -32,10 +32,10 @@ The repository includes the RES-derived runtime release tooling and CloudFormati
 ## Security and cost
 
 - Do not commit passwords, private keys, AWS credentials, or NVIDIA driver binaries.
-- Public DCV TCP 8443 exposure is configurable; restrict ingress when feasible. The current browser certificate may be untrusted.
+- Public DCV TCP 8443 was opened only for a time-limited interactive acceptance test and removed afterward. Restrict ingress by default; future secure access-from-anywhere is tracked in [Issue #62](https://github.com/vision-kwest/studio-workstation/issues/62). Verify the DCV TLS certificate fingerprint before accepting a self-signed certificate.
 - EC2 compute costs stop when a workstation is stopped, but EBS volumes may continue to incur charges.
 - Image Builder GPU builds incur temporary GPU compute and storage charges.
-- Root EBS `DeleteOnTermination=false` can retain storage after stack deletion; audit retained volumes.
+- The published GPU AMI source snapshot is currently unencrypted; temporary test roots were encrypted with `DeleteOnTermination=true`. Audit production snapshot encryption and retained volumes.
 
 ## Upstream RES 2026.06 references
 
