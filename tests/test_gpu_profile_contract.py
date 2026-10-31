@@ -1,5 +1,8 @@
 """Offline GPU profile contracts: reuse original RES NVIDIA path, no AWS writes."""
 import json
+import tempfile
+from unittest import mock
+from render_workstation import main as render_main
 import sys
 import unittest
 from pathlib import Path
@@ -28,6 +31,35 @@ class GpuProfileContracts(unittest.TestCase):
         source=(ROOT/"runtime/render_workstation.py").read_text()
         self.assertIn('["g4dn.xlarge"]',source)
         self.assertIn('a.profile == "gpu"',source)
+    def test_persistent_gpu_template_is_stop_start_safe(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "gpu.json"
+            with mock.patch.object(sys, "argv", ["render_workstation.py", "--profile", "gpu",
+                   "--lifecycle", "persistent", "--bucket", "studio-release-bucket",
+                   "--prefix", "releases/task7-pr61-postreboot-a8ec326/res-2026.06",
+                   "--output", str(out)]):
+                render_main()
+            t = json.loads(out.read_text())
+            p = t["Resources"]["Workstation"]["Properties"]
+            self.assertEqual(p["InstanceInitiatedShutdownBehavior"], "stop")
+            self.assertFalse(p["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
+            self.assertTrue(p["BlockDeviceMappings"][0]["Ebs"]["Encrypted"])
+            self.assertEqual(t["Parameters"]["InstanceType"]["AllowedValues"], ["g4dn.xlarge"])
+            self.assertNotIn("Task7", {tag["Key"] for tag in p["Tags"]})
+            self.assertIn("-g NVIDIA", p["UserData"]["Fn::Base64"]["Fn::Sub"])
+
+    def test_default_gpu_renderer_preserves_task7_temporary_mode(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "gpu.json"
+            with mock.patch.object(sys, "argv", ["render_workstation.py", "--profile", "gpu",
+                   "--bucket", "studio-release-bucket", "--prefix", "releases/test/res-2026.06",
+                   "--output", str(out)]):
+                render_main()
+            p = json.loads(out.read_text())["Resources"]["Workstation"]["Properties"]
+            self.assertEqual(p["InstanceInitiatedShutdownBehavior"], "terminate")
+            self.assertTrue(p["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
+            self.assertIn("Task7", {tag["Key"] for tag in p["Tags"]})
+
     def test_invalid_profile_fails(self):
         with self.assertRaises(ValueError):
             render("studio-release-bucket","releases/v0.1.3/res-2026.06","workstation","unknown")
