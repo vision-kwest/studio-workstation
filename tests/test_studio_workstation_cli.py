@@ -59,5 +59,80 @@ class StudioCliTests(unittest.TestCase):
                          "--client-cidr", "999.0.0.1/32"])
         run.assert_not_called()
 
+    @mock.patch.object(cli, "run")
+    def test_gpu_dry_run_uses_validated_ami_and_persistent_renderer(self, run):
+        self.invoke(["create", "--stack", "studio-gpu-test", "--profile", "gpu"])
+        calls = [str(c.args[0]) for c in run.call_args_list]
+        self.assertTrue(any("--profile', 'gpu'" in c and "--lifecycle', 'persistent'" in c for c in calls))
+        self.assertTrue(any(cli.GPU_PREFIX in c for c in calls))
+        self.assertTrue(any("ImageId=" + cli.GPU_AMI in c for c in calls) is False)
+        self.assertFalse(any("cloudformation', 'deploy'" in c for c in calls))
+
+    @mock.patch.object(cli, "run")
+    def test_gpu_rejects_cpu_ami_before_aws(self, run):
+        with self.assertRaises(SystemExit):
+            self.invoke(["create", "--stack", "studio-gpu-test", "--profile", "gpu",
+                         "--image-id", cli.DEFAULT_AMI])
+        run.assert_not_called()
+
+    @mock.patch.object(cli, "run")
+    def test_gpu_rejects_wrong_instance_type(self, run):
+        with self.assertRaises(SystemExit):
+            self.invoke(["create", "--stack", "studio-gpu-test", "--profile", "gpu",
+                         "--instance-type", "m7i.large"])
+        run.assert_not_called()
+
+    @mock.patch.object(cli, "run")
+    def test_cpu_dry_run_does_not_select_gpu(self, run):
+        self.invoke(["create", "--stack", "studio-cpu-test", "--profile", "cpu"])
+        render = run.call_args_list[0].args[0]
+        self.assertNotIn("--profile", render)
+        self.assertNotIn("--lifecycle", render)
+
+    @mock.patch.object(cli, "aws")
+    def test_gpu_preflight_checks_exact_s3_versions(self, aws):
+        aws.side_effect = [
+            {"Images": [{"State": "available", "OwnerId": "401233741942"}]},
+            {"VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]},
+            {"VersionId": cli.GPU_VERSIONS["virtual-desktop.tar.gz"]},
+        ]
+        from types import SimpleNamespace
+        cli.gpu_release_preflight(SimpleNamespace(region="us-east-1", bucket=cli.DEFAULT_BUCKET))
+        self.assertEqual(aws.call_count, 3)
+
+    @mock.patch.object(cli, "aws")
+    def test_gpu_preflight_fails_closed_on_wrong_version(self, aws):
+        aws.side_effect = [
+            {"Images": [{"State": "available", "OwnerId": "401233741942"}]},
+            {"VersionId": "unexpected"},
+        ]
+        from types import SimpleNamespace
+        with self.assertRaises(ValueError):
+            cli.gpu_release_preflight(SimpleNamespace(region="us-east-1", bucket=cli.DEFAULT_BUCKET))
+
+    @mock.patch.object(cli, "instance_id", return_value=INSTANCE)
+    @mock.patch.object(cli, "aws")
+    @mock.patch("time.sleep")
+    def test_gpu_ready_checks_ssm_success(self, sleep, aws, iid):
+        aws.side_effect = [
+            {"Command": {"CommandId": "test-command"}},
+            {"Status": "Success"},
+        ]
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.gpu_ready(STACK, "us-east-1")
+        self.assertEqual(aws.call_count, 2)
+
+    @mock.patch.object(cli, "instance_id", return_value=INSTANCE)
+    @mock.patch.object(cli, "aws")
+    @mock.patch("time.sleep")
+    def test_gpu_ready_fails_on_ssm_failure(self, sleep, aws, iid):
+        aws.side_effect = [
+            {"Command": {"CommandId": "test-command"}},
+            {"Status": "Failed", "StandardErrorContent": "DCV not ready"},
+        ]
+        with self.assertRaises(ValueError):
+            cli.gpu_ready(STACK, "us-east-1")
+
+
 if __name__ == "__main__":
     unittest.main()
