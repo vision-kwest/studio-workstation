@@ -13,9 +13,9 @@
     },
     "ClientCidr": {
       "Type": "String",
-      "Default": "127.0.0.1/32",
+      "Default": "0.0.0.0/0",
       "AllowedPattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(?:[0-9]|[12][0-9]|3[0-2])$",
-      "Description": "Explicit trusted client IPv4 /32; default loopback is intentionally unusable"
+      "Description": "IPv4 CIDR permitted to connect to DCV TCP 8443; default 0.0.0.0/0 allows access from anywhere (use strong local credentials)"
     },
     "InstanceType": {
       "Type": "String",
@@ -80,8 +80,7 @@
         },
         "MetadataOptions": {
           "HttpTokens": "required",
-          "HttpEndpoint": "enabled",
-          "HttpPutResponseHopLimit": 2
+          "HttpEndpoint": "enabled"
         },
         "UserData": "RENDER_OFFLINE",
         "BlockDeviceMappings": [
@@ -93,7 +92,7 @@
               },
               "VolumeType": "gp3",
               "Encrypted": true,
-              "DeleteOnTermination": true
+              "DeleteOnTermination": false
             }
           }
         ],
@@ -102,8 +101,7 @@
             "Key": "Name",
             "Value": "studio-workstation-res-cpu"
           }
-        ],
-        "InstanceInitiatedShutdownBehavior": "terminate"
+        ]
       }
     }
   },
