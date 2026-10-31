@@ -101,17 +101,30 @@ class StudioCliTests(unittest.TestCase):
         aws.side_effect = [
             {"Images": [{"State": "available", "OwnerId": "401233741942"}]},
             {"VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]},
+            {"VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]},
+            {"VersionId": cli.GPU_VERSIONS["virtual-desktop.tar.gz"]},
             {"VersionId": cli.GPU_VERSIONS["virtual-desktop.tar.gz"]},
         ]
         from types import SimpleNamespace
         cli.gpu_release_preflight(SimpleNamespace(region="us-east-1", bucket=cli.DEFAULT_BUCKET))
-        self.assertEqual(aws.call_count, 3)
+        self.assertEqual(aws.call_count, 5)
 
     @mock.patch.object(cli, "aws")
     def test_gpu_preflight_fails_closed_on_wrong_version(self, aws):
         aws.side_effect = [
             {"Images": [{"State": "available", "OwnerId": "401233741942"}]},
             {"VersionId": "unexpected"},
+        ]
+        from types import SimpleNamespace
+        with self.assertRaises(ValueError):
+            cli.gpu_release_preflight(SimpleNamespace(region="us-east-1", bucket=cli.DEFAULT_BUCKET))
+
+    @mock.patch.object(cli, "aws")
+    def test_gpu_preflight_rejects_changed_latest_s3_object(self, aws):
+        aws.side_effect = [
+            {"Images": [{"State": "available", "OwnerId": "401233741942"}]},
+            {"VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]},
+            {"VersionId": "unexpected-latest"},
         ]
         from types import SimpleNamespace
         with self.assertRaises(ValueError):
