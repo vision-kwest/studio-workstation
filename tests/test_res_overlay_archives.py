@@ -16,6 +16,7 @@ EXPECTED={
         "scripts/virtual-desktop-host/linux/install.sh",
         "scripts/common/linux/install_app.sh",
         "scripts/dcv/linux/debian/dcv_server.sh",
+        "scripts/virtual-desktop-host/linux/install_post_reboot.sh",
     },
     "virtual-desktop.tar.gz":{
         "idea-bootstrap-lib.tar.gz",
@@ -49,7 +50,7 @@ def run(directory):
                 assert b"STUDIO_STANDALONE" in modified["scripts/common/linux/install_app.sh"]
                 assert b"install_post_reboot.sh" in modified["scripts/virtual-desktop-host/linux/install.sh"]
                 assert b"printf" in modified["scripts/dcv/linux/debian/dcv_server.sh"]
-                assert b"printf" in modified["scripts/dcv/linux/debian/dcv_server.sh"]
+                assert b"STUDIO_STANDALONE" in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
             else:
                 assert original.keys()==modified.keys()
                 for name in original:
