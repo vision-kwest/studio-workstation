@@ -128,6 +128,10 @@ def command(args):
                       "--output", str(template)]
             if gpu:
                 render.extend(["--profile", "gpu", "--lifecycle", "persistent"])
+                if args.cleanup_token:
+                    if not args.stack.startswith("studio-gpu-cli-") or not re.fullmatch(r"[a-z0-9-]{12,64}", args.cleanup_token):
+                        raise ValueError("Cleanup scope requires studio-gpu-cli-* stack and safe token")
+                    render.extend(["--cleanup-token", args.cleanup_token, "--test-stack", args.stack])
             print("Rendering:", " ".join(render), flush=True)
             run(render, capture=False)
             validate = ["aws", "cloudformation", "validate-template", "--template-body",
@@ -142,6 +146,8 @@ def command(args):
             deploy = ["aws", "cloudformation", "deploy", "--stack-name", args.stack,
                       "--template-file", str(template), "--region", args.region,
                       "--parameter-overrides", *parameters, "--no-fail-on-empty-changeset"]
+            if gpu and args.cleanup_token:
+                deploy.extend(["--tags", "StudioCleanupToken=" + args.cleanup_token, "StudioStack=" + args.stack])
             print("Stack:", args.stack, "Release:", args.version, "DCV ingress:", args.client_cidr, flush=True)
             if args.client_cidr == "0.0.0.0/0":
                 print("WARNING: DCV login will be publicly accessible on TCP 8443.", flush=True)
@@ -234,6 +240,7 @@ def main(argv=None):
             s.add_argument("--instance-type", choices=["m7i.large", "m7i.xlarge", "g4dn.xlarge"], default=None)
             s.add_argument("--disk-size", type=int, default=100)
             s.add_argument("--client-cidr", default="0.0.0.0/0")
+            s.add_argument("--cleanup-token", default=None, help="Unique scope for independently guarded GPU acceptance test")
         if action == "connect":
             s.add_argument("--ssm", action="store_true", help="Open administrative SSM session instead of printing DCV URL")
         if action == "destroy":
