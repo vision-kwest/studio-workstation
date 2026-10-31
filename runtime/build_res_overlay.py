@@ -43,7 +43,7 @@ def patch_post_reboot_dpms(raw):
       fi"""
     if raw.count(old) != 1:
         raise ValueError("Pinned RES post-reboot DCV install anchor changed")
-    return raw.replace(old, old + b"\\n" + fix)
+    return raw.replace(old, old + b"\n" + fix)
 
 
 def patch_xserver_dcv_access(raw):
