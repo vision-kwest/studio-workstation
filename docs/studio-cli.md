@@ -1,4 +1,4 @@
-# Studio Workstation CLI (CPU v0.1.3)
+# Studio Workstation CLI (CPU v0.1.3 + GPU RES 2026.06)
 
 Thin Python standard-library wrapper over the **existing** RES-derived CloudFormation
 renderer and AWS CLI. It does not replace RES bootstrap or introduce a control plane.
@@ -42,6 +42,55 @@ After provisioning, wait for original RES bootstrap and reboots to complete.
 Check `cloud-init status --long`, DCV `console`, SSM Online, and the
 RES application readiness log. Set the fresh local user password with
 `sudo passwd workstation` through SSM. This enrollment is not automated.
+
+## Create a GPU workstation (Issue #46)
+
+The GPU profile uses validated AMI `ami-027c98f85b155c2ac` in `us-east-1`,
+`g4dn.xlarge` and the exact RES 2026.06 derived archive prefix
+`releases/task7-pr61-postreboot-a8ec326/res-2026.06`. This is **not**
+`releases/v0.1.11/res-2026.06`. The CLI pins the two S3 object version IDs
+and verifies them with read-only AWS calls before deploying. The published
+SHA-256 hashes and acceptance evidence are in [runtime/README.md](../runtime/README.md).
+
+```bash
+# Offline render + CloudFormation validation; does not create EC2
+python3 studio workstation create --stack studio-gpu-review --profile gpu
+
+# Billable deployment: explicit stack confirmation required
+python3 studio workstation create --stack studio-gpu-review --profile gpu \
+  --yes --confirm-stack studio-gpu-review
+
+# After RES installation and reboots, verify readiness via SSM
+python3 studio workstation check-ready --stack studio-gpu-review
+
+# Administrative password enrollment, interactive (never in user-data)
+python3 studio workstation connect --stack studio-gpu-review --ssm
+# Within the SSM session: sudo passwd workstation
+python3 studio workstation connect --stack studio-gpu-review
+```
+
+GPU create renders a **persistent** CloudFormation instance: OS shutdown
+behavior `stop`, encrypted 100 GiB gp3, root EBS retained on termination
+(`DeleteOnTermination=false`), no Task 7 expiration tags or schedule.
+The original RES 2026.06 installer, Supervisor, Xorg and DCV console lifecycle
+are unchanged. A retained root volume may incur storage costs after stack
+deletion; audit and remove it explicitly when no longer needed.
+
+`check-ready` sends a read-only diagnostic command through SSM and checks
+RES READY semaphore, GDM/DCV services, console, Xorg and Tesla T4 OpenGL.
+It can fail while bootstrap is still in progress; retry after the RES setup
+reboots. It does not prove an actual interactive password login.
+
+**Security:** The CLI's existing `--client-cidr` default is public
+`0.0.0.0/0`, including for GPU. For a restricted deployment supply
+`--client-cidr YOUR_IP/32`. SSH remains closed. Trusted TLS and access
+from changing networks are tracked in issues #43 and #62.
+
+**Acceptance remaining:** The new persistent GPU CLI create/stop/start/destroy
+workflow has only offline regression coverage. Real GPU DCV reboot persistence
+was validated on the baked AMI, but EC2 **stop/start** still requires a
+separately approved live acceptance test. No new GPU deployment is implied
+by this documentation.
 
 ## Daily operation
 
