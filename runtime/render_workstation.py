@@ -47,6 +47,7 @@ set +a
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--profile",choices=["cpu","gpu"],default="cpu")
+    p.add_argument("--lifecycle",choices=["temporary","persistent"],default="temporary",help="GPU only; persistent enables stop/start")
     p.add_argument("--bucket",required=True)
     p.add_argument("--prefix",required=True)
     p.add_argument("--user",default="workstation")
@@ -64,7 +65,13 @@ def main():
         template["Parameters"]["InstanceType"]["Default"] = "g4dn.xlarge"
         template["Parameters"]["InstanceType"]["AllowedValues"] = ["g4dn.xlarge"]
         template["Resources"]["Workstation"]["Properties"]["Tags"][0]["Value"] = "studio-workstation-res-gpu"
-        instance["Tags"].extend([{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}])
+        if a.lifecycle == "persistent":
+            instance["InstanceInitiatedShutdownBehavior"] = "stop"
+            instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"] = False
+        else:
+            instance["Tags"].extend([{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}])
+    elif a.lifecycle != "temporary":
+        raise ValueError("persistent lifecycle is only supported for GPU")
     template["Resources"]["Workstation"]["Properties"]["UserData"]={"Fn::Base64":{"Fn::Sub":render(a.bucket,a.prefix,a.user,a.profile)}}
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(template,indent=2)+"\n")
