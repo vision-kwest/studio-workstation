@@ -104,7 +104,7 @@ def durable_inventory(ddb, table, cf, stack, token, info, instances, volumes, gr
             ExpressionAttributeNames={"#sid": "StackId"},
             ExpressionAttributeValues={":sid": {"S": stack_id}},
         )
-    return recorded
+    return recorded, bool(previous_id or stack_id)
 
 def verify_inventory(ec2, recorded, instances, volumes, groups, templates):
     observed = {
@@ -179,16 +179,20 @@ def reconcile(cf, ec2, stack, token, ddb=None, table=None):
     if ddb is not None:
         if not table:
             raise ValueError("Durable inventory table is required")
-        recorded = durable_inventory(ddb, table, cf, stack, token, info,
-                                     instances, volumes, groups, templates)
+        recorded, identity_seen = durable_inventory(
+            ddb, table, cf, stack, token, info,
+            instances, volumes, groups, templates)
         verify_inventory(ec2, recorded, instances, volumes, groups, templates)
-        # Never initiate stack deletion until all resource classes were
-        # inventoried, including the retained root EBS volume.
-        if info and info["StackStatus"] in DELETABLE and any(
-                not recorded[name] for name in INVENTORY_KEYS):
-            return {"complete": False, "reason": "durable inventory incomplete"}
-        if not info and any(not recorded[name] for name in INVENTORY_KEYS):
-            return {"complete": False, "reason": "durable inventory incomplete"}
+        # CloudFormation can fail before creating any EC2 or EBS resources.
+        # Never require an ID for a resource that was not observed or created.
+        # But if an instance ID exists, its retained root volume must be
+        # independently identified before we initiate stack deletion.
+        if recorded["Instances"] and not recorded["Volumes"]:
+            return {"complete": False, "reason": "root volume identity unverified"}
+        # No stack and no persisted stack identity is not evidence of cleanup:
+        # the guard may have started after a partial rollback.
+        if not info and not identity_seen:
+            return {"complete": False, "reason": "stack provenance unverified"}
 
     if info:
         state = info["StackStatus"]
