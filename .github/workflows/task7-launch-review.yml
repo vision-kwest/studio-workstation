@@ -29,7 +29,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/task7-review
-          python3 runtime/render_workstation.py --profile gpu --bucket studio-workstation-releases-401233741942-us-east-1 --prefix releases/task7-pr61-dcvperm-d4105cb/res-2026.06 --user workstation --output dist/task7-review/gpu-template.json
+          python3 runtime/render_workstation.py --profile gpu --bucket studio-workstation-releases-401233741942-us-east-1 --prefix releases/task7-pr61-dpms-preinstalled-d5b6679/res-2026.06 --user workstation --output dist/task7-review/gpu-template.json
           python3 - <<'PY'
           import json, pathlib
           p=pathlib.Path('dist/task7-review/gpu-template.json')
@@ -39,7 +39,7 @@ jobs:
           assert len(u.encode()) <= 16384
           assert 'RENDER_OFFLINE' not in u
           assert 'installation-scripts.tar.gz' in u and 'virtual-desktop.tar.gz' in u
-          assert 'releases/task7-pr61-dcvperm-d4105cb/res-2026.06' in u
+          assert 'releases/task7-pr61-dpms-preinstalled-d5b6679/res-2026.06' in u
           assert 'STUDIO_STANDALONE=true' in u
           assert 'STUDIO_GPU_FAMILIES=g4dn,g5,g6' in u
           assert 'passwd -l workstation' in u
@@ -70,7 +70,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/res-2026-06-standalone-runtime'
         run: |
           set -euo pipefail
-          uri='s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-dcvperm-d4105cb/res-2026.06/gpu-template.json'
+          uri='s3://studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-dpms-preinstalled-d5b6679/res-2026.06/gpu-template.json'
           aws s3 cp dist/task7-review/gpu-template.json "$uri" --sse AES256 --no-progress
           aws s3 cp "$uri" /tmp/task7-gpu-template.json --no-progress
           cmp dist/task7-review/gpu-template.json /tmp/task7-gpu-template.json
