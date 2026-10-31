@@ -1,5 +1,7 @@
 # GPU workstation profile — source-first implementation
 
+> **Status update (2026-10-31):** The GPU AMI `ami-027c98f85b155c2ac` has passed Image Builder 0.1.11/1, real RES 2026.06 GPU/DCV initialization, local password login, OpenGL and reboot reconnection (Issue #60, merged PR #61). The CLI GPU profile is being integrated in Issue #46 with the exact pinned release prefix `releases/task7-pr61-postreboot-a8ec326/res-2026.06`. Earlier paragraphs below are historical pre-validation notes, not current instructions. The persistent CLI stop/start path requires a separate live test.
+
 ## What is implemented
 
 The offline renderer now accepts `--profile gpu`, constrains
