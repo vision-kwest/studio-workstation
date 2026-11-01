@@ -17,15 +17,16 @@ class StudioCliTests(unittest.TestCase):
 
     @mock.patch.object(cli, "run")
     @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_stop_refuses_without_exact_confirmation(self, describe, run):
+    def test_stop_refuses_wrong_ec2_state(self, describe, run):
+        describe.return_value = dict(STATE, state="stopped")
         with self.assertRaises(SystemExit):
-            self.invoke(["stop", "--stack", STACK, "--yes"])
+            self.invoke(["stop", "--stack", STACK])
         run.assert_not_called()
 
     @mock.patch.object(cli, "run")
     @mock.patch.object(cli, "describe", return_value=STATE)
     def test_stop_uses_exact_instance_id(self, describe, run):
-        self.invoke(["stop", "--stack", STACK, "--yes", "--confirm-instance", INSTANCE])
+        self.invoke(["stop", "--stack", STACK])
         self.assertEqual(run.call_args_list[0].args[0][0:4],
                          ["aws", "ec2", "stop-instances", "--instance-ids"])
 
@@ -33,7 +34,7 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "describe", return_value=STATE)
     def test_start_refuses_running_instance(self, describe, run):
         with self.assertRaises(SystemExit):
-            self.invoke(["start", "--yes", "--confirm-instance", INSTANCE])
+            self.invoke(["start"])
         run.assert_not_called()
 
     @mock.patch.object(cli, "run")
@@ -41,8 +42,7 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "describe", return_value=STATE)
     def test_destroy_requires_explicit_delete_flag(self, describe, aws, run):
         with self.assertRaises(SystemExit):
-            self.invoke(["destroy", "--yes", "--confirm-stack", STACK,
-                         "--confirm-instance", INSTANCE])
+            self.invoke(["destroy", "--stack", STACK])
         run.assert_not_called()
         aws.assert_not_called()
 
@@ -61,7 +61,7 @@ class StudioCliTests(unittest.TestCase):
 
     @mock.patch.object(cli, "run")
     def test_gpu_dry_run_uses_validated_ami_and_persistent_renderer(self, run):
-        self.invoke(["create", "--stack", "studio-gpu-test", "--profile", "gpu"])
+        self.invoke(["create", "--stack", "studio-gpu-test", "--profile", "gpu", "--dry-run"])
         calls = [str(c.args[0]) for c in run.call_args_list]
         self.assertTrue(any("--profile', 'gpu'" in c and "--lifecycle', 'persistent'" in c for c in calls))
         self.assertTrue(any(cli.GPU_PREFIX in c for c in calls))
@@ -91,7 +91,7 @@ class StudioCliTests(unittest.TestCase):
 
     @mock.patch.object(cli, "run")
     def test_cpu_dry_run_does_not_select_gpu(self, run):
-        self.invoke(["create", "--stack", "studio-cpu-test", "--profile", "cpu"])
+        self.invoke(["create", "--stack", "studio-cpu-test", "--profile", "cpu", "--dry-run"])
         render = run.call_args_list[0].args[0]
         self.assertNotIn("--profile", render)
         self.assertNotIn("--lifecycle", render)
@@ -100,7 +100,7 @@ class StudioCliTests(unittest.TestCase):
     def test_scoped_gpu_refuses_public_ingress(self, run):
         with self.assertRaises(SystemExit):
             self.invoke(["create", "--stack", "studio-gpu-cli-test1", "--profile", "gpu",
-                         "--cleanup-token", "unique-test-token-123"])
+                         "--cleanup-token", "unique-test-token-123", "--dry-run"])
         run.assert_not_called()
 
     @mock.patch.object(cli, "run")
@@ -115,7 +115,7 @@ class StudioCliTests(unittest.TestCase):
     def test_scoped_gpu_accepts_restricted_ingress_dry_run(self, run):
         self.invoke(["create", "--stack", "studio-gpu-cli-test1", "--profile", "gpu",
                      "--cleanup-token", "unique-test-token-123",
-                     "--client-cidr", "127.0.0.1/32"])
+                     "--client-cidr", "127.0.0.1/32", "--dry-run"])
         calls = [c.args[0] for c in run.call_args_list]
         self.assertTrue(any("--cleanup-token" in c for c in calls))
         self.assertFalse(any("deploy" in c for c in calls))
@@ -124,7 +124,7 @@ class StudioCliTests(unittest.TestCase):
     def test_scoped_gpu_explicit_public_dcv_dry_run(self, run):
         self.invoke(["create", "--stack", "studio-gpu-cli-test1", "--profile", "gpu",
                      "--cleanup-token", "unique-test-token-123",
-                     "--client-cidr", "0.0.0.0/0", "--allow-public-dcv"])
+                     "--client-cidr", "0.0.0.0/0", "--allow-public-dcv", "--dry-run"])
         self.assertFalse(any("deploy" in str(c.args[0]) for c in run.call_args_list))
 
     @mock.patch.object(cli, "run")
@@ -135,10 +135,22 @@ class StudioCliTests(unittest.TestCase):
             {"ResourceType": "AWS::EC2::Instance"},
             {"ResourceType": "AWS::EC2::SecurityGroup"},
             {"ResourceType": "AWS::EC2::LaunchTemplate"}]}
-        self.invoke(["destroy", "--stack", "studio-gpu-cli-test1", "--yes",
-                     "--confirm-stack", "studio-gpu-cli-test1",
-                     "--confirm-instance", INSTANCE, "--delete-stack"])
+        self.invoke(["destroy", "--stack", "studio-gpu-cli-test1", "--delete-stack"])
         self.assertTrue(any("delete-stack" in c.args[0] for c in run.call_args_list))
+
+    @mock.patch.object(cli.subprocess, "check_output", return_value="{}")
+    def test_aws_json_requests_never_open_pager(self, check_output):
+        self.assertEqual(cli.aws("us-east-1", "sts", "get-caller-identity"), {})
+        command = check_output.call_args.args[0]
+        self.assertEqual(command[0], "aws")
+        self.assertIn("--no-cli-pager", command)
+
+    @mock.patch.object(cli, "run")
+    def test_create_dry_run_validates_without_launch(self, run):
+        self.invoke(["create", "--stack", "studio-cpu-test", "--dry-run"])
+        calls = [c.args[0] for c in run.call_args_list]
+        self.assertTrue(any("validate-template" in c for c in calls))
+        self.assertFalse(any("deploy" in c or "create-stack" in c for c in calls))
 
     @mock.patch.object(cli, "aws")
     def test_gpu_preflight_checks_exact_s3_versions(self, aws):
