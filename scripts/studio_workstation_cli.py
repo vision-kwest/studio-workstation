@@ -132,6 +132,8 @@ def command(args):
                 raise ValueError("GPU profile requires the pinned release; --version is CPU-only")
         if not gpu and args.instance_type not in ("m7i.large", "m7i.xlarge"):
             raise ValueError("CPU profile only supports m7i.large or m7i.xlarge")
+        if not gpu and args.allow_public_dcv:
+            raise ValueError("--allow-public-dcv is only for the scoped GPU acceptance test")
         if gpu and args.yes:
             if not args.cleanup_token:
                 raise ValueError("GPU live create requires a scoped --cleanup-token")
@@ -140,8 +142,13 @@ def command(args):
             if (args.stack, args.cleanup_token) != (GPU_ACCEPTANCE_STACK, GPU_ACCEPTANCE_TOKEN):
                 raise ValueError("GPU launch refused: only the approved acceptance stack/token are permitted")
             cidr = ipaddress.IPv4Network(args.client_cidr, strict=False)
-            if cidr.prefixlen != 32 or not cidr.network_address.is_global:
-                raise ValueError("GPU acceptance requires a real public client /32 CIDR")
+            if cidr == ipaddress.IPv4Network("0.0.0.0/0"):
+                if not args.allow_public_dcv:
+                    raise ValueError("Public DCV 8443 requires explicit --allow-public-dcv")
+            elif cidr.prefixlen != 32 or not cidr.network_address.is_global:
+                raise ValueError("Restricted GPU acceptance requires a real public client /32 CIDR")
+            elif args.allow_public_dcv:
+                raise ValueError("--allow-public-dcv requires --client-cidr 0.0.0.0/0")
             if (args.vpc_id != DEFAULT_VPC or args.subnet_id != DEFAULT_SUBNET or
                     args.instance_profile != DEFAULT_PROFILE or args.disk_size != 100):
                 raise ValueError("GPU acceptance must use the reviewed VPC, subnet, profile and 100 GiB disk")
@@ -156,8 +163,10 @@ def command(args):
                 if args.cleanup_token:
                     if not re.fullmatch(r"studio-gpu-cli-[a-z0-9-]{1,25}", args.stack) or not re.fullmatch(r"[a-z0-9-]{12,64}", args.cleanup_token):
                         raise ValueError("Cleanup scope requires studio-gpu-cli-* stack and safe token")
-                    if args.client_cidr == "0.0.0.0/0":
-                        raise ValueError("Scoped GPU acceptance test requires explicit restricted --client-cidr")
+                    if args.client_cidr == "0.0.0.0/0" and not args.allow_public_dcv:
+                        raise ValueError("Public DCV 8443 requires explicit --allow-public-dcv")
+                    if args.client_cidr != "0.0.0.0/0" and args.allow_public_dcv:
+                        raise ValueError("--allow-public-dcv requires --client-cidr 0.0.0.0/0")
                     render.extend(["--cleanup-token", args.cleanup_token, "--test-stack", args.stack])
             print("Rendering:", " ".join(render), flush=True)
             run(render, capture=False)
@@ -278,6 +287,8 @@ def main(argv=None):
             s.add_argument("--instance-type", choices=["m7i.large", "m7i.xlarge", "g4dn.xlarge"], default=None)
             s.add_argument("--disk-size", type=int, default=100)
             s.add_argument("--client-cidr", default="0.0.0.0/0")
+            s.add_argument("--allow-public-dcv", action="store_true",
+                           help="Explicit supervised GPU acceptance: permit TCP 8443 from any IPv4 address")
             s.add_argument("--cleanup-token", default=None, help="Unique scope for independently guarded GPU acceptance test")
         if action == "connect":
             s.add_argument("--ssm", action="store_true", help="Open administrative SSM session instead of printing DCV URL")
