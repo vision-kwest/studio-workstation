@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadExactPinnedGpuReleaseVersions",
+      "Effect": "Allow",
+      "Action": "s3:GetObjectVersion",
+      "Resource": [
+        "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz",
+        "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz"
+      ]
+    }
+  ]
+}
