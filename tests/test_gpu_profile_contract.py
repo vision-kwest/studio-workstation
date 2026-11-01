@@ -105,16 +105,27 @@ class GpuProfileContracts(unittest.TestCase):
         from scripts import studio_workstation_cli as cli
         expected = {
             "installation-scripts.tar.gz": (
-                "dlOKXdRAEJqpeNZNBotj87q0bdNlI5VC",
-                "7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1"),
+                "bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB",
+                "084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5"),
             "virtual-desktop.tar.gz": (
                 "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
                 "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
         }
+        from render_workstation import GPU_ARCHIVES, PINNED_GPU_PREFIX, PINNED_GPU_APP_PREFIX
+        manifest = json.loads((ROOT / "runtime/pr65-staged-release-manifest.json").read_text())
         for name, (version, digest) in expected.items():
             self.assertEqual(cli.GPU_VERSIONS[name], version)
-            self.assertEqual(len(digest), 64)
-            self.assertIn(digest, (ROOT / "runtime/README.md").read_text())
+            self.assertEqual(GPU_ARCHIVES[name], (version, digest))
+            self.assertEqual(manifest["archives"][name]["s3_version_id"], version)
+            self.assertEqual(manifest["archives"][name]["sha256"], digest)
+            self.assertEqual(cli.GPU_KEYS[name],
+                             ("releases/pr65-pinned-download-084e704e/res-2026.06/" + name
+                              if name == "installation-scripts.tar.gz"
+                              else "releases/task7-pr61-postreboot-a8ec326/res-2026.06/" + name))
+            self.assertEqual(manifest["archives"][name]["s3_key"], cli.GPU_KEYS[name])
+        self.assertEqual(PINNED_GPU_PREFIX, cli.GPU_PREFIX)
+        self.assertEqual(PINNED_GPU_APP_PREFIX, cli.GPU_APP_PREFIX)
+        self.assertNotEqual(PINNED_GPU_PREFIX, PINNED_GPU_APP_PREFIX)
 
     def test_pinned_gpu_bootstrap_and_app_archive(self):
         from render_workstation import GPU_ARCHIVES, PINNED_GPU_BUCKET, PINNED_GPU_PREFIX
@@ -127,6 +138,20 @@ class GpuProfileContracts(unittest.TestCase):
         self.assertIn("STUDIO_APP_VERSION_ID=", data)
         self.assertIn("STUDIO_APP_SHA256=", data)
 
+    def test_scoped_gpu_renders_independently_pinned_split_archive_urls(self):
+        from render_workstation import GPU_ARCHIVES, PINNED_GPU_BUCKET, PINNED_GPU_PREFIX, PINNED_GPU_APP_PREFIX
+        data = render(PINNED_GPU_BUCKET, PINNED_GPU_PREFIX, "workstation", "gpu")
+        boot = "s3://" + PINNED_GPU_BUCKET + "/" + PINNED_GPU_PREFIX + "/installation-scripts.tar.gz"
+        app = "s3://" + PINNED_GPU_BUCKET + "/" + PINNED_GPU_APP_PREFIX + "/virtual-desktop.tar.gz"
+        self.assertIn(boot, data)
+        self.assertIn("STUDIO_APP_PACKAGE_URI=" + app, data)
+        self.assertNotIn("STUDIO_APP_PACKAGE_URI=s3://" + PINNED_GPU_BUCKET + "/" +
+                         PINNED_GPU_PREFIX + "/virtual-desktop.tar.gz", data)
+        self.assertIn(GPU_ARCHIVES["installation-scripts.tar.gz"][0], data)
+        self.assertIn(GPU_ARCHIVES["installation-scripts.tar.gz"][1], data)
+        self.assertIn("STUDIO_APP_VERSION_ID=" + GPU_ARCHIVES["virtual-desktop.tar.gz"][0], data)
+        self.assertIn("STUDIO_APP_SHA256=" + GPU_ARCHIVES["virtual-desktop.tar.gz"][1], data)
+
     def test_res_app_loader_pins_version_and_hash(self):
         source = (ROOT / "runtime/overrides/scripts/common/linux/install_app.sh").read_text()
         self.assertIn('s3api get-object', source)
@@ -135,15 +160,14 @@ class GpuProfileContracts(unittest.TestCase):
         self.assertIn('sha256sum --check --status', source)
         self.assertIn('s3 cp', source)  # Original managed RES path remains.
 
-    def test_scoped_gpu_launch_blocked_until_new_archive_published(self):
-        from scripts import studio_workstation_cli as cli
+    def test_scoped_gpu_launch_still_blocked_until_guard_is_ready(self):
         source = (ROOT / "scripts/studio_workstation_cli.py").read_text()
-        self.assertIn("Scoped GPU acceptance blocked:", source)
+        self.assertIn("Scoped GPU acceptance blocked: independent cleanup guard", source)
         manifest = json.loads((ROOT / "runtime/pr65-staged-release-manifest.json").read_text())
-        self.assertEqual(manifest["status"], "STAGED_OFFLINE_NOT_PUBLISHED")
-        self.assertIsNone(manifest["archives"]["installation-scripts.tar.gz"]["s3_version_id"])
-        self.assertNotEqual(manifest["archives"]["installation-scripts.tar.gz"]["sha256"],
-                            "7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1")
+        self.assertEqual(manifest["status"], "INSTALLER_PUBLISHED_GPU_LAUNCH_NOT_AUTHORIZED")
+        self.assertEqual(manifest["launch_gate"], "SCOPED_GPU_CLEANUP_GUARD_NOT_DEPLOYED_OR_VERIFIED")
+        self.assertEqual(manifest["archives"]["installation-scripts.tar.gz"]["s3_version_id"],
+                         "bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB")
 
     def test_invalid_profile_fails(self):
         with self.assertRaises(ValueError):
