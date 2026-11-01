@@ -2,7 +2,7 @@
 """Small AWS CLI/CloudFormation wrapper for the validated CPU RES workstation.
 
 No external Python dependencies. Uses existing render_workstation.py and AWS CLI.
-Mutating actions require --yes and an exact --confirm-stack or --confirm-instance.
+Commands run when explicitly invoked; use --dry-run to preview create, and --delete-stack for teardown.
 """
 import argparse
 import ipaddress
@@ -41,8 +41,12 @@ GPU_ACCEPTANCE_TOKEN = "pr65-b23c8e5fdf67b683cd35"
 
 
 def run(args, *, capture=True):
+    # AWS CLI v2 may open a full-screen pager in CloudShell. Never block
+    # a guarded deployment while rendering read-only JSON output.
+    if args and args[0] == "aws":
+        args = [*args, "--no-cli-pager"]
     if capture:
-        return subprocess.check_output(args, text=True)
+        return subprocess.check_output(args, text=True, stderr=subprocess.PIPE)
     subprocess.check_call(args)
     return ""
 
@@ -60,10 +64,6 @@ def describe(stack, region):
     return {"stack": stack, "instance": iid, "state": vm["State"]["Name"],
             "public_ip": vm.get("PublicIpAddress"),
             "dcv_url": f"https://{vm['PublicIpAddress']}:8443" if vm.get("PublicIpAddress") else None}
-
-def require_approval(args, expected, supplied):
-    if not args.yes or supplied != expected:
-        raise ValueError(f"Refusing mutation: pass --yes --confirm-{'instance' if expected.startswith('i-') else 'stack'} {expected}")
 
 def gpu_release_preflight(args):
     """Read-only preflight of pinned AMI and S3 object versions."""
@@ -134,7 +134,7 @@ def command(args):
             raise ValueError("CPU profile only supports m7i.large or m7i.xlarge")
         if not gpu and args.allow_public_dcv:
             raise ValueError("--allow-public-dcv is only for the scoped GPU acceptance test")
-        if gpu and args.yes:
+        if gpu and not args.dry_run:
             if not args.cleanup_token:
                 raise ValueError("GPU live create requires a scoped --cleanup-token")
             if not GPU_ACCEPTANCE_LIVE_ENABLED:
@@ -172,7 +172,7 @@ def command(args):
             run(render, capture=False)
             validate = ["aws", "cloudformation", "validate-template", "--template-body",
                         f"file://{template}", "--region", args.region]
-            run(validate, capture=False)
+            run(validate)
             parameters = [
                 f"ImageId={args.image_id}", f"InstanceType={args.instance_type}",
                 f"VpcId={args.vpc_id}", f"SubnetId={args.subnet_id}",
@@ -187,15 +187,17 @@ def command(args):
             print("Stack:", args.stack, "Release:", args.version, "DCV ingress:", args.client_cidr, flush=True)
             if args.client_cidr == "0.0.0.0/0":
                 print("WARNING: DCV login will be publicly accessible on TCP 8443.", flush=True)
-            if not args.yes:
-                print("DRY RUN: validated template; deployment not executed. Re-run with --yes --confirm-stack", args.stack)
+            if args.dry_run:
+                print("DRY RUN: validated template; deployment not executed.")
                 return
-            require_approval(args, args.stack, args.confirm_stack)
             # Never use deploy to silently modify an existing workstation.
             try:
                 aws(args.region, "cloudformation", "describe-stacks", "--stack-name", args.stack)
-            except subprocess.CalledProcessError:
-                pass
+            except subprocess.CalledProcessError as exc:
+                # An expected first-create miss is not an error. Do not treat
+                # other failures (including AccessDenied) as proof of absence.
+                if "does not exist" not in (exc.stderr or ""):
+                    raise
             else:
                 raise ValueError("Stack already exists; create requires a new stack name")
             if gpu:
@@ -203,7 +205,7 @@ def command(args):
                 from runtime import pr65_gpu_create
                 # The CPU deploy/wait path is too slow to arm a GPU expiration
                 # schedule; use asynchronous CreateStack with bounded discovery.
-                # Live invocation remains disabled until explicit Task 3 activation.
+                # Runtime IAM and schedule-group verification still fail closed.
                 outcome = pr65_gpu_create.create_guarded(
                     aws, args.region, args.stack, args.cleanup_token, template, parameters)
                 print(json.dumps(outcome, indent=2))
@@ -229,7 +231,6 @@ def command(args):
             print("Use the local workstation account; browser certificate trust is not yet configured.")
         return
     if args.action in ("start", "stop"):
-        require_approval(args, iid, args.confirm_instance)
         desired = "stopped" if args.action == "start" else "running"
         if state["state"] != desired:
             raise ValueError(f"Expected {desired} before {args.action}, got {state['state']}")
@@ -241,9 +242,6 @@ def command(args):
         print("Check SSM and DCV separately; EC2 health alone does not prove desktop readiness.")
         return
     if args.action == "destroy":
-        require_approval(args, args.stack, args.confirm_stack)
-        if args.confirm_instance != iid:
-            raise ValueError(f"Refusing destruction: pass --confirm-instance {iid}")
         if not args.delete_stack:
             raise ValueError("Refusing destruction: add --delete-stack to explicitly request permanent teardown")
         resources = aws(args.region, "cloudformation", "list-stack-resources",
@@ -270,13 +268,9 @@ def main(argv=None):
         s.add_argument("--stack", default=DEFAULT_STACK if action != "create" else None,
                        required=action == "create")
         s.add_argument("--region", default=DEFAULT_REGION)
-        if action in ("create", "start", "stop", "destroy"):
-            s.add_argument("--yes", action="store_true", help="Explicitly authorize AWS mutation")
-        if action in ("create", "destroy"):
-            s.add_argument("--confirm-stack")
-        if action in ("start", "stop", "destroy"):
-            s.add_argument("--confirm-instance")
         if action == "create":
+            s.add_argument("--dry-run", action="store_true",
+                           help="Render and validate without launching AWS resources")
             s.add_argument("--profile", choices=["cpu", "gpu"], default="cpu")
             s.add_argument("--version", default="v0.1.3")
             s.add_argument("--bucket", default=DEFAULT_BUCKET)
@@ -302,7 +296,9 @@ def main(argv=None):
             a.instance_type = "g4dn.xlarge" if a.profile == "gpu" else "m7i.large"
     try:
         command(a)
-    except (ValueError, KeyError, subprocess.CalledProcessError) as exc:
+    except (ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as exc:
+        if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+            p.exit(1, f"ERROR: {(exc.stderr or '').strip()}\n")
         p.exit(1, f"ERROR: {exc}\n")
 
 if __name__ == "__main__":
