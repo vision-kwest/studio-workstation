@@ -39,6 +39,11 @@
               "UPSERT",
               "DELETE"
             ]
+          },
+          "Null": {
+            "route53:ChangeResourceRecordSetsNormalizedRecordNames": "false",
+            "route53:ChangeResourceRecordSetsRecordTypes": "false",
+            "route53:ChangeResourceRecordSetsActions": "false"
           }
         }
       }
@@ -83,6 +88,11 @@
               "DELETE",
               "CREATE"
             ]
+          },
+          "Null": {
+            "route53:ChangeResourceRecordSetsNormalizedRecordNames": "false",
+            "route53:ChangeResourceRecordSetsRecordTypes": "false",
+            "route53:ChangeResourceRecordSetsActions": "false"
           }
         }
       }
