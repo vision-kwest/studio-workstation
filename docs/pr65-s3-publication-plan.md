@@ -29,8 +29,16 @@ mkdir -p /tmp/pr65-stage
 gh run download "$RUN" --repo vision-kwest/studio-workstation --name "$ARTIFACT" --dir /tmp/pr65-stage
 printf '%s  %s\n' "$EXPECTED" /tmp/pr65-stage/installation-scripts.tar.gz | sha256sum -c -
 tar -tzf /tmp/pr65-stage/installation-scripts.tar.gz >/dev/null
-tar -xOf /tmp/pr65-stage/installation-scripts.tar.gz ./scripts/common/linux/install_app.sh | grep -F -- '--version-id'
-# If archive uses another tar member prefix, inspect tar -tzf and adjust only the inspection command.
+python3 - <<'PY'
+import tarfile
+p = "/tmp/pr65-stage/installation-scripts.tar.gz"
+with tarfile.open(p, "r:gz") as tf:
+    matches = [m for m in tf if m.isfile() and m.name.removeprefix("./") == "scripts/common/linux/install_app.sh"]
+    assert len(matches) == 1, "RES installer archive member missing or ambiguous"
+    source = tf.extractfile(matches[0]).read()
+    assert b"s3api get-object" in source and b"--version-id" in source
+    assert b"sha256sum --check --status" in source
+PY
 aws sts get-caller-identity --query Arn --output text
 aws s3api head-object --region us-east-1 --bucket "$BUCKET" --key "$KEY"  # EXPECTED 404 before upload
 # STOP: manual approval of identity, exact key, checksum and 404 required.
@@ -44,7 +52,7 @@ aws s3api get-object --region us-east-1 --bucket "$BUCKET" --key "$KEY" \
 printf '%s  %s\n' "$EXPECTED" /tmp/pr65-stage/verify-versioned.tar.gz | sha256sum -c -
 ```
 
-`gh run download` retrieves the ZIP and extracts it. The archive member path must be inspected before any upload. The put-object request is conditional to prevent overwriting the chosen new key. `head-object` 404 is a required precondition, not a failure to ignore. Verify AWS CLI supports `--if-none-match` before authorization.
+`gh run download` retrieves the ZIP and extracts it. The archive member path and pinned-download contents must be inspected before any upload. The put-object request is conditional to prevent overwriting the chosen new key. `head-object` 404 is a required precondition, not a failure to ignore. Verify AWS CLI supports `--if-none-match` before authorization.
 
 ## Post-upload requirements (not yet authorized)
 
