@@ -1,0 +1,11 @@
+[Unit]
+Description=Studio DCV optional Let's Encrypt certificate check and installation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/studio/dcv-acme.env
+ExecStart=/usr/bin/python3 /opt/studio-workstation/scripts/dcv_tls.py ensure --email ${STUDIO_ACME_EMAIL}
+# This optional unit must be installed only after approved IAM/Certbot setup.
