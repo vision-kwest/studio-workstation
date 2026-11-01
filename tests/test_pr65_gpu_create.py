@@ -183,9 +183,9 @@ class GuardedCreateTests(unittest.TestCase):
     def test_stack_ownership_mismatch_fails_closed(self):
         f = FakeAWS()
         f.wrong_stack_tags = True
-        with self.assertRaisesRegex(RuntimeError, "manual"):
+        with self.assertRaisesRegex(RuntimeError, "stack ownership not verified"):
             self.launch(f)
-        self.assertEqual(f.deleted, [ARN])
+        self.assertEqual(f.deleted, [])  # do not delete a stack with unverified tags
         self.assertFalse(f.schedules)
 
     def test_stack_failure_while_creating_requests_delete(self):
