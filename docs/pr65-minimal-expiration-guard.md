@@ -144,3 +144,24 @@ unless `--allow-public-dcv` is explicitly supplied, and this is
 not a permanent production networking recommendation.
 
 No AWS network or EC2 resources were changed by this source update.
+
+## User-directed CLI simplification during Task 4
+
+As requested, the current CLI no longer accepts or requires `--yes`,
+`--confirm-stack`, or `--confirm-instance`. Explicitly invoking
+`create`, `start`, or `stop` is sufficient authorization. Creation
+runs by default; the optional `--dry-run` flag renders and validates
+without creating resources. Permanent teardown still requires
+`destroy --stack <name> --delete-stack`.
+
+AWS CLI subprocess calls use `--no-cli-pager` so CloudShell never stops
+at `(END)`; read-only ValidateTemplate output is suppressed unless
+there is an error. When checking whether a new CloudFormation stack
+name is available, the expected "does not exist" error is handled
+quietly; any other DescribeStacks failure aborts rather than being
+mistaken for an empty stack name.
+
+This is a UX change only, not a relaxation of the narrowly scoped GPU
+launch path, public DCV opt-in, exact IAM ownership tags, independent
+expiration schedules, or EBS retention verification. Earlier milestone
+notes above describing the old confirmation flags are historical.
