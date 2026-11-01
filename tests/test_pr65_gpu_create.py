@@ -229,12 +229,11 @@ class GuardedCreateTests(unittest.TestCase):
             self.launch(f)
         self.assertFalse(any(c[1:3] == ("cloudformation", "create-stack") for c in f.calls))
 
-    def test_unguarded_gpu_yes_denied_before_any_aws(self):
+    def test_unguarded_gpu_create_denied_before_any_aws(self):
         with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
             with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
                 cli.main(["create", "--stack", STACK, "--profile", "gpu",
-                          "--client-cidr", "192.0.2.42/32", "--cleanup-token", TOKEN,
-                          "--yes", "--confirm-stack", STACK])
+                          "--client-cidr", "192.0.2.42/32", "--cleanup-token", TOKEN])
             run.assert_not_called()
             aws.assert_not_called()
 
@@ -243,15 +242,14 @@ class GuardedCreateTests(unittest.TestCase):
         from subprocess import CalledProcessError
         self.assertTrue(cli.GPU_ACCEPTANCE_LIVE_ENABLED)
         with patch.object(cli, "run") as render, patch.object(
-                cli, "aws", side_effect=CalledProcessError(255, "aws")) as aws, patch.object(
+                cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
                 cli, "gpu_release_preflight") as release, patch.object(
                 flow, "create_guarded", return_value={"guard": {"guard_armed": True}}) as guarded:
             with contextlib.redirect_stdout(io.StringIO()):
                 cli.main([
                     "create", "--stack", cli.GPU_ACCEPTANCE_STACK, "--profile", "gpu",
                     "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
-                    "--client-cidr", "8.8.8.8/32", "--yes",
-                    "--confirm-stack", cli.GPU_ACCEPTANCE_STACK,
+                    "--client-cidr", "8.8.8.8/32",
                 ])
         guarded.assert_called_once()
         self.assertEqual(guarded.call_args.args[2:4],
@@ -270,7 +268,6 @@ class GuardedCreateTests(unittest.TestCase):
                         cli.main([
                             "create", "--stack", stack, "--profile", "gpu",
                             "--cleanup-token", token, "--client-cidr", "8.8.8.8/32",
-                            "--yes", "--confirm-stack", stack,
                         ])
                     run.assert_not_called()
                     aws.assert_not_called()
@@ -284,8 +281,7 @@ class GuardedCreateTests(unittest.TestCase):
                     with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
                         cli.main([
                             "create", "--stack", cli.GPU_ACCEPTANCE_STACK, "--profile", "gpu",
-                            "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
-                            "--yes", "--confirm-stack", cli.GPU_ACCEPTANCE_STACK, *extra,
+                            "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN, *extra,
                         ])
                     run.assert_not_called()
                     aws.assert_not_called()
@@ -296,22 +292,20 @@ class GuardedCreateTests(unittest.TestCase):
             with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
                 cli.main(["create", "--profile", "gpu", "--stack", cli.GPU_ACCEPTANCE_STACK,
                           "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
-                          "--client-cidr", "0.0.0.0/0", "--yes",
-                          "--confirm-stack", cli.GPU_ACCEPTANCE_STACK])
+                          "--client-cidr", "0.0.0.0/0"])
             run.assert_not_called()
             aws.assert_not_called()
 
     def test_public_dcv_opt_in_reaches_guarded_creator(self):
         from subprocess import CalledProcessError
         with patch.object(cli, "run") as render, patch.object(
-                cli, "aws", side_effect=CalledProcessError(255, "aws")) as aws, patch.object(
+                cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
                 cli, "gpu_release_preflight") as release, patch.object(
                 flow, "create_guarded", return_value={"guard": {"guard_armed": True}}) as guarded:
             with contextlib.redirect_stdout(io.StringIO()):
                 cli.main(["create", "--profile", "gpu", "--stack", cli.GPU_ACCEPTANCE_STACK,
                           "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
-                          "--client-cidr", "0.0.0.0/0", "--allow-public-dcv",
-                          "--yes", "--confirm-stack", cli.GPU_ACCEPTANCE_STACK])
+                          "--client-cidr", "0.0.0.0/0", "--allow-public-dcv"])
         guarded.assert_called_once()
         self.assertIn("ClientCidr=0.0.0.0/0", guarded.call_args.args[5])
         release.assert_called_once()
@@ -327,15 +321,14 @@ class GuardedCreateTests(unittest.TestCase):
                     with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
                         cli.main(["create", "--profile", "gpu", "--stack", stack,
                                   "--cleanup-token", token, "--client-cidr", "0.0.0.0/0",
-                                  "--allow-public-dcv", "--yes", "--confirm-stack", stack])
+                                  "--allow-public-dcv"])
                     render.assert_not_called()
                     aws.assert_not_called()
 
-    def test_gpu_yes_without_token_denied_before_any_aws(self):
+    def test_gpu_without_token_denied_before_any_aws(self):
         with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
             with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-                cli.main(["create", "--stack", STACK, "--profile", "gpu", "--yes",
-                          "--confirm-stack", STACK])
+                cli.main(["create", "--stack", STACK, "--profile", "gpu"])
             run.assert_not_called()
             aws.assert_not_called()
 
