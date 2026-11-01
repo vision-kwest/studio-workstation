@@ -47,3 +47,44 @@ manual intervention is mandatory: the schedule is a best-effort attempt,
 not a no-orphan guarantee.
 
 Focus test: `python3 -m unittest discover -s tests -p test_pr65_one_shot_guard.py -v`.
+
+## Task 2 — CLI wiring and bounded discovery (offline only)
+
+- `scripts/studio_workstation_cli.py` now routes approved scoped GPU
+  creation to `runtime/pr65_gpu_create.py`, not the synchronous
+  `cloudformation deploy` waiter. CPU behavior is unchanged.
+- **GPU live creation is still disabled** by
+  `GPU_ACCEPTANCE_LIVE_ENABLED = False`. An attempted GPU `--yes`
+  create fails before the renderer or any AWS operation. Unscoped GPU
+  `--yes` is forbidden as well.
+- Once separately enabled in Task 3, the helper checks that the existing
+  Scheduler group is active, and that the new dedicated Scheduler role
+  has the exact expected trust and *only* two tag-scoped IAM grants.
+  Invalid role/schedule configuration blocks CloudFormation creation.
+- CloudFormation `CreateStack` is asynchronous, with
+  `--disable-rollback` so failures cannot silently remove resource
+  identity evidence before the CLI can inspect it. Within a bounded
+  120-second discovery window (three-second polling), the CLI verifies
+  the newly created stack ID and tags, reads CloudFormation resource
+  IDs, verifies the EC2 instance and its **attached** retained
+  `/dev/sda1` EBS volume, and arms both one-time Scheduler actions.
+  Each scheduled action is independently read back by the existing
+  Task 1 helper.
+- Failed or timed-out discovery requests **emergency instance termination
+  only for a tag-verified instance**, then requests CFN stack deletion
+  **only if stack ownership has been verified**. It always fails with an
+  explicit retained-EBS/manual-cleanup warning. This is a best-effort
+  fail-closed operation, not proof that retained storage has disappeared.
+  If the caller is interrupted or the process dies between CreateStack
+  and arming, there remains a short unscheduled exposure window.
+- Task 3 must establish and verify the dedicated role
+  `studio-pr65-cli-expiration` with its single inline policy named
+  `StudioPr65ExactTaggedExpiry`, scoped to the chosen exact
+  `StudioStack` and `StudioCleanupToken` tags. No role has been
+  created or modified in Task 2.
+- Relevant tests:
+  `python3 -m unittest discover -s tests -p test_pr65_gpu_create.py -v`
+  and `test_pr65_one_shot_guard.py`.
+- **Do not activate the live-launch switch in Task 2.**
+  No EC2, S3, Scheduler, IAM, CFN, or Image Builder resources are
+  created or changed by this code commit.
