@@ -75,6 +75,24 @@ python3 studio workstation connect --stack studio-workstation-cpu-review
 
 DCV login uses local Linux username `workstation`, not AWS IAM credentials. The browser may show an untrusted/self-signed TLS warning; verify the certificate fingerprint through an administrative channel or provision trusted TLS.
 
+### Optional trusted hostname (Issue #43, NOT DEPLOYED)
+
+The feature branch adds an opt-in `--hostname dcv.kwesidavis.com` flag
+for `connect` and `status`. It only returns the trusted HTTPS URL after
+confirming DNS resolves to this stack's current public IPv4 and that a
+system-trusted TLS certificate validates for the hostname. A self-signed,
+expired, mismatched or unreachable certificate fails closed. This does **not**
+install certificates or alter the default IP-based connection:
+
+```bash
+python3 studio workstation connect --stack STACK --hostname dcv.kwesidavis.com
+python3 studio workstation status --stack STACK --hostname dcv.kwesidavis.com
+```
+
+**Do not rely on this option in `main` until a feature PR is merged.**
+The dynamic-DNS Lambda, on-host renewal and permissions are not deployed.
+See [Issue #43 design and live approval gates](issue43-letsencrypt-dcv.md).
+
 ## GPU workstation: tested acceptance scope
 
 **What is proven:** PR #65, now merged, was tested live using the exact scoped GPU CLI launch, user-confirmed DCV login, Tesla T4/OpenGL/RES readiness, EC2 stop/start, identical saved-file SHA-256 across reboot, and independent final cleanup. See [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46). That **does not** mean all arbitrary new stack names, regions or account setups are supported.
