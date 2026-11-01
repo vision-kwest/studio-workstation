@@ -271,6 +271,11 @@ class PolicyTests(unittest.TestCase):
             self.assertIn(dns.ZONE, mutations[0]["Resource"])
             self.assertEqual(mutations[0]["Condition"]["ForAllValues:StringEquals"]
                              ["route53:ChangeResourceRecordSetsRecordTypes"], [typ])
+            self.assertEqual(set(mutations[0]["Condition"]["Null"].values()), {"false"})
+            self.assertEqual(set(mutations[0]["Condition"]["Null"]), {
+                "route53:ChangeResourceRecordSetsNormalizedRecordNames",
+                "route53:ChangeResourceRecordSetsRecordTypes",
+                "route53:ChangeResourceRecordSetsActions"})
         self.assertEqual(policy["WorkstationCertbotPolicy"]["Statement"][-1]
                          ["Condition"]["ForAllValues:StringEquals"]
                          ["route53:ChangeResourceRecordSetsNormalizedRecordNames"],
