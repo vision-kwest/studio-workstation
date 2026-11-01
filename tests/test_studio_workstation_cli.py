@@ -121,6 +121,13 @@ class StudioCliTests(unittest.TestCase):
         self.assertFalse(any("deploy" in c for c in calls))
 
     @mock.patch.object(cli, "run")
+    def test_scoped_gpu_explicit_public_dcv_dry_run(self, run):
+        self.invoke(["create", "--stack", "studio-gpu-cli-test1", "--profile", "gpu",
+                     "--cleanup-token", "unique-test-token-123",
+                     "--client-cidr", "0.0.0.0/0", "--allow-public-dcv"])
+        self.assertFalse(any("deploy" in str(c.args[0]) for c in run.call_args_list))
+
+    @mock.patch.object(cli, "run")
     @mock.patch.object(cli, "aws")
     @mock.patch.object(cli, "describe", return_value=STATE)
     def test_scoped_destroy_accepts_launch_template(self, describe, aws, run):
