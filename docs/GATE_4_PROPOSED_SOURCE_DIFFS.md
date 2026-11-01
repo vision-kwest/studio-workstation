@@ -1,5 +1,7 @@
 # Gate 4 — Proposed source diffs against RES 2026.06
 
+> **Historical proposed diffs — not executable deployment instructions:** The excerpts below were review-only proposals. Do not use them as the final applied patch set or as evidence that deployment remains blocked. Compare with the merged `runtime/overrides/` tree and [runtime provenance](../runtime/README.md); the current GPU CLI was live validated in [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46).
+
 **REVIEW ONLY. NOT AN IMPLEMENTATION PR.** Upstream commit: `1f526a241fb293a29fb018f08ccf81c100c05a42`. All snippets below are **proposed** and require review and patch application validation against the pinned source. They are not tested or approved changes.
 
 **Scope:** minimal call-site adaptations for local authentication, local owner permissions, GPU-family selection and RES-only reporting. No new installer, service manager, cloud-init template or reboot logic. The standalone input interface shown below (`STUDIO_STANDALONE`, `STUDIO_GPU_FAMILIES`, `STUDIO_DCV_IDLE_TIMEOUT`) is a **candidate contract**, not an approved configuration format.

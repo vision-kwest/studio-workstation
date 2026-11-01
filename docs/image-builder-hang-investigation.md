@@ -1,5 +1,7 @@
 # Image Builder desktop installation hang: evidence and next diagnostics
 
+> **Historical failure investigation:** This document describes earlier blocked Image Builder builds and intentionally cautious diagnosis. Subsequent work produced GPU AMI `ami-027c98f85b155c2ac` (recipe 0.1.11/1), verified RES/DCV login and GPU CLI stop/start persistence. The failure evidence is retained; it does not describe the current launch state. See [Quick Start](../README.md) and [GPU Image Builder](gpu-image-builder-visual.md).
+
 ## Observed
 
 Build instance `i-093e12de3fb559209`, SSM command `71d55e9b-cddb-4eeb-aa4c-24efb9846fbd`. Reported last visible line at 09:12:29 UTC: `invoke-rc.d: initscript gdm3, action "reload" failed` / `gdm.service is not active, cannot reload`. SSM command remained pending after hundreds of 30-second checks.
