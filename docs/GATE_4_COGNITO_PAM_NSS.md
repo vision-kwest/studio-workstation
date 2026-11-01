@@ -1,5 +1,7 @@
 # Gate 4 — RES Cognito PAM/NSS dependency closure
 
+> **Historical Cognito/PAM/NSS review:** This page explored a future standalone identity adaptation. The tested final path uses local Linux `workstation` credentials with DCV system auth and omits the RES external identity control plane. Source code and acceptance are described in [runtime provenance](../runtime/README.md); current password enrollment is in [Studio CLI](studio-cli.md). Do not interpret the original `not yet verified` statements as current runtime status.
+
 **Analysis only — no provisioning changes or AWS deployment authorized.** Source: `aws/res` pinned `2026.06`, commit `1f526a241fb293a29fb018f08ccf81c100c05a42`. Companion: [Gate 4 handoff](GATE_4_BOOTSTRAP_HANDOFF_AUDIT.md), [proposed diffs](GATE_4_PROPOSED_SOURCE_DIFFS.md).
 
 ## Exact identity integration
