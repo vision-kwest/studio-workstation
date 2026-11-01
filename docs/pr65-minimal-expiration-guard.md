@@ -123,3 +123,24 @@ Focus test: `python3 -m unittest discover -s tests -p test_pr65_one_shot_guard.p
   when an instance ID exists, and after the test their execution and retained
   EBS cleanup must be verified. Do not assume the scheduled EBS delete
   guarantees successful cleanup.
+
+## Task 4 — connect-from-anywhere convenience-mode correction
+
+Issue #62 explicitly records the need to connect across changing client
+networks without requiring an IP allowlist. PR #65 had inadvertently imposed
+a public-IP /32 requirement during acceptance. For the exact approved
+`studio-gpu-cli-accept65` / `pr65-b23c8e5fdf67b683cd35`
+scope, the CLI now accepts explicit public TCP 8443 access with
+`--client-cidr 0.0.0.0/0 --allow-public-dcv` (or a restricted public
+/32 without this flag). This does **not** remove the exact scope,
+IAM, termination schedule, retained-EBS verification or confirmation
+checks, and it never opens SSH.
+
+Public DCV on TCP 8443 is internet-accessible; do not treat system
+authentication or TLS as private-network isolation. Require a strong
+local OS password, observe connection attempts, and remove the test
+security group when testing ends. The CLI refuses broad public ingress
+unless `--allow-public-dcv` is explicitly supplied, and this is
+not a permanent production networking recommendation.
+
+No AWS network or EC2 resources were changed by this source update.
