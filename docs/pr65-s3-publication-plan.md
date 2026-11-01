@@ -1,4 +1,18 @@
-# PR #65 — read-only S3 publication plan (NO UPLOAD AUTHORIZED)
+# PR #65 — S3 publication record (completed November 1, 2026)
+
+## Publication result and current state
+
+**COMPLETED — no further upload required.** The user authorized their existing AWS root session for development and published exactly one new, checksum-verified installation archive via CloudShell. This section supersedes the historical proposed-command, non-root preference and original no-upload language below. Do **not** run the historical upload instructions again.
+
+- Key: `releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz`
+- S3 VersionId: `bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB`
+- SHA-256 verified by CloudShell: `084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5`
+- Independent AWS read-only HeadObject: 42,816 bytes, AES256, exact VersionId. ListObjectVersions: one current version, no delete markers.
+- App archive: unchanged, still at original Task 7 key and pinned VersionId.
+- GitHub renderer/CLI pins and release manifest updated on the draft PR #65 branch.
+- **Not approved for EC2 launch:** scoped cleanup safeguard not deployed/verified; the EC2 instance role lacks `s3:GetObjectVersion` for both pinned archives (read-only IAM simulation `implicitDeny`). A review-only exact-two-key policy is in `infra/pr65-runtime-version-read.review-only.json`.
+
+No new GitHub Actions archive build or S3 upload is needed. Do not merge PR #65 or modify Image Builder without explicit approval.
 
 ## Freeze artifact and destination
 
