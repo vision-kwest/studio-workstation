@@ -41,12 +41,6 @@ jobs:
           (p/'provenance.json').write_text(json.dumps({'source_commit':os.environ['GITHUB_SHA'],'source_ref':os.environ['GITHUB_REF'],'res_tag':'2026.06','deployment_status':'UNPUBLISHED_DO_NOT_LAUNCH'},indent=2)+'\n')
           PY
           (cd dist/task7 && sha256sum -c SHA256SUMS)
-      - name: Temporary PR65 archive byte transfer for authorized root S3 publication
-        run: |
-          set -euo pipefail
-          echo 'PR65_ARCHIVE_BASE64_START'
-          base64 -w 120 dist/task7/installation-scripts.tar.gz
-          echo 'PR65_ARCHIVE_BASE64_END'
       - uses: actions/upload-artifact@v4
         with:
           name: task7-verified-res-archives-${{ github.sha }}
