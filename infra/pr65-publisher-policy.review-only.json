@@ -1,0 +1,28 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublishPr65InstallerConditionallyOnly",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz",
+      "Condition": {
+        "Null": {
+          "s3:if-none-match": "false"
+        },
+        "StringEquals": {
+          "s3:x-amz-server-side-encryption": "AES256"
+        }
+      }
+    },
+    {
+      "Sid": "ReadBackPr65InstallerOnly",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz"
+    }
+  ]
+}
