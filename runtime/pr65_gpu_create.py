@@ -103,7 +103,7 @@ def _tags_match(item, stack, token):
             values.get("StudioCleanupToken") == token)
 
 
-def _emergency(aws_call, region, stack_id, stack, token, iid):
+def _emergency(aws_call, region, stack_id, stack, token, iid, stack_owned):
     """Best effort; never claim success or conceal orphaned retained EBS."""
     problems = []
     if iid:
@@ -114,10 +114,13 @@ def _emergency(aws_call, region, stack_id, stack, token, iid):
             aws_call(region, "ec2", "terminate-instances", "--instance-ids", iid)
         except Exception as exc:
             problems.append("instance termination: " + str(exc))
-    try:
-        aws_call(region, "cloudformation", "delete-stack", "--stack-name", stack_id)
-    except Exception as exc:
-        problems.append("stack deletion: " + str(exc))
+    if stack_owned:
+        try:
+            aws_call(region, "cloudformation", "delete-stack", "--stack-name", stack_id)
+        except Exception as exc:
+            problems.append("stack deletion: " + str(exc))
+    else:
+        problems.append("stack ownership not verified; no automatic stack delete")
     return problems
 
 
@@ -142,17 +145,22 @@ def create_guarded(aws_call, region, stack, token, template, parameters,
                         "Key=StudioCleanupToken,Value=" + token,
                         "--disable-rollback")
     stack_id = response.get("StackId")
-    if not stack_id or "/stack/" not in stack_id and ":stack/" not in stack_id:
-        raise RuntimeError("No confirmed StackId from CreateStack; investigate manually")
+    if not stack_id or not stack_id.startswith(
+            "arn:aws:cloudformation:us-east-1:401233741942:stack/" + stack + "/"):
+        raise RuntimeError("Unrecognized StackId from CreateStack; investigate manually")
     iid = None
+    stack_owned = False
     started = clock()
     now = utc_now or (lambda: dt.datetime.now(dt.timezone.utc))
     try:
         while clock() - started <= MAX_DISCOVERY_SECONDS:
             stacks = aws_call(region, "cloudformation", "describe-stacks",
                               "--stack-name", stack_id)["Stacks"]
-            if len(stacks) != 1 or stacks[0].get("StackId") != stack_id or not _tags_match(stacks[0], stack, token):
+            if (len(stacks) != 1 or stacks[0].get("StackId") != stack_id or
+                    stacks[0].get("StackName") != stack or
+                    not _tags_match(stacks[0], stack, token)):
                 raise RuntimeError("CloudFormation stack identity or ownership changed")
+            stack_owned = True
             state = stacks[0]["StackStatus"]
             if state not in ("CREATE_IN_PROGRESS", "CREATE_COMPLETE"):
                 raise RuntimeError("CloudFormation failed before guard was armed: " + state)
@@ -190,10 +198,11 @@ def create_guarded(aws_call, region, stack, token, template, parameters,
             sleep(POLL_SECONDS)
         raise RuntimeError("Timed out discovering instance and retained root EBS")
     except BaseException as exc:
-        problems = _emergency(aws_call, region, stack_id, stack, token, iid)
+        problems = _emergency(aws_call, region, stack_id, stack, token, iid, stack_owned)
         raise RuntimeError(
             "GPU guard NOT verified; emergency termination/stack deletion requested. "
             "Check CloudFormation, exact instance, SG, launch template, and retained EBS manually. "
             "Instance=" + str(iid) + " StackId=" + stack_id +
-            ("; cleanup errors: " + "; ".join(problems) if problems else "")
+            "; failure: " + str(exc)[:240] +
+            ("; cleanup warnings: " + "; ".join(problems) if problems else "")
         ) from exc
