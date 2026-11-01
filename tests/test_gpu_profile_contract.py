@@ -162,8 +162,10 @@ class GpuProfileContracts(unittest.TestCase):
 
     def test_scoped_gpu_launch_still_blocked_until_guard_is_ready(self):
         source = (ROOT / "scripts/studio_workstation_cli.py").read_text()
-        self.assertIn("Scoped GPU acceptance blocked: Task 3 guard activation pending", source)
-        self.assertIn("GPU_ACCEPTANCE_LIVE_ENABLED = False", source)
+        self.assertIn("GPU_ACCEPTANCE_LIVE_ENABLED = True", source)
+        self.assertIn("GPU_ACCEPTANCE_STACK = \"studio-gpu-cli-accept65\"", source)
+        self.assertIn("GPU_ACCEPTANCE_TOKEN = \"pr65-b23c8e5fdf67b683cd35\"", source)
+        self.assertIn("only the approved acceptance stack/token", source)
         manifest = json.loads((ROOT / "runtime/pr65-staged-release-manifest.json").read_text())
         self.assertEqual(manifest["status"], "INSTALLER_PUBLISHED_GPU_LAUNCH_NOT_AUTHORIZED")
         self.assertEqual(manifest["launch_gate"], "SCOPED_GPU_CLEANUP_GUARD_NOT_DEPLOYED_OR_VERIFIED")

@@ -33,8 +33,11 @@ GPU_KEYS = {
     "virtual-desktop.tar.gz": GPU_APP_PREFIX + "/virtual-desktop.tar.gz",
 }
 
-# Task 3 must explicitly activate this after the dedicated expiration role is verified.
-GPU_ACCEPTANCE_LIVE_ENABLED = False
+# Task 3: IAM role and exact scope verified; no EC2 launch performed.
+# Only this one acceptance stack/token may reach the supervised create path.
+GPU_ACCEPTANCE_LIVE_ENABLED = True
+GPU_ACCEPTANCE_STACK = "studio-gpu-cli-accept65"
+GPU_ACCEPTANCE_TOKEN = "pr65-b23c8e5fdf67b683cd35"
 
 
 def run(args, *, capture=True):
@@ -134,6 +137,14 @@ def command(args):
                 raise ValueError("GPU live create requires a scoped --cleanup-token")
             if not GPU_ACCEPTANCE_LIVE_ENABLED:
                 raise ValueError("Scoped GPU acceptance blocked: Task 3 guard activation pending")
+            if (args.stack, args.cleanup_token) != (GPU_ACCEPTANCE_STACK, GPU_ACCEPTANCE_TOKEN):
+                raise ValueError("GPU launch refused: only the approved acceptance stack/token are permitted")
+            cidr = ipaddress.IPv4Network(args.client_cidr, strict=False)
+            if cidr.prefixlen != 32 or not cidr.network_address.is_global:
+                raise ValueError("GPU acceptance requires a real public client /32 CIDR")
+            if (args.vpc_id != DEFAULT_VPC or args.subnet_id != DEFAULT_SUBNET or
+                    args.instance_profile != DEFAULT_PROFILE or args.disk_size != 100):
+                raise ValueError("GPU acceptance must use the reviewed VPC, subnet, profile and 100 GiB disk")
         prefix = GPU_PREFIX if gpu else f"releases/{args.version}/res-2026.06"
         with tempfile.TemporaryDirectory(prefix="studio-cli-") as temp:
             template = Path(temp) / "workstation.json"

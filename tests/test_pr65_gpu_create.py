@@ -238,6 +238,58 @@ class GuardedCreateTests(unittest.TestCase):
             run.assert_not_called()
             aws.assert_not_called()
 
+    def test_approved_gpu_scope_reaches_guarded_creator_without_real_aws(self):
+        from unittest.mock import Mock
+        from subprocess import CalledProcessError
+        self.assertTrue(cli.GPU_ACCEPTANCE_LIVE_ENABLED)
+        with patch.object(cli, "run") as render, patch.object(
+                cli, "aws", side_effect=CalledProcessError(255, "aws")) as aws, patch.object(
+                cli, "gpu_release_preflight") as release, patch.object(
+                flow, "create_guarded", return_value={"guard": {"guard_armed": True}}) as guarded:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main([
+                    "create", "--stack", cli.GPU_ACCEPTANCE_STACK, "--profile", "gpu",
+                    "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
+                    "--client-cidr", "8.8.8.8/32", "--yes",
+                    "--confirm-stack", cli.GPU_ACCEPTANCE_STACK,
+                ])
+        guarded.assert_called_once()
+        self.assertEqual(guarded.call_args.args[2:4],
+                         (cli.GPU_ACCEPTANCE_STACK, cli.GPU_ACCEPTANCE_TOKEN))
+        self.assertFalse(any("deploy" in str(c.args[0]) for c in render.call_args_list))
+        release.assert_called_once()
+        aws.assert_called_once()
+
+    def test_unapproved_scoped_gpu_create_refuses_before_aws(self):
+        for stack, token in (
+                ("studio-gpu-cli-review1", cli.GPU_ACCEPTANCE_TOKEN),
+                (cli.GPU_ACCEPTANCE_STACK, "other-unique-token-123")):
+            with self.subTest(stack=stack, token=token):
+                with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
+                    with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+                        cli.main([
+                            "create", "--stack", stack, "--profile", "gpu",
+                            "--cleanup-token", token, "--client-cidr", "8.8.8.8/32",
+                            "--yes", "--confirm-stack", stack,
+                        ])
+                    run.assert_not_called()
+                    aws.assert_not_called()
+
+    def test_scoped_gpu_requires_public_single_ip_and_reviewed_storage(self):
+        for extra in (["--client-cidr", "10.0.0.1/32"],
+                      ["--client-cidr", "8.8.8.0/24"],
+                      ["--client-cidr", "8.8.8.8/32", "--disk-size", "200"]):
+            with self.subTest(extra=extra):
+                with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
+                    with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+                        cli.main([
+                            "create", "--stack", cli.GPU_ACCEPTANCE_STACK, "--profile", "gpu",
+                            "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
+                            "--yes", "--confirm-stack", cli.GPU_ACCEPTANCE_STACK, *extra,
+                        ])
+                    run.assert_not_called()
+                    aws.assert_not_called()
+
     def test_gpu_yes_without_token_denied_before_any_aws(self):
         with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
             with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
