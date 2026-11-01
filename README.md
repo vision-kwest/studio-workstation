@@ -63,6 +63,15 @@ The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`
 
 After provisioning, set a unique local `workstation` password interactively via SSM (`sudo passwd workstation`); DCV uses **Linux system credentials**, not AWS console credentials. Login through the DCV URL printed by `connect`.
 
+## Optional trusted DCV TLS / dynamic DNS — Issue #43 (NOT DEPLOYED)
+
+A feature-branch implementation proposes Let's Encrypt DNS-01 via delegated
+Route 53 subdomain `dcv.kwesidavis.com`, lifecycle-driven DNS for one
+approved EC2 instance, and opt-in validated hostname in `connect`/`status`.
+**No certificate, Lambda, IAM change, DNS A record or on-host renewal
+component has been deployed.** The working IP-based connection still applies.
+See [Issue #43 design and deployment gates](docs/issue43-letsencrypt-dcv.md).
+
 ## Security and operating costs
 
 - No inbound SSH is needed. Use Systems Manager for maintenance and Amazon DCV for the graphical desktop.
