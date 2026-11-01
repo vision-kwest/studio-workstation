@@ -28,6 +28,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -p test_gpu_profile_contract.py -v
       - run: python3 -m unittest discover -s tests -p test_gpu_cli_test_cleanup.py -v
       - run: python3 -m unittest discover -s tests -p test_gpu_cli_guard_infra.py -v
+      - run: python3 -m unittest discover -s tests -p test_pr65_one_shot_guard.py -v
       - run: python3 -m py_compile scripts/studio_workstation_cli.py scripts/gpu_cli_test_cleanup.py runtime/render_workstation.py
       - name: Render exact scoped GPU template (offline)
         run: |
