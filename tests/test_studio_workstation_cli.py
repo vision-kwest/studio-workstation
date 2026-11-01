@@ -145,6 +145,13 @@ class StudioCliTests(unittest.TestCase):
         from types import SimpleNamespace
         cli.gpu_release_preflight(SimpleNamespace(region="us-east-1", bucket=cli.DEFAULT_BUCKET))
         self.assertEqual(aws.call_count, 5)
+        calls = [call.args for call in aws.call_args_list]
+        self.assertIn(cli.GPU_KEYS["installation-scripts.tar.gz"], calls[1])
+        self.assertIn(cli.GPU_KEYS["installation-scripts.tar.gz"], calls[2])
+        self.assertIn(cli.GPU_KEYS["virtual-desktop.tar.gz"], calls[3])
+        self.assertIn(cli.GPU_KEYS["virtual-desktop.tar.gz"], calls[4])
+        self.assertNotEqual(cli.GPU_KEYS["installation-scripts.tar.gz"].rsplit("/", 1)[0],
+                            cli.GPU_KEYS["virtual-desktop.tar.gz"].rsplit("/", 1)[0])
 
     @mock.patch.object(cli, "aws")
     def test_gpu_preflight_fails_closed_on_wrong_version(self, aws):
