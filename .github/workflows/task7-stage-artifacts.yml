@@ -1,5 +1,8 @@
 name: Task 7 stage verified RES archives (no AWS upload)
 on:
+  push:
+    branches:
+      - feature/issue-46-gpu-cli
   pull_request:
     paths:
       - 'runtime/**'
@@ -40,7 +43,7 @@ jobs:
           (cd dist/task7 && sha256sum -c SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
-          name: task7-verified-res-archives
+          name: task7-verified-res-archives-${{ github.sha }}
           path: dist/task7/
           if-no-files-found: error
           retention-days: 7

@@ -1,0 +1,26 @@
+{
+  "status": "INSTALLER_PUBLISHED_GPU_LAUNCH_NOT_AUTHORIZED",
+  "res_tag": "2026.06",
+  "source_commit": "aeabda642ed9f8c99bb6f7aa838cdd445daa03bd",
+  "archives": {
+    "installation-scripts.tar.gz": {
+      "sha256": "084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5",
+      "s3_version_id": "bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB",
+      "s3_key": "releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz",
+      "verified_size_bytes": 42816
+    },
+    "virtual-desktop.tar.gz": {
+      "sha256": "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147",
+      "s3_version_id": "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
+      "s3_key": "releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz"
+    }
+  },
+  "publication": "PUBLISHED_BY_USER_CLOUDSHELL_2026-11-01_VERIFIED_VERSION_AND_SHA256",
+  "launch_gate": "SCOPED_GPU_CLEANUP_GUARD_NOT_DEPLOYED_OR_VERIFIED",
+  "evidence": {
+    "s3_version_id": "bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB",
+    "sha256": "084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5",
+    "cloudshell_verified": true,
+    "aws_read_only_head_object_verified": true
+  }
+}

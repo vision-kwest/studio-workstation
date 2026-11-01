@@ -1,9 +1,18 @@
 name: Studio CLI tests
 on:
+  push:
+    branches:
+      - feature/issue-46-gpu-cli
   pull_request:
     paths:
       - 'studio'
       - 'scripts/studio_workstation_cli.py'
+      - 'runtime/render_workstation.py'
+      - 'tests/test_gpu_profile_contract.py'
+      - 'scripts/gpu_cli_test_cleanup.py'
+      - 'tests/test_gpu_cli_test_cleanup.py'
+      - 'tests/test_gpu_cli_guard_infra.py'
+      - 'infra/gpu-cli-test-cleanup.json'
       - 'tests/test_studio_workstation_cli.py'
       - '.github/workflows/studio-cli.yml'
   workflow_dispatch:
@@ -14,5 +23,25 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - run: python3 -m pip install 'jinja2>=3,<4'
       - run: python3 -m unittest discover -s tests -p test_studio_workstation_cli.py -v
+      - run: python3 -m unittest discover -s tests -p test_gpu_profile_contract.py -v
+      - run: python3 -m unittest discover -s tests -p test_gpu_cli_test_cleanup.py -v
+      - run: python3 -m unittest discover -s tests -p test_gpu_cli_guard_infra.py -v
+      - run: python3 -m unittest discover -s tests -p test_pr65_one_shot_guard.py -v
+      - run: python3 -m unittest discover -s tests -p test_pr65_gpu_create.py -v
+      - run: python3 -m py_compile scripts/studio_workstation_cli.py scripts/gpu_cli_test_cleanup.py runtime/render_workstation.py
+      - name: Render exact scoped GPU template (offline)
+        run: |
+          python3 runtime/render_workstation.py --profile gpu --lifecycle persistent --bucket studio-workstation-releases-401233741942-us-east-1 --prefix releases/pr65-pinned-download-084e704e/res-2026.06 --user workstation --cleanup-token unique-review-token-123 --test-stack studio-gpu-cli-review1 --output /tmp/scoped-gpu-template.json
+          python3 -m json.tool /tmp/scoped-gpu-template.json >/dev/null
+          python3 - <<'PY'
+          import json
+          t=json.load(open('/tmp/scoped-gpu-template.json'))
+          data=t['Resources']['Workstation']['Properties']['UserData']['Fn::Base64']['Fn::Sub']
+          assert 'releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz' in data
+          assert 'releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz' in data
+          assert 'bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB' in data
+          assert '084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5' in data
+          PY
       - run: python3 studio workstation --help

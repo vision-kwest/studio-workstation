@@ -47,7 +47,14 @@ def run(directory):
                 for name in original:
                     if name not in required:
                         assert original[name]==modified[name],name
-                assert b"STUDIO_STANDALONE" in modified["scripts/common/linux/install_app.sh"]
+                app_installer=modified["scripts/common/linux/install_app.sh"]
+                assert b"STUDIO_STANDALONE" in app_installer
+                assert b"s3api get-object" in app_installer
+                assert b"--version-id" in app_installer
+                assert b"STUDIO_APP_VERSION_ID" in app_installer
+                assert b"STUDIO_APP_SHA256" in app_installer
+                assert b"sha256sum --check --status" in app_installer
+                assert b"s3 cp" in app_installer  # managed RES branch preserved
                 assert b"install_post_reboot.sh" in modified["scripts/virtual-desktop-host/linux/install.sh"]
                 assert b"printf" in modified["scripts/dcv/linux/debian/dcv_server.sh"]
                 assert b"STUDIO_STANDALONE" in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
