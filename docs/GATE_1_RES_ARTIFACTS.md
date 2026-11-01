@@ -1,5 +1,7 @@
 # Gate 1 — RES 2026.06 original artifact verification
 
+> **Historical Gate 1 evidence:** This source-integrity checkpoint preceded the published PR #65 two-key immutable GPU runtime release. Earlier `not applied`, `proposed`, or `deferred` statements apply **only to the original gate checkpoint**. For current S3 keys/versions and validated live downloads see [runtime provenance](../runtime/README.md) and [Studio CLI](studio-cli.md#gpu-workstation-tested-acceptance-scope).
+
 **Status: CONDITIONALLY COMPLETE (2026-10-22).** Project owner explicitly approved deferring the standalone EC2 instance-role access test until a separately authorized controlled deployment. **No implementation or AWS deployment authorized.**
 
 ## Source pin

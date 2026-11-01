@@ -1,43 +1,43 @@
-# CPU and GPU image building — visual guide
+# CPU and GPU Image Builder — process and actual status
 
-The **CPU Image Builder pipeline** is our proven reference. The **GPU pipeline** follows its staged GDM-first/reboot pattern, with the original RES NVIDIA GRID path.
+The **CPU** Image Builder recipe uses GDM-first desktop staging. The **GPU** recipe adds the RES NVIDIA GRID stage and hardware-accelerated OpenGL checks. Image building is not the same as operating a live EC2 desktop.
 
 ```mermaid
 flowchart TD
-  Parent["Canonical Ubuntu 24.04 parent AMI"] --> GDM["GDM-first 0.5.0 / reboot"]
-  GDM --> Desktop{"CPU or GPU recipe?"}
-  Desktop -->|CPU| CPUD["CPU desktop + dummy Xorg / reboot"]
-  Desktop -->|GPU| GPUD["GPU desktop, no dummy Xorg / reboot"]
-  GPUD --> NVIDIA["Original RES NVIDIA GRID installer / reboot"]
-  CPUD --> CPUDCV["DCV server / reboot"]
-  NVIDIA --> GPUDCV["DCV + nice-dcv-gl / reboot"]
-  CPUDCV --> CPUTEST["CPU console smoke test"]
-  GPUDCV --> GPUTEST["T4 + Xorg + hardware OpenGL + DCV tests"]
+  Parent["Ubuntu 24.04 parent AMI"] --> GDM["GDM-first desktop stage"]
+  GDM --> Choice{"CPU or GPU?"}
+  Choice -->|CPU| CPUD["CPU desktop + dummy Xorg"]
+  Choice -->|GPU| GPUD["GPU desktop without dummy Xorg"]
+  CPUD --> CPUDCV["DCV server"]
+  GPUD --> NVIDIA["RES NVIDIA GRID driver stage"]
+  NVIDIA --> GPUDCV["DCV + nice-dcv-gl"]
+  CPUDCV --> CPUTEST["CPU DCV smoke"]
+  GPUDCV --> GPUTEST["Tesla T4 + hardware GLX + Xorg + DCV smoke"]
   CPUTEST --> CPUAMI["Validated CPU AMI"]
-  GPUTEST --> GPUAMI["GPU AMI only if tests pass"]
+  GPUTEST --> GPUAMI["Validated GPU AMI 0.1.11/1"]
 ```
 
-## Inputs and outputs
+## Input / output boundaries
 
 | Input | Role |
 |---|---|
-| Parent Ubuntu AMI | OS baseline; a stale base triggered the intentional exit-40 package upgrade guard |
-| Image recipe | Ordered, versioned Image Builder components |
-| Infrastructure configuration | Temporary build instance type and instance profile |
-| Distribution configuration | AMI naming and distribution region |
-| RES installation archive | Original bootstrap, GPU driver installer and DCV integration |
-| Pinned NVIDIA GRID dependency | Exact S3 object version and expected SHA-256 |
+| Ubuntu parent AMI | OS baseline, package/upgrade/reboot compatibility |
+| Image recipe/components | Versioned installation order and reboot checkpoints |
+| Build IAM role | Pinned source package and NVIDIA driver reads |
+| `g4dn.xlarge` builder | Actual Tesla T4 hardware smoke tests |
+| RES source archives | Pinned RES 2026.06 installers and runtime |
 
 | Output | Meaning |
 |---|---|
-| Image Builder execution | Build and test status, component logs |
-| Custom AMI | Created only after build stages complete |
-| GPU workstation | Separate CloudFormation deployment and interactive DCV validation required |
+| Successful Image Builder image | Recipe and configured smoke tests completed |
+| Available AMI | Reusable image, **not** a running desktop |
+| Interactive workstation | Separately tested CloudFormation + RES bootstrap + DCV login |
 
-## Status of the first GPU builds
+## GPU milestones
 
-- GPU 0.1.2/1 failed in `InstallDesktop` with intentional exit 40 (core OS package upgrade guard).
-- GPU 0.1.3/1 was started with refreshed Canonical Ubuntu 24.04 AMI `ami-0d6dd9e8265d48906`. **Its outcome is not yet confirmed in this documentation.**
-- No successful GPU AMI or GPU DCV login should be inferred from a pipeline's `BUILDING` state.
+- Earlier GPU 0.1.2/1 and other builds failed during desktop/core package installation. The initial 0.1.3/1 outcome was unconfirmed in an older visual milestone; that was **not the final project state**.
+- **0.1.11/1 succeeded**, producing GPU AMI `ami-027c98f85b155c2ac` in `us-east-1`.
+- Live standalone RES/DCV/Tesla T4 login, persistent root-EBS stop/start and cleanup were subsequently verified through merged PR #65 ([Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46)).
+- The **GPU Image Builder pipeline remains disabled and references older recipe 0.1.10**. Updating it is independent of the working 0.1.11/1 AMI.
 
-See [RES GPU source trace](res-gpu-imagebuilder-audit.md) and [GPU profile](gpu-workstation-profile.md).
+See [GPU profile](gpu-workstation-profile.md), [runtime provenance](../runtime/README.md), [original RES GPU audit](res-gpu-imagebuilder-audit.md) (historical) and [Studio CLI](studio-cli.md).

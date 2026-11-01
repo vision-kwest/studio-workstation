@@ -1,5 +1,7 @@
 # Studio Workstation — Standalone RES Compatibility Decisions
 
+> **Historical design decision snapshot (October 22, 2026):** The gates and permissions discussions below document what was required *at that point*. The minimal standalone RES adapter, CPU/GPU desktop, GPU CLI stop/start and teardown were subsequently validated, and PR #65 was merged. See [current status](../README.md#status-after-merged-pr-65), [Studio CLI](studio-cli.md) and [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46) for completed acceptance. New changes still require engineering review.
+
 **Status:** Design direction accepted by project owner; **implementation and AWS deployment NOT authorized**.
 **Upstream reference:** `aws/res` tag `2026.06`. Governed by [AGENTS.md](../AGENTS.md), [RES_COMPATIBILITY.md](RES_COMPATIBILITY.md), and [DEVIATIONS.md](DEVIATIONS.md).
 

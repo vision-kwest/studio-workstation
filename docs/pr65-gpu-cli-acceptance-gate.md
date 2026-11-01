@@ -1,5 +1,7 @@
 # PR #65 — GPU CLI controlled acceptance: final predeployment gate
 
+> **ARCHIVED predeployment gate — acceptance COMPLETE, PR #65 MERGED.** This document records the staged blockers, IAM/S3 investigations and multiple intermediate `NO-GO` decisions made **before** the test. They are not current status or user commands. The exact test later launched successfully with local DCV login and Tesla T4/OpenGL, passed EC2 stop/start plus persisted-file SHA-256, and finished with CloudFormation `DELETE_COMPLETE`, test instance terminated, retained EBS/SG/LaunchTemplate absent and both one-shot schedules removed. A dedicated tag-scoped IAM role remains. The earlier Lambda/DynamoDB cleanup proposal was not deployed. Use [current CLI](studio-cli.md), [runtime release provenance](../runtime/README.md), and [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46) instead of copying the obsolete `--yes` or blocked-deployment instructions below.
+
 **Status: NO-GO. Offline/read-only only.** This runbook is not authorization to deploy. The draft PR must remain unmerged until separately approved.
 
 ## Pinned inputs (us-east-1)

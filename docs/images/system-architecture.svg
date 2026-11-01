@@ -24,5 +24,5 @@
 <path d="M1036 286 V337 H435 V380"/><path d="M550 449 H615"/><path d="M851 449 H915"/>
 </g>
 <g fill="#52657b"><path d="M310 228 l-12 -7 v14z"/><path d="M600 228 l-12 -7 v14z"/><path d="M906 228 l-12 -7 v14z"/><path d="M435 380 l-7 -12 h14z"/><path d="M615 449 l-12 -7 v14z"/><path d="M915 449 l-12 -7 v14z"/></g>
-<text x="54" y="581" font-family="Arial,sans-serif" font-size="17" fill="#52657b">SSM: administrative access • RES 2026.06: desktop bootstrap • GPU AMI validation in progress</text>
+<text x="54" y="581" font-family="Arial,sans-serif" font-size="17" fill="#52657b">SSM: administrative access • RES 2026.06: desktop bootstrap • GPU AMI and DCV validated; scoped CLI acceptance complete</text>
 </svg>

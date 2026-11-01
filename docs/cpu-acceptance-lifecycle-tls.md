@@ -1,5 +1,7 @@
 # Standalone CPU workstation: end-to-end acceptance and lifecycle
 
+> **Current status (after merged PR #65):** This page preserves CPU v0.1.3 acceptance and TLS history, not the current CLI syntax. Use [Studio CLI](studio-cli.md): `python3 studio workstation stop|start --stack NAME` (no `--yes` or duplicate confirmation flags). Historical `scripts/workstation_lifecycle.py` references below refer to a **different, older script** which still has its original flags. CPU stop/start and GPU persistence have been validated; see [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46).
+
 ## Verified baseline (2026-10-25)
 
 On EC2 `i-09122a298e3878a57` (stack `studio-workstation-cpu-v011`),

@@ -1,5 +1,7 @@
 # Gate 2 — RES 2026.06 Python import and dependency validation specification
 
+> **Historical Gate 2 validation specification:** Its test approvals, import questions and `pending` reports reflect an early review checkpoint. The RES-derived runtime was implemented and tested after this document; the GPU CLI acceptance completed in merged PR #65. For current behavior and user commands see [runtime provenance](../runtime/README.md) and [Studio CLI](studio-cli.md). Retain this document as traceability for safe import/testing boundaries.
+
 **Status: TEST SPECIFICATION ONLY.** No tests have been executed; no provisioning changes, EC2 launches, AWS role modifications or implementation are authorized. This is a reviewable non-deploying test contract.
 
 ## Pinned evidence and inputs

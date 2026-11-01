@@ -1,5 +1,7 @@
 # Gate 4 — Bootstrap and application handoff dependency closure
 
+> **Historical Gate 4 dependency audit:** Proposed source edits and `Gate 4 remains open` language below refer to an older review, before the standalone RES adapter and completed GPU test. The accepted runtime preserves original installer/reboot/Supervisor/DCV lifecycle; see [runtime provenance](../runtime/README.md). Use [Studio CLI](studio-cli.md) for current operations, not the historical gate's deployment decisions.
+
 **Analysis only; implementation NOT authorized.** Pinned AWS RES commit `1f526a241fb293a29fb018f08ccf81c100c05a42`. Companion: [proposed source diffs](GATE_4_PROPOSED_SOURCE_DIFFS.md). This document records source-backed remaining boundaries; it is **not** a complete mechanically applicable patch.
 
 ## Original runtime call chain (verified)

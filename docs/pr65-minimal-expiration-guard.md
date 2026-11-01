@@ -1,5 +1,7 @@
 # PR #65 — one-off GPU CLI expiration safeguard (Task 1)
 
+> **Historical Task 1–4 progression — final outcome (2026-11-01): PR #65 merged and the supervised GPU CLI lifecycle test passed.** Early `live disabled`, `--yes`, `--confirm-stack`, role absent and `no EC2 launched` statements below describe earlier checkpoints and no longer reflect the current CLI. The accepted flow used two one-time Scheduler actions under the exact tag-scoped `studio-pr65-cli-expiration` role; EC2 stop/start, persisted file checksum, T4/OpenGL, DCV and final cleanup were verified. Both schedules and all test EC2/EBS/SG/LaunchTemplate resources were deleted; the IAM role remains. Current flags, scope and cleanup limitations: [Studio CLI](studio-cli.md).
+
 **Offline only. No IAM changes, schedules, EC2, or stack deployments.**
 The current GPU CLI launch block remains in place. The existing Lambda/DynamoDB
 cleanup subsystem is preserved in GitHub but deferred for this supervised test.

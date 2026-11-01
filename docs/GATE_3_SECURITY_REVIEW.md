@@ -1,5 +1,7 @@
 # Gate 3 — Security decisions review (RES 2026.06)
 
+> **Historical Gate 3 review:** This document records the earlier decisions and deferred tests. In the accepted GPU runtime, RES/DCV console permissions and local Linux system authentication passed live validation; the user successfully logged in. This is **not** a security sign-off for permanent public TCP 8443 or trusted TLS. Current access instructions and open hardening items: [Studio CLI](studio-cli.md), [Issue #62](https://github.com/vision-kwest/studio-workstation/issues/62).
+
 **Status: Option A first-login enrollment APPROVED as design; package-version and runtime verification still open. No provisioning implementation or AWS deployment authorized.**
 
 Upstream pin: `aws/res` tag `2026.06`, commit `1f526a241fb293a29fb018f08ccf81c100c05a42`. Related: [Gate 3 design](GATE_3_DCV_AUTH_DESIGN.md).

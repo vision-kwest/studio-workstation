@@ -1,5 +1,7 @@
 # RES 2026.06 GPU AMI source trace and Image Builder reproduction
 
+> **Historical GPU source trace:** The earlier `no GPU build authorized` review was superseded by the validated GPU Image Builder 0.1.11/1 AMI and live Tesla T4/DCV workstation acceptance. The GPU **pipeline** remains disabled with recipe 0.1.10. For the actual current build/AMI distinction see [GPU Image Builder visual](gpu-image-builder-visual.md) and [GPU profile](gpu-workstation-profile.md).
+
 ## Confirmed upstream code (tag `2026.06`)
 
 - `source/idea/idea-bootstrap/resources/scripts/virtual-desktop-host/linux/install.sh`:

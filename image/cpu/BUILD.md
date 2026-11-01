@@ -1,5 +1,7 @@
 # CPU-only Ubuntu 24.04 DCV golden AMI — experimental v0.2
 
+> **Historical experimental v0.2 manual CPU AMI design:** This document preserves the pre-Image Builder prototype. The CPU v0.1.3 desktop was subsequently live validated (including local DCV login and stop/start), and the GPU AMI 0.1.11/1 plus merged Studio CLI acceptance were also completed. This page is **not** the recommended current build/deployment procedure; see [Quick Start](../../README.md), [Studio CLI](../../docs/studio-cli.md), [GPU image status](../../docs/gpu-image-builder-visual.md), and [docs index](../../docs/INDEX.md).
+
 **Status:** implementation candidate; not yet deployed or tested on EC2. Do not label this AMI production-ready until graphical login and reboot tests pass.
 
 ## Goal

@@ -1,6 +1,6 @@
 # Standalone RES 2026.06 GPU/DCV runtime — validated implementation
 
-**Status (2026-10-31): LIVE VALIDATED on baked GPU AMI `ami-027c98f85b155c2ac` in `us-east-1`.** The release path is the **original RES cloud-init installer, reboot continuation, Supervisor and `ideavirtualdesktop` bootstrap** with narrow standalone guards. No parallel systemd runtime coordinator is installed or enabled. This validation does not mean the PR is merged or that the GPU Image Builder pipeline has been updated.
+**Current after merged PR #65 (November 2026): GPU runtime and persistent CLI acceptance validated.** On baked GPU AMI `ami-027c98f85b155c2ac` in `us-east-1`, the original RES cloud-init installer, reboot continuation, Supervisor and `ideavirtualdesktop` bootstrap (with narrow standalone guards) passed live testing. PR #61 and PR #65 are merged; the GPU Image Builder **pipeline** remains disabled and points to recipe 0.1.10.
 
 ## Architecture and provenance
 
@@ -34,7 +34,7 @@ Live Task 7/8 acceptance confirmed:
 - Access from changing client networks and optional IP restrictions: [Issue #62](https://github.com/vision-kwest/studio-workstation/issues/62). Public DCV ingress must never be enabled implicitly.
 - Slight YouTube audio/video synchronization offset observed by the user; latency and browser/client performance not yet measured.
 - The Task 7 launcher does not automatically reconcile every orphaned SG/schedule after abnormal process failure; always supervise cleanup.
-- PR #61 remains draft until final source review and CI pass. Do not merge or update pipelines without explicit approval.
+- PR #61 and PR #65 have been merged. The GPU Image Builder pipeline was **not** upgraded; updating it remains separate work.
 
 ## Offline verification
 
@@ -42,7 +42,7 @@ Run `python3 -m unittest discover -s tests -v` and review the focused GitHub Act
 
 ## PR #65 — separately published installer (November 1, 2026)
 
-The Task 7 release above is historical and remains intact. For the pending persistent-GPU CLI acceptance test, the **new, verified installation archive** has been published to a distinct S3 key by the user's authorized CloudShell root session:
+The Task 7 release above is historical and remains intact. For the **completed** persistent-GPU CLI acceptance test, the **new, verified installation archive** was published to a separate S3 key through an authorized CloudShell session:
 
 - Bucket: `studio-workstation-releases-401233741942-us-east-1`
 - Key: `releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz`
@@ -54,4 +54,10 @@ The **application archive** continues to use the previously verified Task 7 S3 k
 
 The GPU renderer deliberately uses two distinct S3 prefixes, embedding the new bootstrap VersionId/digest in the original RES user data and the existing app VersionId/digest in `/etc/studio-standalone.env`. CPU and other non-pinned rendering remains unchanged.
 
-**Remaining deployment prerequisites:** The workstation EC2 instance profile `StudioWorkstationSSMRole` grants `s3:GetObject` but *not* `s3:GetObjectVersion`. Read-only IAM simulation returned `implicitDeny` for the exact-version installer and application downloads. Grant the two exact-key version-read permissions in `infra/pr65-runtime-version-read.review-only.json` through a separately approved IAM update and verify effective access. This applies to the EC2 instance role and is unrelated to the user's decision to use root for development. The independent scoped cleanup safeguard also remains undeployed/unverified. Do not launch or merge until both gates are resolved and separately authorized.
+**Resolved in the accepted test:** The workstation EC2 instance profile received an approved narrow `s3:GetObjectVersion` grant for the two exact archive keys, and the live instance successfully downloaded and executed RES runtime. The approved acceptance safeguard was **not** the proposed Lambda/DynamoDB system: two independently verified one-time EventBridge Scheduler actions used the dedicated tag-scoped `studio-pr65-cli-expiration` role. The test's instance, retained EBS, SG, launch template and schedules were verified removed; the role remains. See [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46) and [current CLI instructions](../docs/studio-cli.md).
+
+## Final PR #65 GPU CLI acceptance — November 1, 2026
+
+The accepted GPU CLI launched the exact scoped `studio-gpu-cli-accept65` test stack. The user confirmed interactive DCV password login. EC2 was stopped and restarted with the **same instance and 100 GiB retained root EBS**; a file under `/home/workstation/` retained the exact original SHA-256. After restart, RES semaphore readiness, GDM, Xorg, Tesla T4 hardware OpenGL, DCV console and local HTTPS 200 were verified. The public IPv4 changed on stop/start; a second browser login after restart was not separately confirmed.
+
+CloudFormation then reached `DELETE_COMPLETE`; AWS returned not found for the test EBS volume, SG and launch template, and both one-shot Scheduler actions were subsequently removed and independently checked absent. The dedicated IAM role remains. The GPU CLI currently accepts only the exact approved stack/token with one-shot expiration—not arbitrary GPU workstations or a permanent production control plane.

@@ -1,5 +1,7 @@
 # Gate 3 — Standalone Amazon DCV authentication and console authorization
 
+> **Historical DCV authentication design review:** The originally unapproved credential enrollment and console-authority questions were subsequently resolved in the tested standalone runtime. Current behavior is DCV **system authentication** with a local `workstation` Linux account; set a unique password interactively over SSM, not in user data. Real user DCV login was verified in PR #65. See [current CLI](studio-cli.md) and [runtime](../runtime/README.md).
+
 **Status: proposed design baseline, NOT implementation approval.** RES upstream: [aws/res `2026.06`](https://github.com/aws/res/tree/2026.06), commit `1f526a241fb293a29fb018f08ccf81c100c05a42`. Applies to accepted design decision 1 and deviations D-001/D-002. This document records an owner-only baseline and the remaining security review gates; it does not change RES source, IAM, CloudFormation or EC2.
 
 ## Baseline and explicit boundaries

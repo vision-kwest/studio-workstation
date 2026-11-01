@@ -1,5 +1,7 @@
 # Gate 4 — Minimal RES 2026.06 standalone source patch specification
 
+> **Historical minimal-patch specification:** The proposed implementation/approval checklist here predates the merged standalone RES/DCV runtime and live GPU acceptance. The accepted code is under `runtime/overrides/` with the original RES reboot and automatic DCV console behavior. See [runtime](../runtime/README.md) and [Studio CLI](studio-cli.md); this page remains useful for understanding original minimal-diff intentions, not current release readiness.
+
 **Status: PROPOSED FOR REVIEW. No implementation authorized.** This is a source-level change specification, not a patch or permission to deploy. Upstream [aws/res `2026.06`](https://github.com/aws/res/tree/2026.06), commit `1f526a241fb293a29fb018f08ccf81c100c05a42`. Design: [approved choices](STANDALONE_DESIGN_DECISIONS.md), [Gate 3](GATE_3_SECURITY_REVIEW.md), [deviations](DEVIATIONS.md).
 
 ## Preserve unchanged

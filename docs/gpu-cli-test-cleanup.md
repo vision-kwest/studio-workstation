@@ -1,5 +1,7 @@
 # Issue #46: independent GPU CLI acceptance cleanup — offline design
 
+> **Historical, alternative cleanup design — NOT deployed for accepted PR #65:** The Lambda/DynamoDB/recurring-Scheduler proposal below was explored and tested offline but was **not** the mechanism used for the successful GPU CLI acceptance. The live test instead used two direct one-time EventBridge schedules with a dedicated tag-scoped IAM role and manual resource audit. Both test schedules and all acceptance EC2/EBS/SG/LaunchTemplate resources were removed; the scoped role remains. See [Studio CLI](studio-cli.md#destroy-and-verify-cleanup) and [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46). Historical `NO-GO` and `NOT DEPLOYED` statements concern this *alternative* template, not the already merged CLI.
+
 **NOT DEPLOYED.** This is a dedicated test-only cleanup component, not a production
 workstation lifecycle service. No AWS resources are created by importing this module.
 

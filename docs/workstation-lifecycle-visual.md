@@ -1,28 +1,33 @@
-# Workstation lifecycle — visual guide
+# Workstation lifecycle — validated CPU and GPU paths
 
-Image creation and day-to-day instance lifecycle are distinct operations.
+A baked AMI and a running workstation are separate resources. Merged PR #65 validated **create → GPU/DCV login → stop → start → verify saved file → destroy and audit** using one scoped GPU acceptance workstation.
 
 ```mermaid
 flowchart TD
-  AMI["Validated CPU or GPU AMI"] --> Create["CloudFormation create"]
+  AMI["Validated CPU or GPU AMI"] --> Create["CLI create + CloudFormation"]
   Create --> Running["EC2 running"]
-  Running --> Ready["SSM online + RES/DCV console ready"]
-  Ready --> Connect["Connect via DCV using local workstation login"]
-  Connect --> Stop["Save work; stop EC2"]
-  Stop --> Start["Start same EC2 instance"]
-  Start --> IP["Refresh public IP and verify DCV readiness"]
+  Running --> Ready["SSM + RES/DCV ready"]
+  Ready --> Connect["DCV local Linux login"]
+  Connect --> Stop["Save work; CLI stop"]
+  Stop --> Stopped["Same EBS retained; EC2 stopped"]
+  Stopped --> Start["CLI start: same instance"]
+  Start --> IP["Public IP can change; verify DCV"]
   IP --> Connect
-  Ready --> Destroy["CloudFormation destroy (explicit approval)"]
-  Stop --> Destroy
-  Destroy --> EBS["Audit retained EBS volumes"]
+  Connect --> Destroy["CLI destroy --delete-stack"]
+  Stopped --> Destroy
+  Destroy --> EBS["Verify EBS, SG and launch template removed"]
+  EBS --> Schedules["Verify then remove test schedules"]
 ```
 
 ## Operational rules
 
-- **Stop** preserves the EBS-backed workstation and avoids running-instance compute charges; EBS charges remain.
-- **Start** may assign a new public IPv4 address. Verify SSM and DCV rather than assuming EC2 running means the desktop is ready.
-- **Destroy** removes stack-managed resources. With `DeleteOnTermination=false`, a root EBS volume can remain and continue to incur charges; inspect before deletion.
-- The validated CPU v0.1.3 workstation successfully survived stop/start and DCV reconnection. GPU lifecycle acceptance remains pending.
-- No inbound SSH is required for daily DCV use; SSM is the administrative path.
+- **Create** immediately deploys a billable stack unless `--dry-run` is supplied. There is no `--yes`, `--confirm-stack`, or `--confirm-instance`.
+- **Stop** preserves the EBS-backed filesystem; EC2 compute charges stop after the instance reaches `stopped`, while storage charges continue. The GPU test observed an NVIDIA DRM warning and slow stop; the instance ultimately stopped successfully.
+- **Start** may change the instance's public IPv4, as observed during GPU acceptance. Check SSM, GDM/Xorg, DCV console and GPU OpenGL rather than assuming `running` means login is ready.
+- **Connect** prints the current DCV URL. DCV authenticates the local `workstation` account (set a strong password interactively via SSM). No inbound SSH is required.
+- **Destroy** uses `destroy --stack NAME --delete-stack`. Retained GPU EBS (`DeleteOnTermination=false`) **may survive** stack deletion; independently inspect exact volume ID, SG, launch template and scheduled expiration actions before confirming cleanup.
+- **One-shot GPU test expiration** runs through stop/start. It is not a general production stop/start service; the EBS deletion action is best-effort.
 
-See [CLI usage](studio-cli.md) and [architecture](visual-architecture.md).
+**Acceptance evidence:** CPU v0.1.3 passed prior stop/start DCV reconnection. GPU PR #65 passed exact file SHA-256 persistence, RES/T4/DCV readiness after restart and final cleanup; the user confirmed interactive DCV login before the stop/start test but not separately afterward.
+
+See [Studio CLI](studio-cli.md), [Quick Start](../README.md#quick-start), and [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46).

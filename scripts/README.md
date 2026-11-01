@@ -1,4 +1,7 @@
-# Release preparation
+# RES-derived release preparation and publication
+
+**Current documentation note (post-PR #65):** The v0.1.1/v0.1.3 commands below are historical release examples, **not** the pinned keys consumed by the accepted GPU CLI. For workstation creation and daily use see [Studio CLI](../docs/studio-cli.md) and [Quick Start](../README.md#quick-start). The GPU CLI fetches two separately pinned archive versions recorded in [runtime provenance](../runtime/README.md). Old S3 publication and IAM review blockers were resolved during the live acceptance test; do not repeat one-time upload/policy changes merely because an older example still describes them.
+
 
 From a fresh checkout:
 
@@ -60,10 +63,7 @@ identity needs `s3:PutObject`, `s3:GetObject` and `s3:ListBucket` or
 appropriate object existence-check permissions. No EC2, IAM, or CloudFormation
 resources are created by this command.
 
-**Deployment note:** `runtime/render_workstation.py` must be given the same
-release prefix (`releases/v0.1.1/res-2026.06`), rather
-than the earlier experimental `cpu-v1` prefix. CPU and GPU builds may share
-the same released application artifacts.
+**Historical v0.1.1 deployment note:** The example below uses its matching `releases/v0.1.1/res-2026.06` prefix. **Do not use that single prefix for the accepted GPU CLI.** The installation scripts and application archive live at different immutable S3 keys; see [current GPU requirements](../docs/studio-cli.md#gpu-workstation-tested-acceptance-scope).
 
 ## Release bucket provisioning (separate approval)
 
@@ -98,9 +98,7 @@ python3 runtime/render_workstation.py \
 
 ## Workstation role permissions and release upgrades
 
-The instance profile `StudioWorkstationSSMRole` must be able to read the
-published release **before** cloud-init starts. The policy is version-independent
-and limited to the two RES-derived archive filenames:
+The instance profile `StudioWorkstationSSMRole` must be able to read the published release **before** cloud-init starts. The historical policy below provides broad filename-based **`s3:GetObject`** reads:
 
 `infra/workstation-release-read-policy.json`
 
@@ -120,10 +118,9 @@ It can match more than semantic version strings; scope remains limited to the
 specified bucket, RES version path and two archive names. Keep the
 `AmazonSSMManagedInstanceCore` managed policy attached separately.
 
-Before deploying a new release, verify its **installation-scripts.tar.gz**
-and **virtual-desktop.tar.gz** objects exist and that the EC2 role can read
-them. An administrator's successful S3 read does **not** establish that the
-EC2 instance role is authorized.
+**Additional current GPU requirement:** The PR #65 pinned downloader uses `s3:GetObjectVersion` for **two exact objects**. That narrow permission was separately applied to `StudioWorkstationSSMRole` and validated during live acceptance. The older `s3:GetObject` grant alone is insufficient. See `infra/pr65-runtime-version-read.review-only.json` for the reviewed IAM policy shape and [runtime provenance](../runtime/README.md) for the exact keys and versions. Do not blindly reapply older IAM policies.
+
+Before deploying any new release, verify both archive objects and **effective EC2 instance-profile access**. An administrator's successful S3 read does not prove the EC2 role can fetch the required version.
 
 ### Recovery: S3 403 during bootstrap
 
