@@ -29,7 +29,7 @@ These are preserved evidence/review documents rather than CLI instructions:
 - [CPU/GPU building visual](gpu-image-builder-visual.md) (current outcomes plus older milestone labels).
 - [GPU component generator](gpu-imagebuilder-components.md), [GPU 0.1.1 review](gpu-imagebuilder-v011-preflight.md), [GPU 0.1.11 offline review](imagebuilder-0111-review.md).
 - Historical/manual CPU plans: [CPU experimental v0.2](../image/cpu/BUILD.md), [CPU v0.4 automated build](../image/cpu/AUTOMATED_BUILD.md).
-- **Current GPU AMI:** \`ami-027c98f85b155c2ac\` was validated at 0.1.11/1, but the GPU Image Builder **pipeline** is still disabled and pointing to recipe 0.1.10. Image availability and pipeline configuration are different facts.
+- **Current GPU AMI:** `ami-027c98f85b155c2ac` was validated at 0.1.11/1, but the GPU Image Builder **pipeline** is still disabled and pointing to recipe 0.1.10. Image availability and pipeline configuration are different facts.
 
 ## PR #65 and Task 7 test records (historical)
 
@@ -45,4 +45,4 @@ These are preserved evidence/review documents rather than CLI instructions:
 
 ## Guidance for future edits
 
-Update **this index, the main README and \`docs/studio-cli.md\` together** whenever the user-facing CLI or AWS resource lifecycle changes. Keep the archived gate/review reports as dated evidence and add a current-status banner rather than silently rewriting what happened at the time.
+Update **this index, the main README and `docs/studio-cli.md` together** whenever the user-facing CLI or AWS resource lifecycle changes. Keep the archived gate/review reports as dated evidence and add a current-status banner rather than silently rewriting what happened at the time.
