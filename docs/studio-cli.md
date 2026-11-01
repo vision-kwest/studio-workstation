@@ -1,144 +1,177 @@
-# Studio Workstation CLI (CPU v0.1.3 + GPU RES 2026.06)
+# Studio Workstation CLI — Quick Start and daily operations
 
-Thin Python standard-library wrapper over the **existing** RES-derived CloudFormation
-renderer and AWS CLI. It does not replace RES bootstrap or introduce a control plane.
+**Current after merged PR #65 (November 2026).** Source of truth: [\`scripts/studio_workstation_cli.py\`](../scripts/studio_workstation_cli.py), [entry point](../studio), [GPU create guard](../runtime/pr65_gpu_create.py), [one-shot expiration helper](../runtime/pr65_one_shot_guard.py). Historical PR #65 gates and earlier CLI syntax are archived; see the [documentation index](INDEX.md).
 
-Run from a checkout in an authorized **AWS CloudShell** environment:
+The CLI uses the existing RES-derived CloudFormation renderer and AWS CLI. It does not install a control plane, change the working Image Builder pipeline, or expose SSH.
 
-```bash
+## Requirements
+
+Use a repository checkout in AWS CloudShell or another machine with:
+
+- Python 3, \`jinja2\` (from \`requirements.txt\`), AWS CLI v2, suitable credentials and access to \`us-east-1\`.
+- The published immutable RES-derived release archives in \`studio-workstation-releases-401233741942-us-east-1\`.
+- Existing EC2 instance profile \`StudioWorkstationSSMRole\` with SSM and permitted release reads; approved VPC \`vpc-01bbe5d01838f70b2\` / subnet \`subnet-0986937ce71fb97cb\`.
+- Access to CloudFormation, EC2 and SSM. The GPU controlled-acceptance flow also requires its pre-established narrowly scoped Scheduler role and group.
+
+\`\`\`bash
 cd ~/studio-workstation
+git switch main
+git pull --ff-only origin main
+python3 -m pip install -r requirements.txt
 python3 studio workstation --help
-```
+\`\`\`
 
-Requires Python 3, `jinja2` for the existing renderer, AWS CLI v2,
-account/region access, existing `StudioWorkstationSSMRole` instance profile,
-and the already-published immutable v0.1.3 S3 release.
+The command is **\`python3 studio workstation\`**. It is not an installed system-level \`studio\` binary.
 
-## Create a CPU workstation
+## Command behavior — no redundant confirmations
 
-```bash
-# Render and validate only; no EC2 resources created
-python3 studio workstation create --stack studio-workstation-cpu-test --profile cpu
+| Command | Behavior |
+|---|---|
+| \`create --stack NAME --profile cpu\` | **Creates** a CPU CloudFormation stack and EC2 instance; incurs charges |
+| \`create --stack NAME --profile gpu\` | **Creates** only if the exact GPU acceptance stack/token and guard checks pass |
+| \`create ... --dry-run\` | Renders and calls CloudFormation ValidateTemplate; **no EC2 launch** |
+| \`status --stack NAME\` | Reads the current EC2 instance ID, status, public IP and DCV URL |
+| \`check-ready --stack NAME\` | Uses SSM Run Command for guest-side RES/DCV/GPU diagnostic checks; doesn't prove a human login |
+| \`connect --stack NAME\` | Prints the current \`https://PUBLIC_IP:8443\` URL; doesn't launch a browser |
+| \`connect --stack NAME --ssm\` | Opens an administrative SSM Session Manager session |
+| \`stop --stack NAME\` | Stops the resolved EC2 instance; waits for \`stopped\` |
+| \`start --stack NAME\` | Starts the same instance; waits for EC2 health, **not DCV readiness** |
+| \`destroy --stack NAME --delete-stack\` | Permanently deletes stack-managed resources; requires a **separate EBS/Scheduler audit** |
 
-# Explicitly authorize a new, billable CloudFormation stack
-python3 studio workstation create --stack studio-workstation-cpu-test \
-  --profile cpu --version v0.1.3 --yes \
-  --confirm-stack studio-workstation-cpu-test
-```
+\`--yes\`, \`--confirm-stack\`, and \`--confirm-instance\` **were removed**. Running a command is authorization; you will not be asked to type the same stack or instance twice. \`--delete-stack\` remains mandatory for destructive teardown; \`--dry-run\` is how to preview creation. AWS subprocesses pass \`--no-cli-pager\`, so CloudShell should no longer stop at \`(END)\` after ValidateTemplate.
 
-Defaults are the **tested account-specific** us-east-1 AMI, VPC, public
-subnet, `m7i.large`, 100 GiB encrypted gp3, existing SSM profile, and
-`ClientCidr=0.0.0.0/0`. Verify these values for your account and region.
-Override using `--image-id`, `--vpc-id`, `--subnet-id`,
-`--instance-profile`, `--instance-type`, `--disk-size`, and
-`--client-cidr`. Public DCV exposes the login page to the internet;
-use a strong unique password. No SSH ingress is created.
+### CPU workstation — create and connect
 
-The CLI deliberately **refuses to create** if the stack name already exists,
-so a create command cannot silently update or replace a working EC2 instance.
-It renders/validates a temporary template before deployment.
+First preview the exact inputs:
 
-After provisioning, wait for original RES bootstrap and reboots to complete.
-Check `cloud-init status --long`, DCV `console`, SSM Online, and the
-RES application readiness log. Set the fresh local user password with
-`sudo passwd workstation` through SSM. This enrollment is not automated.
+\`\`\`bash
+python3 studio workstation create \
+  --stack studio-workstation-cpu-review \
+  --profile cpu --version v0.1.3 \
+  --client-cidr YOUR_PUBLIC_IP/32 --dry-run
+\`\`\`
 
-## Create a GPU workstation (Issue #46)
+When ready to create a billable instance, omit \`--dry-run\`:
 
-The GPU profile uses validated AMI `ami-027c98f85b155c2ac` in `us-east-1`,
-`g4dn.xlarge` and the exact RES 2026.06 derived archive prefix
-`releases/task7-pr61-postreboot-a8ec326/res-2026.06`. This is **not**
-`releases/v0.1.11/res-2026.06`. The CLI pins the two S3 object version IDs
-and verifies them with read-only AWS calls before deploying. The published
-SHA-256 hashes and acceptance evidence are in [runtime/README.md](../runtime/README.md).
+\`\`\`bash
+python3 studio workstation create \
+  --stack studio-workstation-cpu-review \
+  --profile cpu --version v0.1.3 \
+  --client-cidr YOUR_PUBLIC_IP/32
+\`\`\`
 
-```bash
-# Offline render + CloudFormation validation; does not create EC2
-python3 studio workstation create --stack studio-gpu-review --profile gpu
+CPU defaults currently include \`m7i.large\`, encrypted 100 GiB gp3, CPU AMI \`ami-0d6dd9e8265d48906\`, the account-specific VPC/subnet/profile above, and **public** \`ClientCidr=0.0.0.0/0\` unless overridden. Supply a trusted CIDR rather than relying on this default. You may override CPU instance type, disk, AMI, subnet and instance profile; inspect the rendered template before deployment. A new \`create\` refuses an existing stack name instead of silently updating it.
 
-# Billable deployment: explicit stack confirmation required
-python3 studio workstation create --stack studio-gpu-review --profile gpu \
-  --yes --confirm-stack studio-gpu-review
+Wait for RES bootstrap and reboots, then enroll a strong unique local password. Do not put passwords into user data or SSM Run Command parameters:
 
-# After RES installation and reboots, verify readiness via SSM
-python3 studio workstation check-ready --stack studio-gpu-review
+\`\`\`bash
+python3 studio workstation connect --stack studio-workstation-cpu-review --ssm
+# In the SSM session:
+sudo passwd workstation
+# Leave the SSM session:
+exit
+python3 studio workstation connect --stack studio-workstation-cpu-review
+\`\`\`
 
-# Administrative password enrollment, interactive (never in user-data)
-python3 studio workstation connect --stack studio-gpu-review --ssm
-# Within the SSM session: sudo passwd workstation
-python3 studio workstation connect --stack studio-gpu-review
-```
+DCV login uses local Linux username \`workstation\`, not AWS IAM credentials. The browser may show an untrusted/self-signed TLS warning; verify the certificate fingerprint through an administrative channel or provision trusted TLS.
 
-GPU create renders a **persistent** CloudFormation instance: OS shutdown
-behavior `stop`, encrypted 100 GiB gp3, root EBS retained on termination
-(`DeleteOnTermination=false`), no Task 7 expiration tags or schedule.
-The original RES 2026.06 installer, Supervisor, Xorg and DCV console lifecycle
-are unchanged. A retained root volume may incur storage costs after stack
-deletion; audit and remove it explicitly when no longer needed.
+## GPU workstation — tested acceptance scope
 
-`check-ready` sends a read-only diagnostic command through SSM and checks
-RES READY semaphore, GDM/DCV services, console, Xorg and Tesla T4 OpenGL.
-It can fail while bootstrap is still in progress; retry after the RES setup
-reboots. It does not prove an actual interactive password login.
+**What is proven:** PR #65, now merged, was tested live using the exact scoped GPU CLI launch, user-confirmed DCV login, Tesla T4/OpenGL/RES readiness, EC2 stop/start, identical saved-file SHA-256 across reboot, and independent final cleanup. See [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46). That **does not** mean all arbitrary new stack names, regions or account setups are supported.
 
-**Security:** The CLI's existing `--client-cidr` default is public
-`0.0.0.0/0`, including for GPU. For a restricted deployment supply
-`--client-cidr YOUR_IP/32`. SSH remains closed. Trusted TLS and access
-from changing networks are tracked in issues #43 and #62.
+The **current implementation** only allows this account-specific GPU scope:
 
-**Acceptance remaining:** The new persistent GPU CLI create/stop/start/destroy
-workflow has only offline regression coverage. Real GPU DCV reboot persistence
-was validated on the baked AMI, but EC2 **stop/start** still requires a
-separately approved live acceptance test. No new GPU deployment is implied
-by this documentation.
+| Input | Required/validated value |
+|---|---|
+| Region | \`us-east-1\` |
+| AMI | \`ami-027c98f85b155c2ac\` (separate from CPU) |
+| Instance type | \`g4dn.xlarge\` (Tesla T4) |
+| Stack name | \`studio-gpu-cli-accept65\` **only** |
+| Cleanup token (ownership label, not credential) | \`pr65-b23c8e5fdf67b683cd35\` **only** |
+| Root storage | Encrypted 100 GiB gp3, **retained** on termination |
+| EC2 role | \`StudioWorkstationSSMRole\` |
+| Scheduler group | \`studio-task7-pr61\` |
+| Scheduler role | \`studio-pr65-cli-expiration\` (restricted to exact stack/token tags) |
 
-## Daily operation
+The original acceptance stack and EC2 have been deleted, so this is an example of the **pinned, one-test configuration**, not a recommended recurring production workload. For a different GPU stack/token, the hardcoded scope and exact IAM policy must be deliberately updated and revalidated; **changing just \`--stack\` will fail**.
 
-```bash
-python3 studio workstation status --stack studio-workstation-cpu-v013
-python3 studio workstation connect --stack studio-workstation-cpu-v013
-# Prints the current DCV URL; no browser is launched.
+The GPU RES installer and application archives are fetched from **different S3 prefixes** and pinned to their own immutable object versions/SHA-256:
 
-python3 studio workstation connect --stack studio-workstation-cpu-v013 --ssm
-# Opens an administrative SSM shell (requires Session Manager plugin).
+- Installer: \`releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz\`, VersionId \`bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB\`.
+- Application: \`releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz\`, VersionId \`nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53\`.
 
-# Save work before stopping.
-python3 studio workstation stop --stack studio-workstation-cpu-v013 \
-  --yes --confirm-instance i-0bbfbdc878d3a2320
+SHA-256 hashes and RES adaptations are recorded in [runtime/README.md](../runtime/README.md).
 
-python3 studio workstation start --stack studio-workstation-cpu-v013 \
-  --yes --confirm-instance i-0bbfbdc878d3a2320
-```
+To review the currently pinned, **non-general** GPU acceptance launch without creating resources:
 
-The stop/start commands resolve the instance ID from CloudFormation and
-require it to match the explicit confirmation. They wait for EC2 state/
-status checks, **not** DCV desktop readiness. After start, check SSM/DCV
-and retrieve the new public IP using `connect`. Stopping saves compute
-charges but EBS storage continues to be billed.
+\`\`\`bash
+python3 studio workstation create \
+  --profile gpu --stack studio-gpu-cli-accept65 \
+  --cleanup-token pr65-b23c8e5fdf67b683cd35 \
+  --client-cidr 0.0.0.0/0 --allow-public-dcv \
+  --dry-run
+\`\`\`
 
-## Permanently destroy a workstation
+To reproduce the **billable, time-limited acceptance test** with this exact scope, omit \`--dry-run\` after confirming the referenced resources, IAM policies, cost exposure and cleanup mechanism are appropriate:
 
-```bash
-python3 studio workstation destroy --stack studio-workstation-cpu-test \
-  --yes --delete-stack \
-  --confirm-stack studio-workstation-cpu-test \
-  --confirm-instance INSTANCE_ID
-```
+\`\`\`bash
+python3 studio workstation create \
+  --profile gpu --stack studio-gpu-cli-accept65 \
+  --cleanup-token pr65-b23c8e5fdf67b683cd35 \
+  --client-cidr 0.0.0.0/0 --allow-public-dcv
+\`\`\`
 
-**Destructive:** deletes the named CloudFormation stack and its instance
-and security group after checking its resource types. It never deletes
-the shared release bucket, IAM profile, VPC, or Image Builder resources.
-The root EBS volume uses `DeleteOnTermination=false` and can remain
-unattached and billable after stack deletion. Audit and explicitly delete
-obsolete EBS volumes separately; this CLI intentionally never deletes them.
+**This example intentionally exposes TCP 8443 to any public IPv4 address.** \`--allow-public-dcv\` is the explicit opt-in; it is **not** a VPN, identity-aware gateway or a recommendation for permanent public access. Prefer a trusted public \`/32\` without \`--allow-public-dcv\` when feasible. The scoped GPU flow refuses broad public ingress unless the flag is supplied. SSH ingress remains closed.
 
-## Design constraints
+The GPU create flow verifies the actual restricted Scheduler IAM role and group, issues an asynchronous CloudFormation \`CreateStack\`, identifies the tagged instance and attached root EBS within a bounded discovery period, then arms and reads back **two one-time EventBridge schedules**: EC2 termination at approximately **150 minutes** after provisioning, and an EBS deletion attempt approximately **45 minutes later**. These are **fail-safe acceptance deadlines, not an always-on workstation service**. They remain active through stop/start. The EBS deletion attempt is **best-effort** and cannot be assumed to succeed if storage remains attached. A crash between \`CreateStack\` and schedule creation still requires manual supervision.
 
-- No AWS writes for `status`, default `connect`, or dry-run `create`
-  (the dry run renders and validates through a read-only AWS API).
-- No automatic EC2 mutations; each start/stop/create/destroy needs
-  explicit confirmation.
-- No SSH ingress, password storage, DNS, certificate or GPU provisioning.
-- `connect` prints the URL; it does not assert that DCV is READY.
-- This is a first CLI implementation; test with the offline regression
-  suite and review its generated CloudFormation before production use.
+After creating, check GPU readiness, enroll the password through SSM, and connect:
+
+\`\`\`bash
+python3 studio workstation check-ready --stack studio-gpu-cli-accept65
+python3 studio workstation connect --stack studio-gpu-cli-accept65 --ssm
+# Inside SSM: sudo passwd workstation
+python3 studio workstation connect --stack studio-gpu-cli-accept65
+\`\`\`
+
+A newly launched GPU instance can take multiple minutes and reboot during RES startup. Readiness means \`linux_vdi_config_host_ready.lock\`, GDM, DCV, console ownership, Xorg and GPU OpenGL all pass; \`check-ready\` does not replace an actual interactive login. A TLS certificate can still be untrusted.
+
+## Daily stop, start, status and reconnect
+
+\`\`\`bash
+python3 studio workstation status --stack STACK_NAME
+python3 studio workstation connect --stack STACK_NAME
+python3 studio workstation stop --stack STACK_NAME
+python3 studio workstation start --stack STACK_NAME
+python3 studio workstation check-ready --stack STACK_NAME
+python3 studio workstation connect --stack STACK_NAME
+\`\`\`
+
+Save documents before stopping. **Stop** ends EC2 running-instance compute charges but keeps EBS billing. A GPU shutdown during acceptance produced an NVIDIA DRM warning in the serial console and an unusually slow EC2 stop transition; the test nevertheless reached \`stopped\` and recovered successfully. After **start**, check the refreshed public IP, SSM readiness and DCV console; the instance's public IPv4 can change. GPU expiration schedules do **not** pause when EC2 is stopped.
+
+## Destroy and verify cleanup
+
+\`\`\`bash
+python3 studio workstation destroy --stack STACK_NAME --delete-stack
+\`\`\`
+
+This is **permanent**. The CLI checks CloudFormation resource types and deletes the stack; it does **not** automatically guarantee removal of a GPU root EBS volume retained with \`DeleteOnTermination=false\`, nor does it automatically remove the test expiration schedules. The 2026-11-01 acceptance test's retained EBS happened to be absent at the final independent AWS audit; **do not infer that every future deletion will do the same**.
+
+For a GPU acceptance stack, record the exact instance/volume/SG/LaunchTemplate physical IDs **before** stack deletion, then independently verify all of the following in the same account/region:
+
+1. CloudFormation reaches \`DELETE_COMPLETE\`; the original EC2 instance is \`terminated\`.
+2. The recorded retained root EBS ID is absent (or, if \`available\`, inspect its two exact ownership tags and delete only that verified volume).
+3. The recorded security group and launch template are absent.
+4. Both one-time EventBridge schedules have been checked and removed **only after** no scoped instance/volume remains. Do not delete the schedules prematurely.
+5. A tag-filtered inventory finds no remaining test volumes, security groups or launch templates. Verify any recorded IDs directly as well: tags can be missing on orphaned resources.
+6. Recheck unexpected orphaned EBS, snapshots and public ingress; **never** delete an unverified volume. A leftover IAM Scheduler execution role is an access-control artifact and can be reviewed for later retirement, not an active EC2 cost.
+
+The full pass, evidence, and final absence check are recorded in [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46). No acceptance instance or public security group was left running by that test.
+
+## Other references
+
+- [Quick Start](../README.md#quick-start) and [documentation index](INDEX.md)
+- [GPU runtime, pinning and provenance](../runtime/README.md)
+- [CPU acceptance history](cpu-acceptance-lifecycle-tls.md)
+- [Architecture](visual-architecture.md) and [lifecycle diagram](workstation-lifecycle-visual.md)
+- [Optional future secure access-from-anywhere](https://github.com/vision-kwest/studio-workstation/issues/62)
