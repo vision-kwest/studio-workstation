@@ -1,5 +1,7 @@
 # GPU Image Builder 0.1.1 review gates
 
+> **Historical Image Builder 0.1.1 review:** Its `not tested` and `no AWS changes` assertions describe this early candidate, **not** the final image. GPU Image Builder 0.1.11/1 later succeeded and produced validated AMI `ami-027c98f85b155c2ac`; the GPU CLI passed live persistent lifecycle acceptance. The pipeline remains disabled and configured with older 0.1.10. See [current GPU Image Builder status](gpu-image-builder-visual.md) and [Studio CLI](studio-cli.md).
+
 The 0.1.0 GPU component build versions are immutable. Regenerate the YAML
 from the original CPU audit after merging this change, inspect it, and
 register **new** 0.1.1 components. Never overwrite 0.1.0.

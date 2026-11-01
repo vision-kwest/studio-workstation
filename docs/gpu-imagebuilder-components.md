@@ -1,5 +1,7 @@
 # GPU Image Builder component generation (review only)
 
+> **Historical GPU component generator milestone:** This document shows the original candidate generator and 0.5.0 CPU-derived proposal, **not** the exact final baked GPU recipe. Subsequently GPU Image Builder 0.1.11/1 produced validated AMI `ami-027c98f85b155c2ac`, and the GPU CLI/RES desktop was tested live. The GPU Image Builder pipeline is still disabled and set to recipe 0.1.10. For current outcomes and commands use [GPU profile](gpu-workstation-profile.md), [GPU build diagram](gpu-image-builder-visual.md), and [Studio CLI](studio-cli.md).
+
 This milestone generates **four separate GPU component documents** from the
 exact working CPU 0.5.0 Image Builder audit. It does not create an AWS
 pipeline or alter the CPU pipeline.

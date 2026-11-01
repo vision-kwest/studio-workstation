@@ -1,5 +1,7 @@
 # Image Builder 0.1.11/1 — exact offline preparation (not registered)
 
+> **Historical offline preparation checkpoint:** This page's title and `not registered`, `no image build`, and `no EC2 launch` statements describe the preparation **at the time it was written**. The GPU image recipe 0.1.11/1 was subsequently built and validated as AMI `ami-027c98f85b155c2ac`; a later standalone GPU CLI instance passed RES/DCV/T4 and persisted-file stop/start tests. The GPU pipeline itself remains disabled and points to 0.1.10. See [GPU build status](gpu-image-builder-visual.md) and [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46).
+
 Source of truth: live AWS Image Builder recipe `studio-gpu-ubuntu2404-dcv/0.1.10`, inspected 2026-10-31. Keep parent `ami-0d6dd9e8265d48906`, 100 GiB gp3 root, existing `studio-gpu-image-builder` infrastructure and distribution, g4dn.xlarge, existing reboot order, and original GDM/desktop components.
 
 ## Ordered recipe candidate
