@@ -1,5 +1,7 @@
 # RES-aligned implementation update (v0.4.0)
 
+> **Historical CPU Image Builder v0.4 draft:** This file records the earlier GDM-first installation research and failures; the validated CPU Image Builder process advanced to staged GDM-first recipe 0.5.0 and live CPU v0.1.3 DCV acceptance. GPU AMI 0.1.11/1 was also separately validated. The old `no workstation launcher yet`, `not deployed` and v0.4 rollout steps below describe the original historical checkpoint, **not current project status**. Use [Quick Start](../../README.md), [Studio CLI](../../docs/studio-cli.md), and [Image Builder visual](../../docs/gpu-image-builder-visual.md).
+
 The Image Builder recipe now uses RES 2026.06's `ubuntu-desktop` + `gdm3`, its CPU-only `/etc/X11/xorg.conf` dummy configuration, and its DCV server + web viewer + `nice-xdcv` package selection. This is a *partial* source-based port, not a guarantee of parity: RES also runs Python bootstrap logic for DCV startup, permissions, and Xorg readiness, and its reboot staging differs from Image Builder.
 
 **Before running another build:** confirm the earlier stalled Image Builder execution is cancelled and temporary EC2 builder has terminated. Update the existing CloudFormation stack with `infra/image-builder-cpu.yaml` from this feature branch; the recipe/components are now version `0.4.0`. Verify CloudFormation changes and the selected pipeline recipe version before Run pipeline. Do not run a new build against the old `0.3.x` recipe.

@@ -1,5 +1,7 @@
 # Studio Workstation — Engineering Charter
 
+> **Implementation status (after merged PR #65):** The RES 2026.06 standalone adapter, CPU/DCV, GPU/Tesla T4/DCV and scoped Studio CLI GPU create/login/stop/start/persistence/cleanup have passed live acceptance. The work order below describes **how to review future changes**, not gates still preventing the completed PR #65. The GPU Image Builder pipeline remains disabled on older recipe 0.1.10, while GPU AMI 0.1.11/1 was successfully built separately. Current operator commands: [Studio CLI](docs/studio-cli.md); [documentation index](docs/INDEX.md).
+
 ## Mission
 
 Extract the working **AWS Research and Engineering Studio (RES) 2026.06** Ubuntu 24.04 workstation provisioning implementation and adapt it for **one standalone EC2 workstation**, retaining CPU and NVIDIA GPU options and browser-based Amazon DCV login, while removing only infrastructure dependencies that a standalone workstation cannot satisfy.
