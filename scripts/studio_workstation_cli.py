@@ -33,6 +33,9 @@ GPU_KEYS = {
     "virtual-desktop.tar.gz": GPU_APP_PREFIX + "/virtual-desktop.tar.gz",
 }
 
+# Task 3 must explicitly activate this after the dedicated expiration role is verified.
+GPU_ACCEPTANCE_LIVE_ENABLED = False
+
 
 def run(args, *, capture=True):
     if capture:
@@ -126,6 +129,11 @@ def command(args):
                 raise ValueError("GPU profile requires the pinned release; --version is CPU-only")
         if not gpu and args.instance_type not in ("m7i.large", "m7i.xlarge"):
             raise ValueError("CPU profile only supports m7i.large or m7i.xlarge")
+        if gpu and args.yes:
+            if not args.cleanup_token:
+                raise ValueError("GPU live create requires a scoped --cleanup-token")
+            if not GPU_ACCEPTANCE_LIVE_ENABLED:
+                raise ValueError("Scoped GPU acceptance blocked: Task 3 guard activation pending")
         prefix = GPU_PREFIX if gpu else f"releases/{args.version}/res-2026.06"
         with tempfile.TemporaryDirectory(prefix="studio-cli-") as temp:
             template = Path(temp) / "workstation.json"
@@ -171,14 +179,15 @@ def command(args):
             else:
                 raise ValueError("Stack already exists; create requires a new stack name")
             if gpu:
-                # The installation archive is now version-pinned and published,
-                # but a scoped acceptance launch still requires its independent
-                # fail-closed cleanup guard to be deployed and verified.
-                if args.cleanup_token:
-                    raise ValueError(
-                        "Scoped GPU acceptance blocked: independent cleanup guard "
-                        "has not been deployed and verified")
                 gpu_release_preflight(args)
+                from runtime import pr65_gpu_create
+                # The CPU deploy/wait path is too slow to arm a GPU expiration
+                # schedule; use asynchronous CreateStack with bounded discovery.
+                # Live invocation remains disabled until explicit Task 3 activation.
+                outcome = pr65_gpu_create.create_guarded(
+                    aws, args.region, args.stack, args.cleanup_token, template, parameters)
+                print(json.dumps(outcome, indent=2))
+                return
             run(deploy, capture=False)
             print(json.dumps(describe(args.stack, args.region), indent=2))
         return
