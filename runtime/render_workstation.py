@@ -8,10 +8,14 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 ROOT=Path(__file__).resolve().parent
 REGION=chr(36)+"{AWS::Region}"
-PINNED_GPU_PREFIX="releases/task7-pr61-postreboot-a8ec326/res-2026.06"
+# GPU bootstrap is published separately; the independently verified app
+# archive stays at the original Task 7 release key. Do not infer that both
+# archives live beneath the same S3 prefix.
+PINNED_GPU_PREFIX="releases/pr65-pinned-download-084e704e/res-2026.06"
+PINNED_GPU_APP_PREFIX="releases/task7-pr61-postreboot-a8ec326/res-2026.06"
 PINNED_GPU_BUCKET="studio-workstation-releases-401233741942-us-east-1"
 GPU_ARCHIVES={
-    "installation-scripts.tar.gz": ("dlOKXdRAEJqpeNZNBotj87q0bdNlI5VC", "7ca921aa8a493d9399918f032b62f7e0e37ce7754fa3f1a2c805047507ecd7a1"),
+    "installation-scripts.tar.gz": ("bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB", "084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5"),
     "virtual-desktop.tar.gz": ("nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53", "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
 }
 def render(bucket,prefix,user,profile="cpu"):
@@ -22,7 +26,8 @@ def render(bucket,prefix,user,profile="cpu"):
     gpu_family = "NVIDIA" if profile == "gpu" else "NONE"
     pinned = profile == "gpu" and bucket == PINNED_GPU_BUCKET and prefix.strip("/") == PINNED_GPU_PREFIX
     prefix=prefix.strip("/")
-    app="s3://"+bucket+"/"+prefix+"/virtual-desktop.tar.gz"
+    app_prefix = PINNED_GPU_APP_PREFIX if pinned else prefix
+    app="s3://"+bucket+"/"+app_prefix+"/virtual-desktop.tar.gz"
     boot="s3://"+bucket+"/"+prefix+"/installation-scripts.tar.gz"
     command="""set -e
 if ! id -u USERNAME >/dev/null 2>&1; then
