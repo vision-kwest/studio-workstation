@@ -1,5 +1,7 @@
 # RES 2026.06 → Standalone Workstation Compatibility Map
 
+> **Historical source-analysis baseline (October 2026):** This was an *initial* map before the RES standalone adapter, GPU AMI and CLI acceptance were implemented. Its `TO TRACE`, `proposed`, `unresolved` and `not yet validated` cells are preserved historical questions, **not current deployment blockers**. The live-tested RES path is described in [runtime provenance](../runtime/README.md), [GPU profile](gpu-workstation-profile.md) and [Studio CLI](studio-cli.md).
+
 **Status: initial source-backed map; not a complete dependency audit.** This document deliberately marks gaps rather than inventing equivalence. Upstream: [aws/res tree at tag 2026.06](https://github.com/aws/res/tree/2026.06). The successful RES Demo used stock Canonical Ubuntu 24.04 in us-east-1 (previously identified as `ami-0fc0d6e8d70ab2d42`) with runtime provisioning; that AMI ID alone does not reproduce RES's installed desktop.
 
 ## Confirmed runtime path

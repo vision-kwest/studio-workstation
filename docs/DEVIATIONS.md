@@ -1,5 +1,7 @@
 # RES 2026.06 Deviation Register
 
+> **Historical register with continuing relevance:** The numbered RES deviation reviews here preserve their original design and review chronology. Some early items described proposed changes that were subsequently implemented and validated. For the accepted live runtime and current operator commands, refer to [runtime provenance](../runtime/README.md) and [Studio CLI](studio-cli.md); do not use old approval notes as current deployment gates.
+
 **Status: design choices recorded, including approved Option A manual SSM credential enrollment. No approved standalone code patch set yet.**
 
 Every change from the pinned upstream RES commit must be recorded here *before* implementation. Do not treat a proposed removal as proven safe.
