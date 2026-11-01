@@ -1,83 +1,57 @@
-# GPU workstation profile — source-first implementation
+# GPU workstation profile — validated RES 2026.06 path
 
-> **Status update (2026-10-31):** The GPU AMI `ami-027c98f85b155c2ac` has passed Image Builder 0.1.11/1, real RES 2026.06 GPU/DCV initialization, local password login, OpenGL and reboot reconnection (Issue #60, merged PR #61). The CLI GPU profile is being integrated in Issue #46 with the exact pinned release prefix `releases/task7-pr61-postreboot-a8ec326/res-2026.06`. Earlier paragraphs below are historical pre-validation notes, not current instructions. The persistent CLI stop/start path requires a separate live test.
+**Current status:** The separate GPU AMI `ami-027c98f85b155c2ac` (`us-east-1`, `g4dn.xlarge`, Tesla T4) is live validated. Merged PR #65 completed GPU Studio CLI creation, local DCV password login, NVIDIA OpenGL, stop/start persisted-file verification, and exact test teardown ([Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46)). The successful 0.1.11/1 GPU Image Builder image was built separately; its Image Builder **pipeline remains disabled and points to recipe 0.1.10**.
 
-## What is implemented
+For the current user-facing commands, use [Studio CLI](studio-cli.md). Earlier source-first design documents are historical.
 
-The offline renderer now accepts `--profile gpu`, constrains
-`InstanceType` to `g4dn.xlarge`, and passes `-g NVIDIA` to the
-**existing RES 2026.06** `scripts/virtual-desktop-host/linux/install.sh`.
-CPU stays unchanged (`-g NONE`, `m7i.large` default).
+## Runtime and GPU integration
 
-The published RES-derived application overlay already includes the
-original `ideabootstrap.dcv.linux.gl` with a minimal standalone
-`STUDIO_GPU_FAMILIES` lookup in place of DynamoDB cluster settings.
-It retains upstream `dcv.configure()`, `gl.configure()`, Xorg,
-DCV readiness and automatic-console session behavior.
+- The renderer in [`runtime/render_workstation.py`](../runtime/render_workstation.py) accepts `--profile gpu`, limits GPU instance type to `g4dn.xlarge`, and invokes the original RES 2026.06 host installer with `-g NVIDIA`.
+- The GPU AMI includes NVIDIA GRID driver, GDM/Xorg, DCV and GPU bake-time checks. The runtime retains RES cloud-init, its reboot semaphores, Supervisor and automatic DCV console setup.
+- `STUDIO_STANDALONE=true` isolates RES-only broker, cluster-setting and external identity dependencies while using DCV Linux `system` authentication.
+- GPU persistent mode uses encrypted gp3 root EBS, stop-on-shutdown and `DeleteOnTermination=false`. Application files survive EC2 stop/start; its public IPv4 can change.
+- The live Task 5 test verified the same 100 GiB EBS root volume, identical file SHA-256 before/after stop/start, RES readiness and T4/OpenGL after restart. The user confirmed an actual DCV login before the test.
+- **The merged GPU CLI remains hardcoded to the one approved acceptance stack/token.** Other stack names need a deliberate CLI/IAM scope update; it is not a generic self-service GPU platform.
 
-Upstream RES references:
-- `source/idea/idea-bootstrap/resources/scripts/virtual-desktop-host/linux/install.sh`
-- `source/idea/idea-bootstrap/resources/scripts/dcv/linux/dcv_server.sh`
-- `source/idea/idea-bootstrap/resources/scripts/dcv/linux/gpu_drivers.sh`
-- `source/idea/idea-bootstrap/src/ideabootstrap/dcv/linux/gl.py`
-- `source/idea/idea-bootstrap/src/ideabootstrap/dcv/linux/x_server.py`
+## Exact immutable runtime archives
 
-**This is a profile renderer and contract-test milestone, NOT a
-validated GPU workstation.** Do not reuse CPU AMI
-`ami-0d6dd9e8265d48906` on `g4dn.xlarge` without first validating
-its GPU driver, Xorg and DCV prerequisites.
+Unlike the early single-prefix proposal, PR #65 fetches the two pinned GPU archives from **different S3 prefixes** under `studio-workstation-releases-401233741942-us-east-1`:
 
-## RES GPU driver path to preserve
+| Archive | Key |
+|---|---|
+| Installer | `releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz` |
+| Application | `releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz` |
 
-Upstream `install.sh` accepts `-g NVIDIA`; the GPU path disables
-Nouveau and routes through the RES DCV driver installation scripts.
-For `g4dn`, RES `gpu_drivers.sh` selects NVIDIA GRID drivers.
-It looks up driver package configuration through RES settings and
-downloads from NVIDIA's S3 distribution path. **Standalone mode
-does not currently provide that complete package configuration.**
-Merely passing `-g NVIDIA` does not prove the GRID driver installer
-will succeed without the RES control plane.
+The exact SHA-256 and S3 VersionIds are documented in [runtime provenance](../runtime/README.md); preserve `s3:GetObjectVersion` instance-role permissions for both exact keys.
 
-Prefer the existing RES Image Builder/prebake strategy: create a
-**separate GPU AMI** using the upstream RES GPU/DCV install path and
-verify `nvidia-smi`, `nvidia-xconfig`, Xorg, `dcvserver` and
-OpenGL hardware rendering in Image Builder smoke tests. Retain the
-RES installer and reboots; do not create a second hand-written driver
-installation framework.
-
-## Safe offline render
+## Offline render for review
 
 ```bash
 python3 runtime/render_workstation.py \
-  --profile gpu \
+  --profile gpu --lifecycle persistent \
   --bucket studio-workstation-releases-401233741942-us-east-1 \
-  --prefix releases/v0.1.3/res-2026.06 \
+  --prefix releases/pr65-pinned-download-084e704e/res-2026.06 \
   --user workstation \
-  --output ~/studio-release/workstation-gpu-review.json
+  --cleanup-token pr65-b23c8e5fdf67b683cd35 \
+  --test-stack studio-gpu-cli-accept65 \
+  --output /tmp/studio-gpu-review.json
 
 aws cloudformation validate-template \
-  --template-body file://$HOME/studio-release/workstation-gpu-review.json \
-  --region us-east-1
+  --template-body file:///tmp/studio-gpu-review.json \
+  --region us-east-1 --no-cli-pager
 ```
 
-No EC2 deployment occurs. The GPU template requires an explicit
-**validated GPU-capable AMI** at deployment time. Never deploy it
-with the CPU AMI solely because the CloudFormation template validates.
+The base `runtime/workstation-template.json` contains a `RENDER_OFFLINE` placeholder and **must not be deployed directly**. ValidateTemplate checks structure, not GPU functionality. Use [`studio workstation create ... --dry-run`](studio-cli.md) to see CLI-rendered inputs without EC2 launch.
 
-## Remaining acceptance gates
+## DCV and cleanup
 
-1. Trace RES 2026.06 Image Builder GPU components, GRID driver
-   distribution/configuration, and prebake `PREBAKING_AMI=true` path.
-2. Produce a versioned GPU AMI; verify kernel module, driver, Xorg,
-   OpenGL and DCV smoke tests **before** launching a workstation.
-3. Confirm the standalone post-reboot runtime with `-g NVIDIA`
-   doesn't depend on missing RES cluster settings.
-4. Render, validate and review GPU CloudFormation using the GPU AMI.
-5. Deploy a **new** test stack, keeping validated CPU v0.1.3 untouched.
-6. Verify SSM, `nvidia-smi` T4, hardware `glxinfo -B` (not llvmpipe),
-   DCV console READY, local login, and EC2 Stop → Start reconnection.
-7. Only then expose `--profile gpu` in the Studio CLI and publish
-   any changed RES-derived application archives as a new immutable
-   release. GPU EC2 costs can be significant.
+During the supervised test, `--client-cidr 0.0.0.0/0 --allow-public-dcv` explicitly allowed login from changing networks. This opens TCP 8443 to the public internet, requires a strong unique Linux password and was removed in acceptance cleanup. SSH stayed closed. For long-term use, prefer restricted ingress or a future identity-aware private path ([Issue #62](https://github.com/vision-kwest/studio-workstation/issues/62)). Enroll the local `workstation` password interactively through SSM, not in user data.
 
-Do not alter the existing CPU stack, AMI or running instance.
+The test-only one-shot guard terminates the instance after approximately 150 minutes and attempts retained-EBS deletion 45 minutes later, even through EC2 stop/start. Do not treat it as a permanent workstation service or guaranteed EBS recycler. Test resources were deleted; the tag-scoped IAM expiration role remains.
+
+## RES sources
+
+- [RES 2026.06 host installer](https://github.com/aws/res/blob/2026.06/source/idea/idea-bootstrap/resources/scripts/virtual-desktop-host/linux/install.sh)
+- [RES GPU driver installer](https://github.com/aws/res/blob/2026.06/source/idea/idea-bootstrap/resources/scripts/dcv/linux/gpu_drivers.sh)
+- [Ubuntu DCV installer](https://github.com/aws/res/blob/2026.06/source/idea/idea-bootstrap/resources/scripts/dcv/linux/debian/dcv_server.sh)
+- [Historical GPU/Image Builder audit](res-gpu-imagebuilder-audit.md)
