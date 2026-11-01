@@ -1,0 +1,55 @@
+# PR #65 — read-only S3 publication plan (NO UPLOAD AUTHORIZED)
+
+## Freeze artifact and destination
+
+Source: GitHub Actions run 41254585650, artifact ID 13062033480, `task7-verified-res-archives-533e100ea3d1b6798a024efa4451e436d9bc04fd`. The run's source commit is `533e100ea3d1b6798a024efa4451e436d9bc04fd`. Artifact ZIP digest from GitHub API is `sha256:91a425b2fc7fbe5e726a89bad564ec02c63f015c2f8caf470422f4d322635ac4`; this ZIP digest is NOT the installation archive digest. ZIP artifact expires 2026-11-07.
+
+Install archive member: `installation-scripts.tar.gz`; verified SHA-256 `084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5`. Expected unchanged app archive SHA-256 `e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147`.
+
+Proposed **new, single-object** destination (not existing):
+```
+s3://studio-workstation-releases-401233741942-us-east-1/releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz
+```
+This new prefix does not currently contain the virtual-desktop archive. **Before launch**, adapt the GPU renderer to use this new bootstrap URI while continuing to use the old pinned virtual-desktop URI, or separately authorize a copy of the unchanged app archive. The current renderer assumes both archives share one prefix. Do not change or overwrite the previous known-working release.
+
+## Read-only findings
+
+AWS bucket versioning: Enabled. Default SSE-S3 AES256. Public access block all four settings enabled; bucket policy is not public. Existing old prefix holds exactly the known GPU template and two original derived archives. IAM `SimulateCustomPolicy` with a proposed exact-object `s3:PutObject` grant: intended new object allowed, previous object, virtual-desktop object, and other bucket implicitly denied (4/4). This does not establish the actual uploading principal's effective IAM, permissions boundary, SCP, bucket policy or VPC endpoint behavior. Current inspected AWS caller is account root: **do not use root to upload**. A dedicated temporary scoped publisher role with the exact object ARN and no delete permission must be approved separately.
+
+## Prepared operator commands — DO NOT RUN without separate upload authorization
+
+```bash
+set -euo pipefail
+RUN=41254585650
+ARTIFACT=task7-verified-res-archives-533e100ea3d1b6798a024efa4451e436d9bc04fd
+BUCKET=studio-workstation-releases-401233741942-us-east-1
+KEY=releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz
+EXPECTED=084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5
+mkdir -p /tmp/pr65-stage
+gh run download "$RUN" --repo vision-kwest/studio-workstation --name "$ARTIFACT" --dir /tmp/pr65-stage
+printf '%s  %s\n' "$EXPECTED" /tmp/pr65-stage/installation-scripts.tar.gz | sha256sum -c -
+tar -tzf /tmp/pr65-stage/installation-scripts.tar.gz >/dev/null
+tar -xOf /tmp/pr65-stage/installation-scripts.tar.gz ./scripts/common/linux/install_app.sh | grep -F -- '--version-id'
+# If archive uses another tar member prefix, inspect tar -tzf and adjust only the inspection command.
+aws sts get-caller-identity --query Arn --output text
+aws s3api head-object --region us-east-1 --bucket "$BUCKET" --key "$KEY"  # EXPECTED 404 before upload
+# STOP: manual approval of identity, exact key, checksum and 404 required.
+aws s3api put-object --region us-east-1 --bucket "$BUCKET" --key "$KEY" \
+  --body /tmp/pr65-stage/installation-scripts.tar.gz --server-side-encryption AES256 \
+  --if-none-match '*'
+# Capture VersionId from put-object response. Never upload again if the key already exists.
+aws s3api head-object --region us-east-1 --bucket "$BUCKET" --key "$KEY" --version-id 'REPLACE_WITH_RETURNED_VERSION_ID'
+aws s3api get-object --region us-east-1 --bucket "$BUCKET" --key "$KEY" \
+  --version-id 'REPLACE_WITH_RETURNED_VERSION_ID' /tmp/pr65-stage/verify-versioned.tar.gz
+printf '%s  %s\n' "$EXPECTED" /tmp/pr65-stage/verify-versioned.tar.gz | sha256sum -c -
+```
+
+`gh run download` retrieves the ZIP and extracts it. The archive member path must be inspected before any upload. The put-object request is conditional to prevent overwriting the chosen new key. `head-object` 404 is a required precondition, not a failure to ignore. Verify AWS CLI supports `--if-none-match` before authorization.
+
+## Post-upload requirements (not yet authorized)
+
+Record returned VersionId, exact key, checksum, AWS caller identity and GitHub artifact provenance in the release manifest. Update GPU renderer and CLI preflight to the **new bootstrap key + VersionId + SHA-256** while retaining old app archive URI/version/hash. Revalidate exact rendered CloudFormation, repeat CI, and confirm the instance profile can `s3:GetObjectVersion` on the new key. Maintain fail-closed scoped GPU launch gate until these checks pass. No EC2 launch authorized by publication.
+
+## Rollback
+
+Because the new object has a unique key and `--if-none-match '*'`, rollback is **not** overwriting or deleting the existing validated release. Keep the CLI scoped GPU launch gate active and revert the unpublished renderer/pin changes if necessary. Preserve the new version for audit; do not delete the object or introduce a delete marker without separate authorization. If a later runtime test fails, stop the test and use independent cleanup. Do not point production to the staged release.
