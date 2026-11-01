@@ -15,6 +15,13 @@
 | [CPU lifecycle/TLS](cpu-acceptance-lifecycle-tls.md) | CPU live-acceptance record and security background |
 | [Release tooling](../scripts/README.md) | Release building/publication, historical paths and updated version-read caveat |
 
+## Optional hardening (implementation branch, NOT deployed)
+
+- [Issue #43 — Let's Encrypt + Route 53 dynamic DNS](issue43-letsencrypt-dcv.md):
+  review-only infrastructure, on-host renewal helper, opt-in CLI hostname
+  verification, offline tests, prerequisites and rollback. The currently
+  working public-IP/self-signed connection remains unchanged.
+
 ## Historical source audits and design gates
 
 These are preserved evidence/review documents rather than CLI instructions:
