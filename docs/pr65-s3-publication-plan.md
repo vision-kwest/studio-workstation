@@ -40,8 +40,11 @@ with tarfile.open(p, "r:gz") as tf:
     assert b"sha256sum --check --status" in source
 PY
 aws sts get-caller-identity --query Arn --output text
-aws s3api head-object --region us-east-1 --bucket "$BUCKET" --key "$KEY"  # EXPECTED 404 before upload
-# STOP: manual approval of identity, exact key, checksum and 404 required.
+# Follow the safe read-only exact-key preflight in docs/pr65-s3-final-readonly-preflight.md.
+# This session currently resolves to root; do not use root to publish.
+echo "STOP: No exact-key publisher IAM role or S3 upload authorization exists."
+exit 1
+# THE FOLLOWING MUTATING COMMANDS ARE REFERENCE-ONLY, NOT REACHABLE AS A SCRIPT.
 aws s3api put-object --region us-east-1 --bucket "$BUCKET" --key "$KEY" \
   --body /tmp/pr65-stage/installation-scripts.tar.gz --server-side-encryption AES256 \
   --if-none-match '*'
@@ -52,7 +55,7 @@ aws s3api get-object --region us-east-1 --bucket "$BUCKET" --key "$KEY" \
 printf '%s  %s\n' "$EXPECTED" /tmp/pr65-stage/verify-versioned.tar.gz | sha256sum -c -
 ```
 
-`gh run download` retrieves the ZIP and extracts it. The archive member path and pinned-download contents must be inspected before any upload. The put-object request is conditional to prevent overwriting the chosen new key. `head-object` 404 is a required precondition, not a failure to ignore. Verify AWS CLI supports `--if-none-match` before authorization.
+`gh run download` retrieves the ZIP and extracts it. The archive member path and pinned-download contents must be inspected before any upload. The put-object request is conditional to prevent overwriting the chosen new key. `head-object` 404 is a required precondition, not a failure to ignore. The AWS CLI v2 reference supports `--if-none-match '*'`, but the eventual operator environment must verify its installed CLI version. Do not treat the `head-object` 404 as an ordinary success in `set -e` scripts; use the explicit error handling and version-listing checks in the final read-only preflight.
 
 ## Post-upload requirements (not yet authorized)
 
@@ -61,3 +64,7 @@ Record returned VersionId, exact key, checksum, AWS caller identity and GitHub a
 ## Rollback
 
 Because the new object has a unique key and `--if-none-match '*'`, rollback is **not** overwriting or deleting the existing validated release. Keep the CLI scoped GPU launch gate active and revert the unpublished renderer/pin changes if necessary. Preserve the new version for audit; do not delete the object or introduce a delete marker without separate authorization. If a later runtime test fails, stop the test and use independent cleanup. Do not point production to the staged release.
+
+## Final publisher and destination verification
+
+See [Final read-only preflight](pr65-s3-final-readonly-preflight.md) for independently verified ZIP and archive SHA-256, exact-key absence via 404 plus empty version/delete-marker listings, the actual existing publisher role's implicit-deny result, the proposed exact-key policy's 10/10 simulator results, and corrected operator preflight commands. The original upload snippet above intentionally contains an unconditional `exit 1` before the `put-object` example; no AWS upload has been approved.
