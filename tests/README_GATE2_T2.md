@@ -1,5 +1,7 @@
 # Gate 2 T2 — Import-only harness
 
+> **Historical isolated-import validation procedure:** This is an intentionally non-deploying Gate 2 research tool and does not describe the current GPU workstation CLI. The standalone RES/DCV path, GPU user login and GPU CLI stop/start persistence were subsequently validated. Preserve the warning against running the isolated import harness on a live workstation. Current operation: [Studio CLI](../docs/studio-cli.md) and [runtime provenance](../runtime/README.md).
+
 **Experimental test harness; not a standalone workstation implementation.** This is a separate step from the merged [Gate 2 specification](../docs/GATE_2_PYTHON_VALIDATION.md).
 
 `gate2_import_only.py` verifies the recorded SHA-256 of the original `idea-virtual-desktop-2026.06.tar.gz`, safely unpacks its six nested source archives to a temporary directory, and attempts imports of seven original RES Python modules in a separate Python process. It reports each failure instead of masking it. The temporary files are deleted on exit. It never invokes `bootstrap.run()` or DCV configuration.

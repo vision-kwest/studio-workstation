@@ -1,5 +1,7 @@
 # PR #65 — S3 publication record (completed November 1, 2026)
 
+> **Current outcome — publication, role access and acceptance COMPLETE:** The PR #65 installer archive was published under its own immutable key/VersionId, the GPU instance-profile `s3:GetObjectVersion` permissions were updated, and the live GPU CLI acceptance subsequently passed. The historical command snippets below preserve the *preapproval publication plan* and should not be run again. Source of truth for the two distinct archive keys, hashes and versions: [runtime README](../runtime/README.md); current launch and cleanup: [Studio CLI](studio-cli.md).
+
 ## Publication result and current state
 
 **COMPLETED — no further upload required.** The user authorized their existing AWS root session for development and published exactly one new, checksum-verified installation archive via CloudShell. This section supersedes the historical proposed-command, non-root preference and original no-upload language below. Do **not** run the historical upload instructions again.

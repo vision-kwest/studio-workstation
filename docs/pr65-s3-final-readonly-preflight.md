@@ -1,5 +1,7 @@
 # PR #65 — Final read-only S3 publisher and destination preflight
 
+> **Historical S3 upload NO-GO checkpoint — superseded:** This read-only proposal captured the state *before* the PR #65 installer was actually published. The new installer was subsequently uploaded to `releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz`, VersionId `bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB`; the previous application archive remained separately pinned. Both were downloaded successfully by the live GPU acceptance instance after the EC2 role obtained `s3:GetObjectVersion`. Do **not** interpret the original 'unused destination' / 'no upload authorized' statements below as current S3 state. See [runtime provenance](../runtime/README.md).
+
 **Decision: NO-GO for S3 upload. No AWS writes performed.** This document reports observations made on 2026-10-31. All checks must be repeated immediately before a separately authorized write.
 
 ## Exact staged source
