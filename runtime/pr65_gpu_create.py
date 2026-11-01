@@ -76,9 +76,13 @@ def preflight(aws_call, region, stack, token):
             }
         ):
             raise ValueError("Expiration role permissions do not match exact test scope")
+    policies = aws_call(region, "iam", "list-role-policies",
+                        "--role-name", guard.ROLE.rsplit("/", 1)[-1])
+    if policies.get("PolicyNames") != [POLICY] or policies.get("IsTruncated", False):
+        raise ValueError("Unexpected inline policies on expiration role")
     attached = aws_call(region, "iam", "list-attached-role-policies",
                         "--role-name", guard.ROLE.rsplit("/", 1)[-1])
-    if attached.get("AttachedPolicies"):
+    if attached.get("AttachedPolicies") or attached.get("IsTruncated", False):
         raise ValueError("Unexpected managed policies on expiration role")
 
 
