@@ -290,6 +290,47 @@ class GuardedCreateTests(unittest.TestCase):
                     run.assert_not_called()
                     aws.assert_not_called()
 
+
+    def test_public_dcv_requires_explicit_opt_in_before_any_aws(self):
+        with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
+            with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+                cli.main(["create", "--profile", "gpu", "--stack", cli.GPU_ACCEPTANCE_STACK,
+                          "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
+                          "--client-cidr", "0.0.0.0/0", "--yes",
+                          "--confirm-stack", cli.GPU_ACCEPTANCE_STACK])
+            run.assert_not_called()
+            aws.assert_not_called()
+
+    def test_public_dcv_opt_in_reaches_guarded_creator(self):
+        from subprocess import CalledProcessError
+        with patch.object(cli, "run") as render, patch.object(
+                cli, "aws", side_effect=CalledProcessError(255, "aws")) as aws, patch.object(
+                cli, "gpu_release_preflight") as release, patch.object(
+                flow, "create_guarded", return_value={"guard": {"guard_armed": True}}) as guarded:
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main(["create", "--profile", "gpu", "--stack", cli.GPU_ACCEPTANCE_STACK,
+                          "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
+                          "--client-cidr", "0.0.0.0/0", "--allow-public-dcv",
+                          "--yes", "--confirm-stack", cli.GPU_ACCEPTANCE_STACK])
+        guarded.assert_called_once()
+        self.assertIn("ClientCidr=0.0.0.0/0", guarded.call_args.args[5])
+        release.assert_called_once()
+        aws.assert_called_once()
+
+    def test_public_dcv_opt_in_cannot_override_scope(self):
+        for stack, token in (
+            ("studio-gpu-cli-wrong", cli.GPU_ACCEPTANCE_TOKEN),
+            (cli.GPU_ACCEPTANCE_STACK, "different-scope-token-123"),
+        ):
+            with self.subTest(stack=stack, token=token):
+                with patch.object(cli, "run") as render, patch.object(cli, "aws") as aws:
+                    with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+                        cli.main(["create", "--profile", "gpu", "--stack", stack,
+                                  "--cleanup-token", token, "--client-cidr", "0.0.0.0/0",
+                                  "--allow-public-dcv", "--yes", "--confirm-stack", stack])
+                    render.assert_not_called()
+                    aws.assert_not_called()
+
     def test_gpu_yes_without_token_denied_before_any_aws(self):
         with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
             with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
