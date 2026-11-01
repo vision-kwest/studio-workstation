@@ -39,3 +39,19 @@ Live Task 7/8 acceptance confirmed:
 ## Offline verification
 
 Run `python3 -m unittest discover -s tests -v` and review the focused GitHub Actions contracts. Only the original RES/Supervisor path is part of the validated runtime. The abandoned alternative systemd coordinator and its mocked-only tests were retired from this release PR.
+
+## PR #65 — separately published installer (November 1, 2026)
+
+The Task 7 release above is historical and remains intact. For the pending persistent-GPU CLI acceptance test, the **new, verified installation archive** has been published to a distinct S3 key by the user's authorized CloudShell root session:
+
+- Bucket: `studio-workstation-releases-401233741942-us-east-1`
+- Key: `releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz`
+- VersionId: `bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB`
+- SHA-256: `084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5`
+- Size: 42,816 bytes; SSE-S3 AES256; read-only HeadObject and ListObjectVersions verified exactly one current version and no delete marker.
+
+The **application archive** continues to use the previously verified Task 7 S3 key `releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz`, VersionId `nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53` and SHA-256 `e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147`.
+
+The GPU renderer deliberately uses two distinct S3 prefixes, embedding the new bootstrap VersionId/digest in the original RES user data and the existing app VersionId/digest in `/etc/studio-standalone.env`. CPU and other non-pinned rendering remains unchanged.
+
+**Remaining deployment prerequisites:** The workstation EC2 instance profile `StudioWorkstationSSMRole` grants `s3:GetObject` but *not* `s3:GetObjectVersion`. Read-only IAM simulation returned `implicitDeny` for the exact-version installer and application downloads. Grant the two exact-key version-read permissions in `infra/pr65-runtime-version-read.review-only.json` through a separately approved IAM update and verify effective access. This applies to the EC2 instance role and is unrelated to the user's decision to use root for development. The independent scoped cleanup safeguard also remains undeployed/unverified. Do not launch or merge until both gates are resolved and separately authorized.
