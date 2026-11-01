@@ -8,6 +8,8 @@ import argparse
 import ipaddress
 import json
 import re
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -38,6 +40,8 @@ GPU_KEYS = {
 GPU_ACCEPTANCE_LIVE_ENABLED = True
 GPU_ACCEPTANCE_STACK = "studio-gpu-cli-accept65"
 GPU_ACCEPTANCE_TOKEN = "pr65-b23c8e5fdf67b683cd35"
+TRUSTED_DCV_HOSTNAME = "dcv.kwesidavis.com"  # Issue #43: opt-in, never an IP alias
+
 
 
 def run(args, *, capture=True):
@@ -64,6 +68,29 @@ def describe(stack, region):
     return {"stack": stack, "instance": iid, "state": vm["State"]["Name"],
             "public_ip": vm.get("PublicIpAddress"),
             "dcv_url": f"https://{vm['PublicIpAddress']}:8443" if vm.get("PublicIpAddress") else None}
+
+def verified_dcv_hostname(hostname, public_ip):
+    """Only advertise a trusted URL when DNS AND system TLS verification pass.
+
+    This reads public DNS from the user's client. It never bypasses validation,
+    changes the instance, or promotes a self-signed IP endpoint to trusted.
+    """
+    if hostname != TRUSTED_DCV_HOSTNAME or not public_ip:
+        raise ValueError("Unconfigured hostname or instance public IP missing")
+    try:
+        addresses = {result[4][0] for result in
+                     socket.getaddrinfo(hostname, 8443, family=socket.AF_INET,
+                                        type=socket.SOCK_STREAM)}
+        if addresses != {public_ip}:
+            raise ValueError("DNS A record does not match this stack's public IP")
+        context = ssl.create_default_context()
+        with socket.create_connection((hostname, 8443), timeout=5) as connection:
+            with context.wrap_socket(connection, server_hostname=hostname):
+                pass
+    except (OSError, ssl.SSLError) as exc:
+        raise ValueError("Trusted DCV TLS verification failed: " + str(exc)) from exc
+    return f"https://{hostname}:8443"
+
 
 def gpu_release_preflight(args):
     """Read-only preflight of pinned AMI and S3 object versions."""
@@ -217,7 +244,12 @@ def command(args):
         gpu_ready(args.stack, args.region)
         return
     if args.action == "status":
-        print(json.dumps(describe(args.stack, args.region), indent=2))
+        state = describe(args.stack, args.region)
+        if args.hostname:
+            if state["state"] != "running":
+                raise ValueError("Cannot verify trusted TLS while workstation is stopped")
+            state["trusted_dcv_url"] = verified_dcv_hostname(args.hostname, state["public_ip"])
+        print(json.dumps(state, indent=2))
         return
     state = describe(args.stack, args.region)
     iid = state["instance"]
@@ -227,8 +259,12 @@ def command(args):
         if args.ssm:
             run(["aws", "ssm", "start-session", "--target", iid, "--region", args.region], capture=False)
         else:
-            print(state["dcv_url"] or "No public IPv4 address. Use --ssm for administrative access.")
-            print("Use the local workstation account; browser certificate trust is not yet configured.")
+            if args.hostname:
+                print(verified_dcv_hostname(args.hostname, state["public_ip"]))
+                print("DNS and certificate validated; log in with the local workstation account.")
+            else:
+                print(state["dcv_url"] or "No public IPv4 address. Use --ssm for administrative access.")
+                print("Use the local workstation account; browser certificate trust is not yet configured.")
         return
     if args.action in ("start", "stop"):
         desired = "stopped" if args.action == "start" else "running"
@@ -284,6 +320,9 @@ def main(argv=None):
             s.add_argument("--allow-public-dcv", action="store_true",
                            help="Explicit supervised GPU acceptance: permit TCP 8443 from any IPv4 address")
             s.add_argument("--cleanup-token", default=None, help="Unique scope for independently guarded GPU acceptance test")
+        if action in ("connect", "status"):
+            s.add_argument("--hostname", choices=[TRUSTED_DCV_HOSTNAME],
+                           help="Opt-in trusted hostname; verify DNS, TLS trust, and instance IPv4")
         if action == "connect":
             s.add_argument("--ssm", action="store_true", help="Open administrative SSM session instead of printing DCV URL")
         if action == "destroy":
@@ -295,6 +334,8 @@ def main(argv=None):
         if a.instance_type is None:
             a.instance_type = "g4dn.xlarge" if a.profile == "gpu" else "m7i.large"
     try:
+        if a.action == "connect" and a.ssm and a.hostname:
+            raise ValueError("--hostname cannot be used with --ssm")
         command(a)
     except (ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as exc:
         if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
