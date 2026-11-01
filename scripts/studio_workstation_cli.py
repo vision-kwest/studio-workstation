@@ -22,10 +22,15 @@ DEFAULT_SUBNET = "subnet-0986937ce71fb97cb"
 DEFAULT_PROFILE = "StudioWorkstationSSMRole"
 DEFAULT_REGION = "us-east-1"
 GPU_AMI = "ami-027c98f85b155c2ac"
-GPU_PREFIX = "releases/task7-pr61-postreboot-a8ec326/res-2026.06"
+GPU_PREFIX = "releases/pr65-pinned-download-084e704e/res-2026.06"
+GPU_APP_PREFIX = "releases/task7-pr61-postreboot-a8ec326/res-2026.06"
 GPU_VERSIONS = {
-    "installation-scripts.tar.gz": "dlOKXdRAEJqpeNZNBotj87q0bdNlI5VC",
+    "installation-scripts.tar.gz": "bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB",
     "virtual-desktop.tar.gz": "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
+}
+GPU_KEYS = {
+    "installation-scripts.tar.gz": GPU_PREFIX + "/installation-scripts.tar.gz",
+    "virtual-desktop.tar.gz": GPU_APP_PREFIX + "/virtual-desktop.tar.gz",
 }
 
 
@@ -60,14 +65,15 @@ def gpu_release_preflight(args):
     if len(images) != 1 or images[0]["State"] != "available" or images[0]["OwnerId"] != "401233741942":
         raise ValueError("Validated GPU AMI unavailable or unexpected owner")
     for name, version in GPU_VERSIONS.items():
+        key = GPU_KEYS[name]
         obj = aws(args.region, "s3api", "head-object", "--bucket", args.bucket,
-                  "--key", GPU_PREFIX + "/" + name, "--version-id", version)
+                  "--key", key, "--version-id", version)
         if obj.get("VersionId") != version:
             raise ValueError("GPU release object version mismatch: " + name)
-        # Original RES bootstrap uses the unversioned S3 URI. Ensure latest
-        # still points to the exact validated immutable version before launch.
+        # Fail closed if the current object differs from the pinned version,
+        # even though bootstrap and app loaders use explicit VersionIds.
         latest = aws(args.region, "s3api", "head-object", "--bucket", args.bucket,
-                     "--key", GPU_PREFIX + "/" + name)
+                     "--key", key)
         if latest.get("VersionId") != version:
             raise ValueError("GPU release latest object differs from validated version: " + name)
 
@@ -165,13 +171,13 @@ def command(args):
             else:
                 raise ValueError("Stack already exists; create requires a new stack name")
             if gpu:
-                # PR #65 staged installer differs from the older published
-                # installation-scripts S3 version. Never launch it as though
-                # the new SHA-256 enforcement were present.
+                # The installation archive is now version-pinned and published,
+                # but a scoped acceptance launch still requires its independent
+                # fail-closed cleanup guard to be deployed and verified.
                 if args.cleanup_token:
                     raise ValueError(
-                        "Scoped GPU acceptance blocked: new immutable RES installation "
-                        "archive has not been published and pinned by S3 VersionId")
+                        "Scoped GPU acceptance blocked: independent cleanup guard "
+                        "has not been deployed and verified")
                 gpu_release_preflight(args)
             run(deploy, capture=False)
             print(json.dumps(describe(args.stack, args.region), indent=2))
