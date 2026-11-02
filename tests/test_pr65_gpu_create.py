@@ -245,7 +245,8 @@ class GuardedCreateTests(unittest.TestCase):
                 cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
                 cli, "gpu_release_preflight") as release, patch.object(
                 flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID}}) as guarded, patch.object(
-                cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup:
+                cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup, patch.object(
+                cli, "shared_gpu_source_ready") as source:
             with contextlib.redirect_stdout(io.StringIO()):
                 cli.main([
                     "create", "--stack", cli.GPU_ACCEPTANCE_STACK, "--profile", "gpu",
@@ -254,6 +255,7 @@ class GuardedCreateTests(unittest.TestCase):
                 ])
         guarded.assert_called_once()
         setup.assert_called_once_with(cli.GPU_ACCEPTANCE_STACK, "us-east-1", IID)
+        source.assert_called_once_with()
         self.assertEqual(guarded.call_args.args[2:4],
                          (cli.GPU_ACCEPTANCE_STACK, cli.GPU_ACCEPTANCE_TOKEN))
         self.assertFalse(any("deploy" in str(c.args[0]) for c in render.call_args_list))
@@ -304,13 +306,15 @@ class GuardedCreateTests(unittest.TestCase):
                 cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
                 cli, "gpu_release_preflight") as release, patch.object(
                 flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID}}) as guarded, patch.object(
-                cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup:
+                cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup, patch.object(
+                cli, "shared_gpu_source_ready") as source:
             with contextlib.redirect_stdout(io.StringIO()):
                 cli.main(["create", "--profile", "gpu", "--stack", cli.GPU_ACCEPTANCE_STACK,
                           "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
                           "--client-cidr", "0.0.0.0/0", "--allow-public-dcv"])
         guarded.assert_called_once()
         setup.assert_called_once_with(cli.GPU_ACCEPTANCE_STACK, "us-east-1", IID)
+        source.assert_called_once_with()
         self.assertIn("ClientCidr=0.0.0.0/0", guarded.call_args.args[5])
         release.assert_called_once()
         aws.assert_called_once()
