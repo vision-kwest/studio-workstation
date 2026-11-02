@@ -137,6 +137,24 @@ class DcvAcmTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 tls.verify_material(self.src / "fullchain.pem", self.src / "privkey.pem")
 
+    def test_restart_verifies_console_json_not_unrelated_status_text(self):
+        with mock.patch.object(tls, "command", side_effect=[
+            "", "active", '{"id":"other","message":"status: running","status":"initializing"}',
+            "active", '{"id":"console","status":"running"}',
+        ]) as cmds, mock.patch.object(tls.time, "sleep") as sleep:
+            tls.restart_and_check()
+        self.assertEqual(cmds.call_args_list[0].args[0], ["systemctl", "restart", "dcvserver"])
+        sleep.assert_called_once_with(2)
+
+    def test_restart_rejects_console_not_ready(self):
+        with mock.patch.object(tls, "command", side_effect=lambda argv:
+                "active" if argv[0] == "systemctl" and "is-active" in argv
+                else '{"id":"console","status":"initializing"}'), \
+             mock.patch.object(tls.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "did not become ready"):
+                tls.restart_and_check()
+        self.assertEqual(sleep.call_count, 12)
+
     def test_approved_config_stages_fullchain_without_chain_separate(self):
         root = Path(__file__).resolve().parents[1]
         cfg = (root / "infra/issue43-awcp.review-only.toml").read_text()
