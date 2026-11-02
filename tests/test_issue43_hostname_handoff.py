@@ -101,6 +101,8 @@ class FakeAWS:
             self.eip.pop("AssociationId", None)
             self.eip.pop("InstanceId", None)
             self.eip.pop("NetworkInterfaceId", None)
+            if self.fail_on == "disassociate-address-after":
+                raise RuntimeError("Simulated network error after disassociation")
             return {}
         if (service, op) == ("ec2", "associate-address"):
             if self.eip.get("AssociationId"):
@@ -253,6 +255,24 @@ class HandoffTests(unittest.TestCase):
                 h.handoff_gpu(self.aws, lambda *_: (_ for _ in ()).throw(
                     ValueError("public cert invalid")), now=NOW, allow_live=True,
                     verify_guest=lambda *_: None)
+        self.assertEqual(self.aws.eip["InstanceId"], h.CPU_ID)
+        self.assertEqual(h._tags(self.aws.eip)["StudioDcvInstanceId"], h.CPU_ID)
+
+    def test_disassociation_refusal_keeps_original_cpu_owner(self):
+        self.aws.fail_on = "disassociate-address"
+        with mock.patch.object(h, "LIVE_HANDOFF_ENABLED", True):
+            with self.assertRaisesRegex(RuntimeError, "restored to CPU"):
+                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, allow_live=True,
+                              verify_guest=lambda *_: None)
+        self.assertEqual(self.aws.eip["InstanceId"], h.CPU_ID)
+        self.assertEqual(self.aws.eip["AssociationId"], "eipassoc-previous")
+
+    def test_partial_disassociation_error_restores_cpu(self):
+        self.aws.fail_on = "disassociate-address-after"
+        with mock.patch.object(h, "LIVE_HANDOFF_ENABLED", True):
+            with self.assertRaisesRegex(RuntimeError, "restored to CPU"):
+                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, allow_live=True,
+                              verify_guest=lambda *_: None)
         self.assertEqual(self.aws.eip["InstanceId"], h.CPU_ID)
         self.assertEqual(h._tags(self.aws.eip)["StudioDcvInstanceId"], h.CPU_ID)
 
