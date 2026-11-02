@@ -189,13 +189,12 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "run")
     @mock.patch.object(cli, "aws")
     @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_scoped_destroy_accepts_launch_template(self, describe, aws, run):
-        aws.return_value = {"StackResourceSummaries": [
-            {"ResourceType": "AWS::EC2::Instance"},
-            {"ResourceType": "AWS::EC2::SecurityGroup"},
-            {"ResourceType": "AWS::EC2::LaunchTemplate"}]}
-        self.invoke(["destroy", "--stack", "studio-gpu-cli-test1", "--delete-stack"])
-        self.assertTrue(any("delete-stack" in c.args[0] for c in run.call_args_list))
+    def test_nonapproved_gpu_destroy_fails_before_aws(self, describe, aws, run):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.invoke(["destroy", "--stack", "studio-gpu-cli-test1", "--delete-stack"])
+        aws.assert_not_called()
+        run.assert_not_called()
 
     @mock.patch.object(cli.subprocess, "check_output", return_value="{}")
     def test_aws_json_requests_never_open_pager(self, check_output):
