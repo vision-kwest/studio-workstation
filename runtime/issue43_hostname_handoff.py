@@ -17,6 +17,7 @@ import re
 import time
 
 from runtime import pr65_one_shot_guard as guard
+from runtime import pr65_gpu_create
 
 REGION = "us-east-1"
 ACCOUNT = "401233741942"
@@ -179,6 +180,10 @@ def gpu_preview(aws, *, now=None):
             _tags(address).get("StudioDcvInstanceId") != CPU_ID):
         raise ValueError("Current EIP owner is not the approved CPU")
     _dns(aws)
+    # Reuse PR #65's original read-only IAM/Scheduler preflight, not a
+    # parallel hand-written policy check. A changed expiration execution
+    # role must block the EIP transfer even if the schedules still exist.
+    pr65_gpu_create.preflight(aws, REGION, GPU_STACK, GPU_TOKEN)
     expiry = _gpu_guard(aws, gpu, now)
     return {"from": CPU_ID, "to": gpu_id, "from_stack": CPU_STACK, "to_stack": GPU_STACK,
             "allocation_id": EIP_ID, "ip": EIP_IP, "hostname": HOST,
