@@ -119,6 +119,35 @@ complete commands in an authorized CloudShell/administrator environment;
 **do not grant broad CloudFormation rights to the guest solely to test
 the CLI**. Do not call full CLI acceptance passed until that happens.
 
+### CPU/GPU shared hostname — guarded draft commands
+
+Draft PR #67 also adds the following optional commands for one-at-a-time
+CPU/GPU sharing, **without changing the existing GPU create/start/stop or
+PR #65 expiration safeguards**:
+
+```bash
+# Read-only GPU handoff preflight: exact stack/EIP/DNS/expiration checks
+python3 studio workstation hostname-plan
+
+# Print additive-only, per-GPU-instance ACM export IAM proposal; no AWS call
+python3 studio workstation hostname-iam --gpu-instance-id i-REPLACE
+
+# Review returning the EIP to the original stopped CPU
+python3 studio workstation hostname-return-plan --gpu-instance-id i-REPLACE
+```
+
+The transfer/return commands are intentionally hard-disabled even when
+`--execute` is present. They must not become executable until separate
+authorization and real GPU guest preparation (AWCP, exact instance-scoped
+IAM and verified trusted localhost DCV certificate). The GPU's independent
+termination and retained-EBS cleanup schedules **must remain enabled**,
+so a handoff is temporary and must finish before its deadline. The
+single EIP remains reserved and DNS remains unchanged. Neither a GPU
+launch nor a GPU TLS deployment has been performed.
+
+[Read the reviewed CPU/GPU handoff, failure and rollback design](issue43-shared-cpu-gpu-handoff.md)
+before proposing any live activation.
+
 See [Issue #43 evidence and final audit](issue43-acm-dcv.md).
 Trusted HTTPS does not fix the public TCP 8443 exposure (Issue #62).
 
