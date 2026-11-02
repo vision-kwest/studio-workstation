@@ -52,6 +52,62 @@ class StudioCliTests(unittest.TestCase):
         self.invoke(["connect"])
         run.assert_not_called()
 
+    def test_trusted_hostname_connect_uses_verified_stack_identity(self):
+        vm = dict(STATE, public_ip="54.159.180.104", state="running")
+        with mock.patch.object(cli, "describe", return_value=vm), \
+             mock.patch.object(cli, "verified_dcv_hostname",
+                               return_value="https://dcv.kwesidavis.com:8443") as tls, \
+             mock.patch.object(cli, "run") as run, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            cli.main(["connect", "--stack", STACK,
+                      "--hostname", "dcv.kwesidavis.com"])
+        tls.assert_called_once_with("dcv.kwesidavis.com", "54.159.180.104")
+        self.assertIn("https://dcv.kwesidavis.com:8443", output.getvalue())
+        run.assert_not_called()
+
+    def test_trusted_hostname_rejected_when_stopped(self):
+        vm = dict(STATE, public_ip="54.159.180.104", state="stopped")
+        with mock.patch.object(cli, "describe", return_value=vm), \
+             mock.patch.object(cli, "verified_dcv_hostname") as tls, \
+             mock.patch.object(cli, "run") as run, \
+             contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main(["status", "--stack", STACK,
+                          "--hostname", "dcv.kwesidavis.com"])
+        tls.assert_not_called()
+        run.assert_not_called()
+
+    def test_trusted_hostname_is_not_allowed_with_ssm(self):
+        with mock.patch.object(cli, "describe") as describe, \
+             mock.patch.object(cli, "run") as run, \
+             contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main(["connect", "--stack", STACK, "--ssm",
+                          "--hostname", "dcv.kwesidavis.com"])
+        describe.assert_not_called()
+        run.assert_not_called()
+
+    def test_trusted_dns_mismatch_fails_before_network_connection(self):
+        fake = [(None, None, None, None, ("203.0.113.10", 8443))]
+        with mock.patch.object(cli.socket, "getaddrinfo", return_value=fake), \
+             mock.patch.object(cli.socket, "create_connection") as conn:
+            with self.assertRaisesRegex(ValueError, "DNS A record does not match"):
+                cli.verified_dcv_hostname("dcv.kwesidavis.com", "54.159.180.104")
+        conn.assert_not_called()
+
+    def test_trusted_connection_pins_verified_ip_and_preserves_hostname_sni(self):
+        fake = [(None, None, None, None, ("54.159.180.104", 8443))]
+        import ssl
+        with mock.patch.object(cli.socket, "getaddrinfo", return_value=fake), \
+             mock.patch.object(cli.socket, "create_connection") as conn, \
+             mock.patch.object(cli.ssl, "create_default_context") as context:
+            tlsctx = context.return_value
+            url = cli.verified_dcv_hostname("dcv.kwesidavis.com", "54.159.180.104")
+        self.assertEqual(url, "https://dcv.kwesidavis.com:8443")
+        conn.assert_called_once_with(("54.159.180.104", 8443), timeout=5)
+        tlsctx.wrap_socket.assert_called_once_with(conn.return_value.__enter__.return_value,
+                                                   server_hostname="dcv.kwesidavis.com")
+
     @mock.patch.object(cli, "run")
     def test_create_rejects_invalid_cidr_without_running(self, run):
         with self.assertRaises(SystemExit):
