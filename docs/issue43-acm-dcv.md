@@ -1,9 +1,94 @@
-# Issue #43 — Stable IP + ACM trusted DCV (Tasks 3–5 deployed; Task 6 pending)
+# Issue #43 — Stable IP + ACM trusted DCV (Tasks 3–6 accepted; Task 7 offline audit)
 
-**Status:** Draft PR #67 remains unmerged. Tasks 3–5 are live: EIP/DNS, ACM certificate, scoped IAM, AWCP v3.1.2 and verified DCV TLS enrollment. The Studio CLI changes in PR #67 are NOT merged, and Task 6 browser/stop-start acceptance is still pending.
+**Status:** Draft PR #67 remains **unmerged**. Tasks 3–6 were accepted live on the CPU: static EIP/DNS, exportable ACM, session-scoped IAM, AWCP v3.1.2, successful browser login and two stop/start TLS/persistence checks. The CPU is **stopped**. Task 7's no-op refresh, retention and CLI regression refinements are **offline-only on this feature branch**, not installed on that EC2 instance. No GPU hostname handoff is authorized.
 This plan supersedes the bespoke Lambda/EventBridge/DynamoDB/DDNS/Certbot
 architecture removed from the feature branch. The approved DNS delegation
 was created before this PR.
+
+## Task 7 — offline final adoption, security and release audit (2026-11-02 UTC)
+
+**Execution boundary:** Reviewed IAM, EIP, DNS, ACM and CPU CloudFormation through
+read-only AWS calls. Updated only draft PR #67 branch code, tests and
+documentation. **No EC2/SSM start, GPU launch, DNS, IAM, ACM or AWCP guest
+mutations; no RES/Image Builder edits or PR merge.**
+
+### Audit findings and decisions
+
+| Area | Read-only finding / decision |
+| --- | --- |
+| EIP | `eipalloc-0879a34aa1a1298dd` holds `54.159.180.104`, associated through `eipassoc-0e09a0e9afddda6db` to the original CPU primary ENI `eni-0719a8758ddd51d4c`. The CPU remains **stopped**. |
+| DNS | Zone `Z02607163QPWX22FZ2Q9M` has only expected apex A, NS/SOA and ACM-validation CNAME; A TTL 300 points to `54.159.180.104`. No DDNS or stop-time deletion needed with allocated EIP. |
+| ACM | Exact exportable public certificate `b753beee-5659-4311-a52f-39326b7b3243` is `ISSUED`, `Export=ENABLED`, `RenewalEligibility=ELIGIBLE`, expiry `2027-05-18T23:59:59Z`. Validation CNAME remains, status `SUCCESS`. Actual **future reissued** certificate has not yet been observed. |
+| IAM | Verified exact export role `studio-issue43-dcv-acm-export` has only `acm:ExportCertificate` for one ARN. Export role trust and shared base-role `StudioIssue43ExactInstanceAssume` policy both restrict `aws:userid` to `AROAV223FBB3JOQHYPKDX:i-0bbfbdc878d3a2320`. A different CPU/GPU session does **not** inherit permission to export. |
+| Stack | CloudFormation `studio-workstation-cpu-v013` is `CREATE_COMPLETE`; `DescribeStackResource(Workstation)` resolves the exact stopped CPU instance. EIP allocation is managed separately and MUST be retired separately if stack is destroyed. |
+| Ownership | **CPU-only hostname ownership** is the approved present state. A GPU cannot be switched merely by updating DNS: it needs a separately approved EIP reassociation, own trusted certificate staging and deliberately scoped IAM. Do not change GPU PR #65 safeguards. |
+| Ingress | Trusted TLS does **not** fix the existing TCP 8443 public exposure; hardening is tracked separately in Issue #62. |
+| Credentials | The certificate private key stays in restricted AWS-provider staging and `dcv:dcv 0600` deployed generations. No private key may enter GitHub, CI or SSM output. |
+| Cost | AWS EIP/public IPv4 `$0.005/hour` (~$3.65/730h), Route 53 hosted zone `$0.50/month` plus queries, and ACM exportable FQDN `$7` at issuance and each renewal (budget roughly three issuance/renewal charges in a year). ~$5.90/month first-year normalized gross estimate, excluding EC2/EBS and possible other IPv4 charges. EIP's incremental cost versus a public IP already attached to running EC2 may be smaller. |
+
+**CLI:** Read-only AWS operations `DescribeStackResource` and
+`DescribeInstances` independently returned the real stack→instance ID,
+stopped state and EIP; they match the data path used by Studio CLI.
+Previously, the draft CLI's DNS/TLS verifier was run with **real
+certificate and DNS**, and the `connect`/`status --hostname` output
+was tested with mocked stack discovery; negative offline tests now cover
+stopped state, DNS mismatch, SNI/pinned-IP verification and
+`--hostname`/`--ssm` incompatibility. **A fully unmocked,
+credential-backed CLI invocation against a running workstation remains
+unverified**: no EC2 startup was authorized for Task 7.
+
+### New, offline-only refinements in draft PR #67
+
+1. **Idempotent refresh:** Validate staged hostname, lifetime and matching
+   key on every refresh. If both staged files are byte-identical to the
+   current validated DCV certificate and key, check DCV service/console
+   health **without restarting it**, without rewriting keys, and without
+   generating another certificate directory. A failed console state
+   still fails closed.
+2. **Bounded managed retention:** After a successful changed-certificate
+   activation, retain the **active** and **immediately preceding**
+   generation for rollback and prune only older *positively identified*
+   `gen-*` directories. On a no-op startup, select the newest verified
+   prior generation as rollback and trim older verified excess generations,
+   still without a DCV restart. Root-owned, symlinked, incorrectly
+   permissioned, hard-linked, unfamiliar or incomplete entries are never
+   force-deleted; they are left for manual review (so the overall directory
+   can exceed two entries if unsafe foreign entries exist). Cleanup uses
+   directory descriptors and no-follow guards and **only runs following
+   successful certificate activation or healthy no-op validation**.
+   Cleanup failures are logged but do not roll back a working trusted
+   certificate.
+3. **Regression coverage:** Includes changed-certificate switch/rollback,
+   unchanged-pair no-op, unavailable console, mismatch/expired identity,
+   permissions, no-delete policy for unknown files/symlinks/hardlinks,
+   cleanup failure, retaining rollback generation and exact CLI
+   DNS/TLS/instance checks. Runs without AWS credentials, guest DCV or
+   imported private keys.
+
+### Outstanding release approval gates
+
+- **The new hook is not installed on the stopped CPU**. Before merging or
+  claiming the new idempotence/retention behavior in production, explicitly
+  approve one supervised live rollout and confirm unchanged-certificate
+  startup does **not** disconnect DCV, generation count is bounded for
+  verified files, and changed-cert/rollback behavior still succeeds.
+  Do not start an EC2 instance under this offline Task 7 authorization.
+- A future actual ACM-reissued certificate cannot be forced as part of a
+  read-only review. Verify its delivery after renewal, and consider a
+  renewal/expiry alert channel. Do not delete the validation CNAME.
+- Resolve public TCP 8443 access under Issue #62 separately.
+- PR #67 stays **DRAFT/unmerged** until this audit is reviewed and any
+  required live acceptance and merge authorization are independently
+  approved.
+
+### References for costs and renewal
+
+- [AWS VPC/public IPv4 pricing](https://aws.amazon.com/vpc/pricing/)
+- [Route 53 pricing](https://aws.amazon.com/route53/pricing/)
+- [ACM exportable public certificate pricing](https://aws.amazon.com/certificate-manager/pricing/)
+- [ACM public certificate 198-day validity and renewal](https://docs.aws.amazon.com/acm/latest/userguide/gs-acm-request-public.html)
+
+---
 
 ## Task 6 — browser, automatic refresh and stop/start acceptance (2026-11-02 UTC; COMPLETED)
 
@@ -465,18 +550,18 @@ This rollback was documented, **not executed**. Task 5 requires a
 separate approval for IAM permissions, on-host AWCP installation,
 first certificate export, key storage and controlled DCV testing.
 
-## AWS steps requiring separate approvals
+## Completion and remaining authorizations
 
-- **Task 3:** Allocate *new* EIP and associate approved workstation, create
-  Route 53 A record, verify ownership and rollback. Do not use NAT EIPs.
-- **Task 4:** Request ACM exportable certificate for exact FQDN and add
-  only the required validation CNAME. This incurs a certificate issuance fee.
-- **Task 5:** Install pinned AWCP and exact IAM roles/permissions, stage
-  secrets, perform supervised enrollment and validate DCV behavior.
-- **Task 6:** Browser trust, actual local DCV login, stop/start, retained EIP,
-  recovery from long stop and renewal/rollback. No live action before approval.
-- **Task 7:** GPU ownership/handoff decision, documentation, cleanup evidence;
-  merge separately approved. Issue #62 still covers public TCP 8443 access.
+- **Completed with separate approvals:** Task 3 EIP/Route 53, Task 4 ACM,
+  Task 5 agent/instance-scoped IAM/DCV enrollment, Task 6 human browser login,
+  AWCP refresh and supervised stop/start. CPU was stopped at the end.
+- **Task 7:** read-only infrastructure audit, draft hook and CLI improvements,
+  offline failure-path tests, documentation and final-review preparation.
+  Changes remain in draft PR #67 and are **not installed** on the CPU.
+- **Still requires explicit permission:** supervised live rollout of the
+  updated hook, any extra CPU/GPU launch or EIP handoff, changes to IAM/DNS,
+  and PR merge. No GPU TLS capability is implied by the CPU acceptance.
+- **Issue #62:** independent public TCP 8443 access hardening.
 
 ## Tests and controls
 
@@ -484,8 +569,10 @@ first certificate export, key storage and controlled DCV testing.
 exercises symlink enrollment refusal, cert/key mismatch and hostname
 validation, secure file permissions, successful generation activation,
 failure before switch, and post-switch rollback. All checks use local mocks,
-no AWS calls and no real service restart. Existing Studio CLI and RES
-contract suites must continue to pass.
+no AWS calls and no real service restart. The new no-op and retention safety checks are offline-only until approved
+guest deployment. Run Issue #43 and existing Studio CLI regressions before
+the final release decision; RES 2026.06 source and GPU launch safeguards
+are unchanged.
 
 **Security:** never copy an exported private key into Git, user data, CI
 artifacts, an unrestricted SSM command, or publicly readable filesystem.
