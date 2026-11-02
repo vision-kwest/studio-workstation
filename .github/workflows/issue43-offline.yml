@@ -11,6 +11,8 @@ on:
       - 'tests/test_issue43_hostname_handoff.py'
       - 'runtime/issue43_hostname_handoff.py'
       - 'runtime/issue43_gpu_acm_setup.py'
+      - 'runtime/issue43_destroy.py'
+      - 'tests/test_issue43_destroy.py'
       - 'tests/test_issue43_gpu_acm_setup.py'
       - 'tests/test_issue43_cli_lifecycle.py'
       - 'infra/issue43-awcp.review-only.toml'
@@ -28,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Compile standalone certificate and CLI modules
-        run: python3 -m py_compile scripts/studio_dcv_acm.py scripts/studio_workstation_cli.py runtime/issue43_hostname_handoff.py runtime/issue43_gpu_acm_setup.py
+        run: python3 -m py_compile scripts/studio_dcv_acm.py scripts/studio_workstation_cli.py runtime/issue43_hostname_handoff.py runtime/issue43_gpu_acm_setup.py runtime/issue43_destroy.py
       - name: Test ACM certificate activation (no AWS credentials)
         run: python3 -m unittest discover -s tests -p 'test_issue43_acm_dcv.py' -v
       - name: Offline CPU/GPU shared EIP handoff and expiration guard tests
@@ -36,6 +38,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_issue43_hostname_handoff.py' -v
           python3 -m unittest discover -s tests -p 'test_issue43_gpu_acm_setup.py' -v
           python3 -m unittest discover -s tests -p 'test_issue43_cli_lifecycle.py' -v
+          python3 -m unittest discover -s tests -p 'test_issue43_destroy.py' -v
           python3 -m unittest discover -s tests -p 'test_pr65_one_shot_guard.py' -v
           python3 -m unittest discover -s tests -p 'test_pr65_gpu_create.py' -v
       - name: Preserve baseline Studio CLI regression suite
