@@ -63,6 +63,21 @@ The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`
 
 After provisioning, set a unique local `workstation` password interactively via SSM (`sudo passwd workstation`); DCV uses **Linux system credentials**, not AWS console credentials. Login through the DCV URL printed by `connect`.
 
+## Optional trusted DCV TLS — Issue #43 (DRAFT; not deployed)
+
+The simplified design uses a dedicated Elastic IP, a single Route 53 A record,
+one exportable AWS ACM public certificate, and AWS Workload Credentials Provider
+(v3.1.2) to refresh trusted TLS on the workstation. A minimal, offline-tested
+DCV activation hook validates and switches a versioned certificate/key pair.
+**Tasks 3–5 are deployed to the approved CPU only:** dedicated Elastic IP,
+A record, exportable ACM certificate, exact session-scoped IAM, AWS provider
+and trusted DCV TLS have passed guest/console verification. The feature branch
+Studio CLI remains unmerged; browser login and stop/start recovery are Task 6.
+
+See [Issue #43 simplified ACM/DCV runbook](docs/issue43-acm-dcv.md).
+Draft [PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
+remains deliberately unmerged. The former Lambda/DDNS/Certbot proposal is retired.
+
 ## Security and operating costs
 
 - No inbound SSH is needed. Use Systems Manager for maintenance and Amazon DCV for the graphical desktop.

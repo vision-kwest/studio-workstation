@@ -1,0 +1,42 @@
+name: Issue 43 ACM DCV offline tests
+on:
+  push:
+    branches:
+      - feature/issue-43-letsencrypt-dynamic-dns
+  pull_request:
+    paths:
+      - 'scripts/studio_dcv_acm.py'
+      - 'scripts/studio_workstation_cli.py'
+      - 'tests/test_issue43_acm_dcv.py'
+      - 'infra/issue43-awcp.review-only.toml'
+      - 'infra/issue43-awcp-dcv-refresh.conf'
+      - 'infra/issue43-acm-iam.review-only.json'
+      - 'docs/issue43-acm-dcv.md'
+      - '.github/workflows/issue43-offline.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile standalone certificate and CLI modules
+        run: python3 -m py_compile scripts/studio_dcv_acm.py scripts/studio_workstation_cli.py
+      - name: Test ACM certificate activation (no AWS credentials)
+        run: python3 -m unittest discover -s tests -p 'test_issue43_acm_dcv.py' -v
+      - name: Preserve baseline Studio CLI regression suite
+        run: python3 -m unittest discover -s tests -p 'test_studio_workstation_cli.py' -v
+      - name: Validate ACM-only IAM and TOML format (no secrets)
+        run: |
+          python3 -m json.tool infra/issue43-acm-iam.review-only.json >/dev/null
+          python3 - <<'PY'
+          import tomllib
+          with open('infra/issue43-awcp.review-only.toml', 'rb') as f:
+              config = tomllib.load(f)
+          certs = config["capabilities"]["acm"]["certificates"]
+          assert len(certs) == 1
+          assert certs[0]["certificate_path"] == "/var/lib/studio/dcv-acm/fullchain.pem"
+          assert certs[0]["private_key_path"] == "/var/lib/studio/dcv-acm/privkey.pem"
+          assert "chain_path" not in certs[0]
+          PY
