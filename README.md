@@ -59,7 +59,7 @@ python3 studio workstation stop --stack STACK_NAME
 python3 studio workstation start --stack STACK_NAME
 ```
 
-The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`. `create` performs the action unless `--dry-run` is specified. For final teardown, `destroy --stack STACK_NAME --delete-stack` deletes stack-managed resources, **not necessarily retained EBS volumes or test Scheduler schedules**. Follow [the cleanup checklist](docs/studio-cli.md#destroy-and-verify-cleanup).
+The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`. `create` performs the action unless `--dry-run` is specified. On the draft PR #67 branch, `destroy --stack STACK_NAME --delete-stack` performs guarded cleanup of approved GPU retained EBS and both expiration schedules after exact resource verification, and safely destroys non-anchor CPU stacks. The original shared-hostname CPU anchor is protected; any partial failure requires operator review. See [Studio CLI operations](docs/studio-cli.md#daily-operation-and-safe-cleanup-pr-67-draft).
 
 After provisioning, set a unique local `workstation` password interactively via SSM (`sudo passwd workstation`); DCV uses **Linux system credentials**, not AWS console credentials. Login through the DCV URL printed by `connect`.
 
@@ -89,10 +89,7 @@ management environment. Do not infer that a GPU has this hostname yet.
 **CPU/GPU sharing is now designed and offline-tested in the draft**, without
 any additional static IP, Route 53 record or ACM certificate. The guarded
 `hostname-plan`, `hostname-iam` and `hostname-return-plan` commands can
-review the exact GPU handoff. Live `hostname-handoff --execute` and
-`hostname-return --execute` are deliberately disabled until separately
-approved GPU TLS/IAM preparation, expiration-schedule checks and live
-acceptance. [Shared CPU/GPU hostname runbook](docs/issue43-shared-cpu-gpu-handoff.md).
+review the exact GPU handoff. Live `hostname-handoff --execute` and `hostname-return --execute` are now guarded, privileged operations in the draft branch, alongside automatic approved CPU/GPU lifecycle integration. The complete CLI flow still requires Task 6 unmocked acceptance. [Shared CPU/GPU hostname runbook](docs/issue43-shared-cpu-gpu-handoff.md).
 
 See [the Issue #43 acceptance, operations and rollback runbook](docs/issue43-acm-dcv.md)
 and [the Studio CLI instructions](docs/studio-cli.md#optional-trusted-hostname--issue-43).
