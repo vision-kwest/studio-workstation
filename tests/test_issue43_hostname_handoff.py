@@ -3,6 +3,7 @@ import copy
 import datetime as dt
 import io
 import json
+import subprocess
 import unittest
 from contextlib import redirect_stdout, redirect_stderr
 from unittest import mock
@@ -287,6 +288,31 @@ class HandoffTests(unittest.TestCase):
         self.aws.ssm_status = "Failed"
         with self.assertRaisesRegex(RuntimeError, "GPU DCV"):
             h.check_gpu_tls(self.aws, GPU, sleep=lambda _: None)
+
+    def test_ssm_invocation_eventual_consistency_retry_is_bounded(self):
+        attempts = 0
+        def call(region, *args):
+            nonlocal attempts
+            if args[:2] == ("ssm", "get-command-invocation"):
+                attempts += 1
+                if attempts <= 2:
+                    raise subprocess.CalledProcessError(254, args,
+                        stderr="An error occurred (InvocationDoesNotExist) while retrieving SSM command")
+            return self.aws(region, *args)
+        h.check_gpu_tls(call, GPU, sleep=lambda _: None)
+        self.assertEqual(attempts, 3)
+
+    def test_ssm_access_denied_is_not_treated_as_eventual_consistency(self):
+        attempts = 0
+        def call(region, *args):
+            nonlocal attempts
+            if args[:2] == ("ssm", "get-command-invocation"):
+                attempts += 1
+                raise subprocess.CalledProcessError(254, args, stderr="AccessDenied")
+            return self.aws(region, *args)
+        with self.assertRaises(subprocess.CalledProcessError):
+            h.check_gpu_tls(call, GPU, sleep=lambda _: None)
+        self.assertEqual(attempts, 1)
 
     def test_simulated_live_handoff_with_scoped_rollback_protection(self):
         with mock.patch.object(h, "LIVE_HANDOFF_ENABLED", True):
