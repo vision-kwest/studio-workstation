@@ -152,6 +152,38 @@ def validate_console_without_restart():
         raise RuntimeError("DCV console not ready")
 
 
+def newest_safe_previous(store: Path, active: str, uid: int, gid: int) -> str:
+    """Choose the newest recognizable rollback pair without modifying files.
+
+    For a no-op startup, the previous generation is not separately recorded.
+    Only known gen-* directories with exactly two owner-restricted regular
+    files are eligible for protection. Retention revalidates before deletion.
+    """
+    candidates = []
+    for entry in store.iterdir():
+        if entry.name == active or not GEN_NAME.fullmatch(entry.name):
+            continue
+        try:
+            s = entry.lstat()
+            if (not stat.S_ISDIR(s.st_mode) or s.st_uid != uid
+                    or s.st_gid != gid or stat.S_IMODE(s.st_mode) != 0o700
+                    or {p.name for p in entry.iterdir()} != set(LINKS)):
+                continue
+            valid = all(
+                stat.S_ISREG((s2 := (entry / name).lstat()).st_mode)
+                and s2.st_uid == uid and s2.st_gid == gid
+                and stat.S_IMODE(s2.st_mode) == 0o600
+                and s2.st_nlink == 1
+                for name in LINKS
+            )
+            if valid:
+                candidates.append((s.st_mtime_ns, entry.name))
+        except (OSError, ValueError):
+            continue
+    # With no other valid generation, protecting the active twice is safe.
+    return max(candidates)[1] if candidates else active
+
+
 def prune_managed_generations(store: Path, active: str, previous: str,
                               uid: int, gid: int) -> tuple[int, int]:
     """Best-effort bounded retention, never follow links or delete unknowns.
@@ -224,6 +256,18 @@ def activate(source: Path = SOURCE, dcv: Path = DCV):
     dcvu = pwd.getpwnam("dcv")
     if current_pair_matches(source, dcv):
         validate_console_without_restart()
+        # A no-op may still clean earlier excess generations from before the
+        # idempotence fix. This does not create a generation or restart DCV.
+        try:
+            rollback = newest_safe_previous(store, previous.name,
+                                            dcvu.pw_uid, dcvu.pw_gid)
+            removed, skipped = prune_managed_generations(
+                store, previous.name, rollback, dcvu.pw_uid, dcvu.pw_gid)
+            if skipped:
+                logging.warning("DCV TLS retention left %d unsafe entries for manual review", skipped)
+            logging.info("DCV TLS no-op retention pruned %d old generations", removed)
+        except (OSError, RuntimeError) as exc:
+            logging.warning("DCV TLS no-op retention incomplete: %s", exc)
         return "Certificate unchanged; DCV console ready (no restart or new generation)"
     # The store was created by supervised enrollment, not by the AWS agent.
     generation = Path(tempfile.mkdtemp(prefix="gen-", dir=store))
