@@ -101,6 +101,8 @@ def _guard_schedule(aws, name, iid, action, payload, now):
     when = dt.datetime.strptime(expr[3:-1], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
     if when - now < SAFETY_MARGIN:
         raise ValueError("GPU expiration is too near for a safe handoff")
+    if when - now > dt.timedelta(minutes=240):
+        raise ValueError("GPU expiration exceeds PR #65 supervised guard bound")
     return when
 
 def _gpu_guard(aws, gpu, now):
@@ -118,8 +120,8 @@ def _gpu_guard(aws, gpu, now):
                            guard.TERMINATE, {"InstanceIds": [gpu["InstanceId"]]}, now)
     cleanup = _guard_schedule(aws, "studio-pr65-v-" + vid, gpu["InstanceId"],
                               guard.DELETE_VOLUME, {"VolumeId": vid}, now)
-    if cleanup <= term + dt.timedelta(minutes=29):
-        raise ValueError("GPU volume-cleanup deadline too near termination")
+    if cleanup <= term + dt.timedelta(minutes=29) or cleanup > term + dt.timedelta(minutes=120):
+        raise ValueError("GPU volume-cleanup timing outside PR #65 guard bounds")
     return {"terminate_at": term.isoformat(), "volume_cleanup_at": cleanup.isoformat(),
             "root_volume_id": vid}
 
@@ -222,7 +224,8 @@ def check_gpu_tls(aws, instance_id, *, sleep=time.sleep):
             raise RuntimeError("GPU DCV/ACM certificate readiness failed")
     raise RuntimeError("GPU DCV/ACM SSM readiness timeout")
 
-def handoff_gpu(aws, verify_public_tls, *, now=None, allow_live=False, verify_guest=check_gpu_tls):
+def handoff_gpu(aws, verify_public_tls, *, now=None, allow_live=False,
+                verify_guest=check_gpu_tls, clock=lambda: dt.datetime.now(dt.timezone.utc)):
     """Live write path tested offline, but hard-disabled pending a separate approval.
 
     Failure after disassociation attempts recovery of original stopped CPU
@@ -230,10 +233,10 @@ def handoff_gpu(aws, verify_public_tls, *, now=None, allow_live=False, verify_gu
     """
     if not (LIVE_HANDOFF_ENABLED and allow_live):
         raise RuntimeError("GPU EIP handoff DISABLED pending separately approved live phase")
-    pre = gpu_preview(aws, now=now)
+    pre = gpu_preview(aws, now=now or clock())
     verify_guest(aws, pre["to"])
     # Refresh the guard, source ownership and deadline immediately before writes.
-    refreshed = gpu_preview(aws, now=dt.datetime.now(dt.timezone.utc))
+    refreshed = gpu_preview(aws, now=clock())
     if (refreshed["to"] != pre["to"] or refreshed["old_association"] != pre["old_association"]):
         raise RuntimeError("Handoff preflight changed during guest preparation")
     new_assoc = None
