@@ -144,10 +144,60 @@ def activate(source: Path = SOURCE, dcv: Path = DCV):
     return "Activated a verified DCV certificate generation; console ready"
 
 
+def enroll_default(source: Path = SOURCE, dcv: Path = DCV):
+    """Supervised first enrollment when DCV uses its built-in self-signed cert.
+
+    Does not replace existing files: both target paths and generation directory
+    must be absent. On service failure the links are removed and the default
+    built-in self-signed certificate is restored by a second DCV restart.
+    """
+    if os.geteuid() != 0:
+        raise PermissionError("First enrollment requires root")
+    if dcv.is_symlink() or not dcv.is_dir():
+        raise RuntimeError("Invalid DCV directory")
+    if any((dcv / name).exists() or (dcv / name).is_symlink()
+           for name in (*LINKS, ACTIVE_NAME, STORE_NAME)):
+        raise RuntimeError("Refusing first enrollment over preexisting DCV certificate paths")
+    cert, key = source / "fullchain.pem", source / "privkey.pem"
+    assert_local_file(cert)
+    assert_local_file(key)
+    verify_material(cert, key)
+    dcvu = pwd.getpwnam("dcv")
+    store = dcv / STORE_NAME
+    store.mkdir(mode=0o700)
+    os.chown(store, dcvu.pw_uid, dcvu.pw_gid)
+    generation = store / ("gen-initial-" + secrets.token_hex(8))
+    try:
+        generation.mkdir(mode=0o700)
+        os.chown(generation, dcvu.pw_uid, dcvu.pw_gid)
+        write_private(cert, generation / "dcv.pem", dcvu.pw_uid, dcvu.pw_gid)
+        write_private(key, generation / "dcv.key", dcvu.pw_uid, dcvu.pw_gid)
+        verify_material(generation / "dcv.pem", generation / "dcv.key")
+        (dcv / ACTIVE_NAME).symlink_to(f"{STORE_NAME}/{generation.name}")
+        for name, link in LINKS.items():
+            (dcv / name).symlink_to(link)
+        restart_and_check()
+    except Exception:
+        # Never erase anything unexpected: only delete our verified symlinks.
+        for name, link in LINKS.items():
+            p = dcv / name
+            if p.is_symlink() and os.readlink(p) == link:
+                p.unlink()
+        p = dcv / ACTIVE_NAME
+        if p.is_symlink() and os.readlink(p) == f"{STORE_NAME}/{generation.name}":
+            p.unlink()
+        # Revert to DCV built-in self-signed certificate if first install failed.
+        restart_and_check()
+        raise
+    return "First custom certificate installed; console ready"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--enroll-default", action="store_true",
+                        help="Supervised first install: only when DCV has no custom cert files")
     args = parser.parse_args(argv)
-    print(activate())
+    print(enroll_default() if args.enroll_default else activate())
 
 
 if __name__ == "__main__":
