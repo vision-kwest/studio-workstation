@@ -10,6 +10,7 @@ on:
       - 'scripts/studio_workstation_cli.py'
       - 'tests/test_issue43_tls_dns.py'
       - 'infra/issue43-*'
+      - 'scripts/package_issue43_dns.py'
       - '.github/workflows/issue43-offline.yml'
   workflow_dispatch:
 permissions:
@@ -20,12 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Compile Issue 43 modules
-        run: python3 -m py_compile runtime/dcv_dynamic_dns.py scripts/dcv_tls.py scripts/studio_workstation_cli.py
+        run: python3 -m py_compile runtime/dcv_dynamic_dns.py scripts/dcv_tls.py scripts/studio_workstation_cli.py scripts/package_issue43_dns.py
       - name: Run Issue 43 regression tests (no AWS credentials)
         run: python3 -m unittest discover -s tests -p 'test_issue43_tls_dns.py' -v
       - name: Preserve baseline CLI regression suite
         run: python3 -m unittest discover -s tests -p 'test_studio_workstation_cli.py' -v
       - name: Validate reviewed IAM and EventBridge JSON
         run: |
+          python3 -m json.tool infra/issue43-dns-reconciler.review-only.json >/dev/null
           python3 -m json.tool infra/issue43-iam.review-only.json >/dev/null
           python3 -m json.tool infra/issue43-eventbridge.review-only.json >/dev/null
