@@ -243,6 +243,26 @@ class HandoffTests(unittest.TestCase):
                 h.gpu_preview(lambda *args: deny_role(*args), now=NOW)
         self.assertEqual(self.aws.writes, [])
 
+    def test_expiration_trust_or_extra_managed_policy_blocks_eip_move(self):
+        actual = self.aws.__call__
+        def broken_trust(region, *args):
+            if args[:2] == ("iam", "get-role"):
+                valid = actual(region, *args)
+                valid["Role"]["AssumeRolePolicyDocument"]["Statement"][0]["Condition"][
+                    "StringEquals"]["aws:SourceAccount"] = "000000000000"
+                return valid
+            return actual(region, *args)
+        with self.assertRaisesRegex(ValueError, "scheduler trust mismatch"):
+            h.gpu_preview(broken_trust, now=NOW)
+        self.assertEqual(self.aws.writes, [])
+        def extra_policy(region, *args):
+            if args[:2] == ("iam", "list-attached-role-policies"):
+                return {"AttachedPolicies": [{"PolicyArn": "arn:aws:iam::aws:policy/AdministratorAccess"}]}
+            return actual(region, *args)
+        with self.assertRaisesRegex(ValueError, "Unexpected managed policies"):
+            h.gpu_preview(extra_policy, now=NOW)
+        self.assertEqual(self.aws.writes, [])
+
     def test_weakened_gpu_guard_retry_policy_refused(self):
         self.aws.schedules["studio-pr65-i-" + GPU]["Target"]["RetryPolicy"]["MaximumRetryAttempts"] = 0
         with self.assertRaisesRegex(ValueError, "guard mismatch"):
