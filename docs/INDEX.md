@@ -18,8 +18,8 @@
 ## Optional trusted DCV hostname (draft branch; NOT deployed)
 
 - [Issue #43 — EIP, ACM and AWS Workload Credentials Provider](issue43-acm-dcv.md):
-  current simplified design, pinned agent, certificate activation tests,
-  IAM review, live gates and rollback. Existing IP/self-signed DCV still works.
+  current simplified design, Task 3–5 live CPU TLS evidence, pinned agent,
+  instance-scoped IAM, Task 6 browser/stop-start gates and rollback.
 - Original Lambda/EventBridge/DDNS proposal was retired in draft PR #67;
   Issue #43 retains dated audit and historical context.
 
