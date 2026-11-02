@@ -5,11 +5,9 @@ This plan supersedes the bespoke Lambda/EventBridge/DynamoDB/DDNS/Certbot
 architecture removed from the feature branch. The approved DNS delegation
 was created before this PR.
 
-## Task 6 — initial live restart/renewal check (2026-11-02 UTC; IN PROGRESS)
+## Task 6 — browser, automatic refresh and stop/start acceptance (2026-11-02 UTC; COMPLETED)
 
-**Status:** Awaiting actual user browser DCV login; do not mark Task 6 done or
-stop/restart a session while the user is testing. CPU
-`i-0bbfbdc878d3a2320` was started solely under Task 6 approval.
+**Status:** The user confirmed interactive browser DCV login with **no certificate warnings** and successful GNOME access as `workstation`. Subsequently a supervised stop/start preservation test succeeded; the CPU was stopped again after test cleanup. Draft PR #67 remains unmerged. Do not consider this a test of a future ACM-renewed certificate (only the current issued certificate has been refreshed).
 
 ### Verified before the user's browser test
 
@@ -61,18 +59,67 @@ enabling AWCP's automatic ACM refresh. Its two directives are guarded
 by an offline regression test. Do not broaden `ReadWritePaths` to
 `/etc`, disable `ProtectSystem`, or grant broad AWS permissions.
 
-### Remaining Task 6 gate
+### Browser confirmation and supervised persistence test
 
-- User must open `https://dcv.kwesidavis.com:8443` from an external
-  browser and report no certificate warning plus successful login as
-  local `workstation` user. The guest-side TLS test does not constitute
-  this human UI acceptance.
-- Once user confirms, complete supervised stop/start persistence
-  and AWS/DNS/EIP checks, test the full CLI AWS discovery in an authorized
-  AWS CLI environment if available, and stop the EC2 instance after testing
-  unless user requests otherwise.
-- Keep Issue #43 Task 6 unchecked and PR #67 draft/unmerged until
-  final evidence is gathered. Preserve RES bootstrap/GPU/Image Builder.
+**User confirmation:** Browser `https://dcv.kwesidavis.com:8443`
+connected successfully, no certificate warning, and login to
+the DCV GNOME desktop as the existing local `workstation` user succeeded.
+
+**Supervised second stop/start test, exact approved instance only:**
+1. Created one temporary owner `workstation:workstation`, mode 0600 marker
+   `/home/workstation/.studio-issue43-task6-persistence-20261102`.
+   SHA-256 before stop:
+   `cab2677287188c2ad1a50d8ee914e92e0f2bad5cd29dba3f8c5ddf5bf78935f0`.
+   This was test-only data; no user files were overwritten.
+2. Confirmed DCV `console` `running` owner `workstation`;
+   AWCP ACM service active and had a previous successful refresh.
+   Stopped `i-0bbfbdc878d3a2320` and independently observed `stopped`.
+3. While stopped, `eipalloc-0879a34aa1a1298dd` remained associated via
+   `eipassoc-0e09a0e9afddda6db` to primary ENI
+   `eni-0719a8758ddd51d4c`, and an authoritative Route 53 DNS test
+   returned exactly `54.159.180.104` with `NOERROR`.
+4. Started the same instance. SSM came online automatically. SHA-256
+   verified **identical** after startup. Ubuntu 24.04 and RES host-ready
+   semaphore persisted; DCV 2026.0, GDM, ACM provider and `dcvserver`
+   were active; console `running`, owner `workstation`.
+5. AWCP automatically exported and refreshed the installed current certificate:
+   provider log at **2026-11-02T04:48:14 UTC**:
+   `Refresh command succeeded` and `Certificate refresh successful`.
+   New active generation became
+   `studio-tls-generations/gen-9uzn3i9q`.
+   Certificate/key targets stayed `dcv:dcv` with mode 0600.
+   Trusted TLS 1.3 handshake again reported `Verification: OK`
+   and `Verified peername: dcv.kwesidavis.com`.
+6. Independently rechecked the exact marker SHA-256; removed **only**
+   the temporary marker and verified its absence. DCV remained healthy.
+   Stopped the exact CPU instance again and independently confirmed
+   state `stopped`, unchanged EIP attachment/DNS/ACM certificate and
+   `studio-workstation-cpu-v013` CloudFormation stack `CREATE_COMPLETE`.
+   All permanent EIP/DNS/certificate resources retained.
+
+**CLI verification scope:** The draft Studio CLI's real hostname resolution and
+system-CA-validated TLS were verified on the instance using a SHA-checked
+feature-branch module; `connect/status --hostname` paths were tested with
+*mocked* AWS stack metadata. Full unmocked CloudShell/desktop CLI command
+execution has **not been verified** and should be part of Task 7's final
+release gate. No new IAM permission was granted to facilitate the test.
+
+**Remaining limitations to track in Task 7 / follow-up:** Automated delivery
+after real ACM certificate renewal (a new CA-issued certificate) could not be
+exercised before ACM's renewal window; only repeat export/activation of
+the currently issued certificate was proven. The activation hook presently
+creates a new generation and restarts DCV at each successful post-boot refresh
+even if content is unchanged; review an idempotent no-op optimization and
+retention/garbage collection policy before merge to avoid unnecessary
+disconnects and unbounded growth. Actual browser login was confirmed
+before the second restart, not repeated by a user after that restart; the
+post-restart console and CA TLS checks passed on the guest.
+
+**End state:** CPU **stopped**, persistent storage preserved, static EIP
+`54.159.180.104` and Route 53 A record unchanged, ACM
+`ISSUED`/`ELIGIBLE`, PR #67 draft/unmerged. No modifications to RES 2026.06
+source, GPU controls, Image Builder or unrelated AWS resources.
+
 
 ---
 
