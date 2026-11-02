@@ -192,6 +192,19 @@ def trusted_url(stack, instance, *, manager=aws, check_tls=verified_dcv_hostname
     return check_tls(host, ip)
 
 
+def shared_gpu_source_ready(*, manager=aws):
+    """Before a billable GPU create/start, prove CPU is stopped and owns the EIP."""
+    from runtime import issue43_hostname_handoff as handoff
+    if handoff._stack_iid(manager, handoff.CPU_STACK) != handoff.CPU_ID:
+        raise ValueError("Original CPU CloudFormation identity changed")
+    cpu = handoff._items(manager, handoff.CPU_ID)[handoff.CPU_ID]
+    if (cpu.get("State", {}).get("Name") != "stopped" or
+            cpu.get("NetworkInterfaces", [{}])[0].get("NetworkInterfaceId")
+            != handoff.CPU_ENI):
+        raise ValueError("CPU must be stopped and have its original ENI before GPU launch")
+    trusted_owner(DEFAULT_STACK, handoff.CPU_ID, manager=manager)
+
+
 def complete_gpu_setup(stack, region, instance, *, manager=aws,
                        wait=wait_gpu_bootstrap):
     """Run existing ACM + EIP components AFTER PR65 guarded launch/start."""
@@ -372,6 +385,7 @@ def command(args):
                 raise ValueError("Stack already exists; create requires a new stack name")
             if gpu:
                 gpu_release_preflight(args)
+                shared_gpu_source_ready()  # Do not create billable GPU against a running/foreign CPU.
                 from runtime import pr65_gpu_create
                 # The CPU deploy/wait path is too slow to arm a GPU expiration
                 # schedule; use asynchronous CreateStack with bounded discovery.
@@ -425,6 +439,8 @@ def command(args):
             raise ValueError(f"Expected {desired} before {args.action}, got {state['state']}")
         if args.action == "start" and args.stack == DEFAULT_STACK:
             trusted_owner(args.stack, iid)  # Never start CPU against GPU EIP.
+        if args.action == "start" and args.stack == GPU_ACCEPTANCE_STACK:
+            shared_gpu_source_ready()  # Fail before billing if CPU/EIP ownership is wrong.
         if args.action == "stop" and args.stack == GPU_ACCEPTANCE_STACK:
             from runtime import issue43_hostname_handoff as handoff
             address = handoff._eip(aws)
