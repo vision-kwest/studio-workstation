@@ -17,6 +17,8 @@
 
 ## Optional hardening (implementation branch, NOT deployed)
 
+- [Issue #43 security preflight / NO-GO audit](issue43-security-preflight.md):
+  independently verified AWS state, simulated IAM permissions and deployment blockers.
 - [Issue #43 — Let's Encrypt + Route 53 dynamic DNS](issue43-letsencrypt-dcv.md):
   review-only infrastructure, on-host renewal helper, opt-in CLI hostname
   verification, offline tests, prerequisites and rollback. The currently
