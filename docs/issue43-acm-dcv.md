@@ -103,6 +103,73 @@ separate GPU review.
 
 No IAM, S3, ACM or instance resources have been changed by Task 2.
 
+## Task 3 — approved live Elastic IP and DNS record (completed 2026-11-02 UTC)
+
+The operator approved **only** the Elastic IP allocation/association and one A-record
+creation; no EC2 start, IAM change, ACM request or agent installation was authorized.
+
+| Item | Verified value |
+| --- | --- |
+| AWS account / region | `401233741942` / `us-east-1` |
+| Initial approved owner | stopped CPU instance `i-0bbfbdc878d3a2320` |
+| Workstation stack | `studio-workstation-cpu-v013` |
+| Dedicated EIP address | `54.159.180.104` |
+| EIP AllocationId | `eipalloc-0879a34aa1a1298dd` |
+| EIP AssociationId | `eipassoc-0e09a0e9afddda6db` |
+| Primary ENI | `eni-0719a8758ddd51d4c` |
+| Primary private IPv4 | `172.31.4.184` |
+| Delegated zone | `Z02607163QPWX22FZ2Q9M` |
+| A record | `dcv.kwesidavis.com. A 300 54.159.180.104` |
+| Route 53 change | `/change/C00862872TV2F3IPSK8OP` — **INSYNC** |
+| DNS authoritative test | `NOERROR`, exact A answer `54.159.180.104` |
+| EC2 state after changes | **stopped** |
+
+The EIP was tagged at allocation with `StudioIssue=43`,
+`StudioDcvHostname=dcv.kwesidavis.com`,
+`StudioDcvInstanceId=i-0bbfbdc878d3a2320`, and
+`StudioOwnerStack=studio-workstation-cpu-v013`. The two preexisting EIPs
+assigned to RES NAT gateways were **not changed**.
+
+**Operational caveat:** The new Elastic IP is independently managed, **not a
+CloudFormation resource of the CPU workstation stack**. Deleting that stack
+may leave the EIP allocated and accruing hourly charges. It must be separately
+audited and intentionally released when retired. The current A record resolves
+to a **stopped** EC2 instance, so it is not yet a working DCV login endpoint;
+ACM validation and trusted TLS are separate later tasks.
+
+### Read-only follow-up
+
+```bash
+aws ec2 describe-addresses --region us-east-1 \
+  --allocation-ids eipalloc-0879a34aa1a1298dd --no-cli-pager
+aws ec2 describe-instances --region us-east-1 \
+  --instance-ids i-0bbfbdc878d3a2320 --no-cli-pager
+aws route53 list-resource-record-sets \
+  --hosted-zone-id Z02607163QPWX22FZ2Q9M --no-cli-pager
+aws route53 get-change --id C00862872TV2F3IPSK8OP --no-cli-pager
+```
+
+### Rollback procedure (DOCUMENTED ONLY; NOT EXECUTED)
+
+1. Obtain explicit separate approval for retirement and confirm the A record
+   still exactly equals `54.159.180.104`, with no new owner or DNS handoff.
+2. Remove **only** that exact Route 53 A record using `DELETE` with identical
+   name/type/TTL/value; wait for `INSYNC` and allow cached responses to expire.
+   Preserve delegated zone NS/SOA, all unrelated records and Bluehost NS.
+3. Confirm EIP `eipalloc-0879a34aa1a1298dd` remains associated **only**
+   with ENI `eni-0719a8758ddd51d4c`. Disassociate using the independently
+   verified `eipassoc-0e09a0e9afddda6db`. Recheck allocation status.
+4. Release **only** `eipalloc-0879a34aa1a1298dd` once it is unassociated
+   and no workstation, renewal or DNS workflow relies on it.
+5. Verify the address is absent from EC2 DescribeAddresses, the exact A record
+   is absent, and no other EIPs were altered. Recheck resource charges.
+   No rollback action is part of Task 3 authorization.
+
+Do **not** release or disassociate this EIP without first removing or
+reassigning the corresponding DNS record, and never touch the two RES NAT
+gateway EIPs. Reassociation with another CPU/GPU machine is an explicit
+future handoff operation, not automatic.
+
 ## AWS steps requiring separate approvals
 
 - **Task 3:** Allocate *new* EIP and associate approved workstation, create
