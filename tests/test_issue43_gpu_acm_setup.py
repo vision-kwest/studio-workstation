@@ -139,6 +139,28 @@ class ACMSetupTests(unittest.TestCase):
         self.assertEqual(self.aws.eip["InstanceId"], h.CPU_ID)
         self.assertFalse(setup.revoke_gpu(self.aws, GPU)["revoked"])
 
+    def test_cleanup_after_gpu_absent_from_ec2_inventory(self):
+        setup._install_grant(self.aws, GPU)
+        original = self.aws.__call__
+        def absent(region, *args):
+            if args[:2] == ("ec2", "describe-instances"):
+                return {"Reservations": []}
+            return original(region, *args)
+        result = setup.revoke_gpu(absent, GPU)
+        self.assertTrue(result["revoked"])
+        self.assertFalse(setup._get_role_state(self.aws, GPU))
+
+    def test_cleanup_never_swallow_aws_permission_failure(self):
+        setup._install_grant(self.aws, GPU)
+        original = self.aws.__call__
+        def denied(region, *args):
+            if args[:2] == ("ec2", "describe-instances"):
+                raise subprocess.CalledProcessError(254, args, stderr="AccessDenied")
+            return original(region, *args)
+        with self.assertRaises(subprocess.CalledProcessError):
+            setup.revoke_gpu(denied, GPU)
+        self.assertTrue(setup._get_role_state(self.aws, GPU))
+
     def test_revoke_refuses_gpu_eip_or_running_instance(self):
         setup._install_grant(self.aws, GPU)
         self.aws.eip["InstanceId"] = GPU
