@@ -260,18 +260,24 @@ def handoff_gpu(aws, verify_public_tls, *, now=None, allow_live=False, verify_gu
         try:
             current = _eip(aws)
             owner = current.get("InstanceId")
-            if owner not in (None, pre["to"]):
-                raise RuntimeError("Foreign EIP owner; manual intervention mandatory")
-            if owner == pre["to"]:
-                aws(REGION, "ec2", "disassociate-address", "--association-id", current["AssociationId"])
-            restore = aws(REGION, "ec2", "associate-address", "--allocation-id", EIP_ID,
-                          "--instance-id", CPU_ID, "--no-allow-reassociation")
-            if not restore.get("AssociationId") or _eip(aws).get("InstanceId") != CPU_ID:
-                raise RuntimeError("CPU EIP restoration not verified")
-            aws(REGION, "ec2", "create-tags", "--resources", EIP_ID,
-                "--tags", "Key=StudioDcvInstanceId,Value=" + CPU_ID)
-            if _tags(_eip(aws)).get("StudioDcvInstanceId") != CPU_ID:
-                raise RuntimeError("CPU tag restoration not verified")
+            if owner == CPU_ID and current.get("AssociationId") == pre["old_association"]:
+                # Disassociation was rejected before it took effect.
+                # Already-safe CPU ownership is the correct rollback outcome.
+                if _tags(current).get("StudioDcvInstanceId") != CPU_ID:
+                    raise RuntimeError("Unchanged CPU EIP has conflicting ownership tag")
+            else:
+                if owner not in (None, pre["to"]):
+                    raise RuntimeError("Foreign EIP owner; manual intervention mandatory")
+                if owner == pre["to"]:
+                    aws(REGION, "ec2", "disassociate-address", "--association-id", current["AssociationId"])
+                restore = aws(REGION, "ec2", "associate-address", "--allocation-id", EIP_ID,
+                              "--instance-id", CPU_ID, "--no-allow-reassociation")
+                if not restore.get("AssociationId") or _eip(aws).get("InstanceId") != CPU_ID:
+                    raise RuntimeError("CPU EIP restoration not verified")
+                aws(REGION, "ec2", "create-tags", "--resources", EIP_ID,
+                    "--tags", "Key=StudioDcvInstanceId,Value=" + CPU_ID)
+                if _tags(_eip(aws)).get("StudioDcvInstanceId") != CPU_ID:
+                    raise RuntimeError("CPU tag restoration not verified")
         except BaseException as restore_error:
             raise RuntimeError("GPU handoff failed AND CPU EIP restoration unverified; manual remediation required") from restore_error
         raise RuntimeError("GPU handoff failed, dedicated EIP restored to CPU") from exc
