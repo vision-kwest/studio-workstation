@@ -27,7 +27,8 @@ class FakeAWS:
                     "ImageId": h.GPU_AMI, "InstanceType": "g4dn.xlarge",
                     "IamInstanceProfile": {"Arn": h.BASE_PROFILE},
                     "Tags": copy.deepcopy(tags),
-                    "NetworkInterfaces": [{"NetworkInterfaceId": "eni-0123456789abcdef0"}],
+                    "NetworkInterfaces": [{"NetworkInterfaceId": "eni-0123456789abcdef0",
+                                           "Attachment": {"DeviceIndex": 0, "Status": "attached"}}],
                     "BlockDeviceMappings": [{"DeviceName": "/dev/sda1",
                                               "Ebs": {"VolumeId": VOLUME, "DeleteOnTermination": False}}]}
         self.volume = {"VolumeId": VOLUME, "State": "in-use", "Tags": copy.deepcopy(tags),
@@ -60,6 +61,7 @@ class FakeAWS:
                 "ActionAfterCompletion": "DELETE", "FlexibleTimeWindow": {"Mode": "OFF"},
                 "ScheduleExpressionTimezone": "UTC", "ScheduleExpression": "at(" + when + ")",
                 "Target": {"Arn": target, "RoleArn": h.guard.ROLE,
+                           "RetryPolicy": {"MaximumRetryAttempts": 3, "MaximumEventAgeInSeconds": 3600},
                            "Input": json.dumps(payload)}}
 
     def __call__(self, region, *args):
@@ -183,6 +185,23 @@ class HandoffTests(unittest.TestCase):
             h.gpu_preview(self.aws, now=NOW)
         self.aws.schedules["studio-pr65-i-" + GPU]["ScheduleExpression"] = "at(" + EXPIRES + ")"
         self.aws.schedules["studio-pr65-v-" + VOLUME]["Target"]["Input"] = '{"VolumeId":"vol-wrong"}'
+        with self.assertRaisesRegex(ValueError, "guard mismatch"):
+            h.gpu_preview(self.aws, now=NOW)
+        self.assertEqual(self.aws.writes, [])
+
+    def test_gpu_existing_unrelated_eip_or_secondary_eni_refused(self):
+        self.aws.gpu["NetworkInterfaces"][0]["Association"] = {
+            "AllocationId": "eipalloc-different", "PublicIp": "203.0.113.12"}
+        with self.assertRaisesRegex(ValueError, "do not replace it"):
+            h.gpu_preview(self.aws, now=NOW)
+        self.aws.gpu["NetworkInterfaces"][0].pop("Association")
+        self.aws.gpu["NetworkInterfaces"][0]["Attachment"]["DeviceIndex"] = 1
+        with self.assertRaisesRegex(ValueError, "primary ENI"):
+            h.gpu_preview(self.aws, now=NOW)
+        self.assertEqual(self.aws.writes, [])
+
+    def test_weakened_gpu_guard_retry_policy_refused(self):
+        self.aws.schedules["studio-pr65-i-" + GPU]["Target"]["RetryPolicy"]["MaximumRetryAttempts"] = 0
         with self.assertRaisesRegex(ValueError, "guard mismatch"):
             h.gpu_preview(self.aws, now=NOW)
         self.assertEqual(self.aws.writes, [])
