@@ -274,3 +274,103 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
     return {"stack": stack, "state": "DELETE_COMPLETE", "instance": iid,
             "volume_removed": ids["vid"], "schedules_removed": ids["schedules"],
             "eip_owner": h.CPU_ID, "cpu_certificate_access": "preserved"}
+
+
+def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
+    """Destroy a non-anchor CPU CloudFormation workstation and its retained EBS.
+
+    The original CPU is the shared EIP owner and must first be migrated.
+    A volume is deleted only if observed as the exact EC2 root before stack
+    deletion, encrypted, and subsequently detached with no attachments.
+    """
+    if region != h.REGION or not re.fullmatch(r"studio-[a-z0-9-]{3,100}", stack or ""):
+        raise ValueError("Unapproved CPU stack or region")
+    if stack == h.CPU_STACK or stack.startswith("studio-gpu-cli-"):
+        raise ValueError("Cannot destroy shared CPU anchor or GPU through CPU teardown")
+    stacks = aws(region, "cloudformation", "describe-stacks", "--stack-name", stack)["Stacks"]
+    if len(stacks) != 1:
+        raise ValueError("Ambiguous CPU CloudFormation stack")
+    item = stacks[0]
+    arn = item.get("StackId", "")
+    if (item.get("StackName") != stack or item.get("StackStatus") != "CREATE_COMPLETE"
+            or not arn.startswith("arn:aws:cloudformation:" + region + ":" +
+                                  h.ACCOUNT + ":stack/" + stack + "/")):
+        raise ValueError("CPU CloudFormation stack identity/status mismatch")
+    resources = aws(region, "cloudformation", "list-stack-resources",
+                    "--stack-name", arn)["StackResourceSummaries"]
+    ids = {}
+    allowed = {"Workstation": "AWS::EC2::Instance",
+               "WorkstationSG": "AWS::EC2::SecurityGroup"}
+    for record in resources:
+        name = record.get("LogicalResourceId")
+        if (name not in allowed or name in ids or
+                record.get("ResourceType") != allowed[name] or
+                record.get("ResourceStatus") != "CREATE_COMPLETE"):
+            raise ValueError("Unexpected CPU CloudFormation resource")
+        ids[name] = record.get("PhysicalResourceId")
+    if set(ids) != set(allowed):
+        raise ValueError("Missing CPU workstation/SG inventory")
+    iid, sg = ids["Workstation"], ids["WorkstationSG"]
+    if not re.fullmatch(r"i-[0-9a-f]{8,17}", iid or "") or not re.fullmatch(r"sg-[0-9a-f]{8,17}", sg or ""):
+        raise ValueError("Unrecognized CPU instance/SG ID")
+    vm = h._items(aws, iid)[iid]
+    tags = h._tags(vm)
+    if (tags.get("Name") != "studio-workstation-res-cpu" or
+            tags.get("aws:cloudformation:stack-id") != arn or
+            vm.get("InstanceType") not in ("m7i.large", "m7i.xlarge") or
+            vm.get("State", {}).get("Name") not in ("pending", "running", "stopped", "stopping")):
+        raise ValueError("CPU EC2 ownership/type/status mismatch")
+    group = _one(aws, "ec2", "describe-security-groups", "--group-ids", sg)
+    if (group.get("GroupId") != sg or
+            h._tags(group).get("aws:cloudformation:stack-id") != arn):
+        raise ValueError("CPU security group does not belong to stack")
+    block = [x for x in vm.get("BlockDeviceMappings", []) if x.get("DeviceName") == ROOT]
+    if len(block) != 1:
+        raise ValueError("Expected exactly one CPU root block mapping")
+    disk = block[0].get("Ebs", {})
+    vid = disk.get("VolumeId")
+    if not re.fullmatch(r"vol-[0-9a-f]{8,17}", vid or ""):
+        raise ValueError("Unrecognized CPU root EBS ID")
+    volume = _one(aws, "ec2", "describe-volumes", "--volume-ids", vid)
+    if (volume.get("VolumeId") != vid or not volume.get("Encrypted") or
+            volume.get("State") != "in-use" or not any(
+                x.get("VolumeId") == vid and x.get("InstanceId") == iid and
+                x.get("Device") == ROOT for x in volume.get("Attachments", []))):
+        raise ValueError("CPU encrypted root EBS attachment/identity mismatch")
+    eip = h._eip(aws)
+    if (eip.get("InstanceId") != h.CPU_ID or
+            h._tags(eip).get("StudioDcvInstanceId") != h.CPU_ID or
+            iid == h.CPU_ID):
+        raise ValueError("Shared CPU EIP is not safely owned by original anchor")
+    h._dns(aws)
+    run(["aws", "cloudformation", "delete-stack", "--stack-name", arn,
+         "--region", region], capture=False)
+    run(["aws", "cloudformation", "wait", "stack-delete-complete",
+         "--stack-name", arn, "--region", region], capture=False)
+    completed = aws(region, "cloudformation", "describe-stacks",
+                    "--stack-name", arn)["Stacks"]
+    if len(completed) != 1 or completed[0].get("StackId") != arn or completed[0]["StackStatus"] != "DELETE_COMPLETE":
+        raise RuntimeError("CPU CloudFormation deletion not independently verified")
+    _gone(aws, "instance", "ec2", "describe-instances", "--instance-ids", iid)
+    _gone(aws, "sg", "ec2", "describe-security-groups", "--group-ids", sg)
+    leftover = _absent(lambda: _one(aws, "ec2", "describe-volumes",
+                                    "--volume-ids", vid), MISSING["volume"])
+    if leftover is not None:
+        if (leftover.get("VolumeId") != vid or leftover.get("State") != "available" or
+                leftover.get("Attachments") or not leftover.get("Encrypted")):
+            raise RuntimeError("CPU retained EBS not safely detached")
+        run(["aws", "ec2", "delete-volume", "--volume-id", vid,
+             "--region", region], capture=False)
+    for attempt in range(12):
+        if _absent(lambda: _one(aws, "ec2", "describe-volumes",
+                                "--volume-ids", vid), MISSING["volume"]) is None:
+            break
+        if attempt == 11:
+            raise RuntimeError("CPU retained volume deletion not verified")
+        sleep(3)
+    final = h._eip(aws)
+    if final.get("InstanceId") != h.CPU_ID or h._tags(final).get("StudioDcvInstanceId") != h.CPU_ID:
+        raise RuntimeError("Shared CPU EIP changed during CPU teardown")
+    h._dns(aws)
+    return {"stack": stack, "state": "DELETE_COMPLETE", "instance": iid,
+            "volume_removed": vid, "shared_eip_preserved": h.EIP_IP}
