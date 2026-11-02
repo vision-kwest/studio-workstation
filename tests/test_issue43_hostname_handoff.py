@@ -13,8 +13,8 @@ from scripts import studio_workstation_cli as cli
 GPU = "i-0123456789abcdef0"
 VOLUME = "vol-0123456789abcdef0"
 NOW = dt.datetime(2026, 11, 2, 7, 0, 0, tzinfo=dt.timezone.utc)
-EXPIRES = "2099-11-02T09:00:00"  # mock is deliberately distant for second live read
-VOLUME_CLEANUP = "2099-11-02T10:00:00"
+EXPIRES = "2026-11-02T09:00:00"
+VOLUME_CLEANUP = "2026-11-02T10:00:00"
 
 
 class FakeAWS:
@@ -208,6 +208,16 @@ class HandoffTests(unittest.TestCase):
             h.gpu_preview(self.aws, now=NOW)
         self.assertEqual(self.aws.writes, [])
 
+    def test_expiration_cannot_be_extended_outside_original_pr65_bounds(self):
+        self.aws.schedules["studio-pr65-i-" + GPU]["ScheduleExpression"] = "at(2026-11-02T12:00:00)"
+        with self.assertRaisesRegex(ValueError, "supervised guard bound"):
+            h.gpu_preview(self.aws, now=NOW)
+        self.aws.schedules["studio-pr65-i-" + GPU]["ScheduleExpression"] = "at(" + EXPIRES + ")"
+        self.aws.schedules["studio-pr65-v-" + VOLUME]["ScheduleExpression"] = "at(2026-11-02T12:30:00)"
+        with self.assertRaisesRegex(ValueError, "timing outside"):
+            h.gpu_preview(self.aws, now=NOW)
+        self.assertEqual(self.aws.writes, [])
+
     def test_gpu_expiration_volume_ownership_guard_reused(self):
         self.aws.volume["Tags"][0]["Value"] = "wrong-stack"
         with self.assertRaisesRegex(ValueError, "ownership"):
@@ -241,7 +251,7 @@ class HandoffTests(unittest.TestCase):
     def test_simulated_live_handoff_with_scoped_rollback_protection(self):
         with mock.patch.object(h, "LIVE_HANDOFF_ENABLED", True):
             result = h.handoff_gpu(self.aws, lambda host, ip: self.assertEqual(
-                (host, ip), (h.HOST, h.EIP_IP)), now=NOW, allow_live=True,
+                (host, ip), (h.HOST, h.EIP_IP)), now=NOW, clock=lambda: NOW, allow_live=True,
                 verify_guest=lambda aws, iid: self.assertEqual(iid, GPU))
         self.assertEqual(result["owner"], GPU)
         self.assertEqual(self.aws.eip["InstanceId"], GPU)
@@ -253,7 +263,7 @@ class HandoffTests(unittest.TestCase):
         with mock.patch.object(h, "LIVE_HANDOFF_ENABLED", True):
             with self.assertRaisesRegex(RuntimeError, "restored to CPU"):
                 h.handoff_gpu(self.aws, lambda *_: (_ for _ in ()).throw(
-                    ValueError("public cert invalid")), now=NOW, allow_live=True,
+                    ValueError("public cert invalid")), now=NOW, clock=lambda: NOW, allow_live=True,
                     verify_guest=lambda *_: None)
         self.assertEqual(self.aws.eip["InstanceId"], h.CPU_ID)
         self.assertEqual(h._tags(self.aws.eip)["StudioDcvInstanceId"], h.CPU_ID)
@@ -262,7 +272,7 @@ class HandoffTests(unittest.TestCase):
         self.aws.fail_on = "disassociate-address"
         with mock.patch.object(h, "LIVE_HANDOFF_ENABLED", True):
             with self.assertRaisesRegex(RuntimeError, "restored to CPU"):
-                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, allow_live=True,
+                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, clock=lambda: NOW, allow_live=True,
                               verify_guest=lambda *_: None)
         self.assertEqual(self.aws.eip["InstanceId"], h.CPU_ID)
         self.assertEqual(self.aws.eip["AssociationId"], "eipassoc-previous")
@@ -271,7 +281,7 @@ class HandoffTests(unittest.TestCase):
         self.aws.fail_on = "disassociate-address-after"
         with mock.patch.object(h, "LIVE_HANDOFF_ENABLED", True):
             with self.assertRaisesRegex(RuntimeError, "restored to CPU"):
-                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, allow_live=True,
+                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, clock=lambda: NOW, allow_live=True,
                               verify_guest=lambda *_: None)
         self.assertEqual(self.aws.eip["InstanceId"], h.CPU_ID)
         self.assertEqual(h._tags(self.aws.eip)["StudioDcvInstanceId"], h.CPU_ID)
@@ -280,14 +290,14 @@ class HandoffTests(unittest.TestCase):
         self.aws.fail_on = "associate-address"
         with mock.patch.object(h, "LIVE_HANDOFF_ENABLED", True):
             with self.assertRaisesRegex(RuntimeError, "restoration unverified"):
-                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, allow_live=True,
+                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, clock=lambda: NOW, allow_live=True,
                               verify_guest=lambda *_: None)
         self.assertEqual(self.aws.records[0]["ResourceRecords"], [{"Value": h.EIP_IP}])
 
     def test_failed_guest_preflight_cannot_disassociate_eip(self):
         with mock.patch.object(h, "LIVE_HANDOFF_ENABLED", True):
             with self.assertRaisesRegex(RuntimeError, "unprepared"):
-                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, allow_live=True,
+                h.handoff_gpu(self.aws, lambda *_: None, now=NOW, clock=lambda: NOW, allow_live=True,
                               verify_guest=lambda *_: (_ for _ in ()).throw(RuntimeError("unprepared")))
         self.assertEqual(self.aws.eip["InstanceId"], h.CPU_ID)
         self.assertEqual(self.aws.writes, [])
