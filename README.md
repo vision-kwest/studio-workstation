@@ -86,6 +86,14 @@ deliberately narrow instance-role permissions, although the real DNS/TLS
 verifier passed. Full CLI acceptance should be run from an authorized
 management environment. Do not infer that a GPU has this hostname yet.
 
+**CPU/GPU sharing is now designed and offline-tested in the draft**, without
+any additional static IP, Route 53 record or ACM certificate. The guarded
+`hostname-plan`, `hostname-iam` and `hostname-return-plan` commands can
+review the exact GPU handoff. Live `hostname-handoff --execute` and
+`hostname-return --execute` are deliberately disabled until separately
+approved GPU TLS/IAM preparation, expiration-schedule checks and live
+acceptance. [Shared CPU/GPU hostname runbook](docs/issue43-shared-cpu-gpu-handoff.md).
+
 See [the Issue #43 acceptance, operations and rollback runbook](docs/issue43-acm-dcv.md)
 and [the Studio CLI instructions](docs/studio-cli.md#optional-trusted-hostname--issue-43).
 [Draft PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
