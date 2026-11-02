@@ -219,7 +219,8 @@ class DcvAcmTests(unittest.TestCase):
         with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \
              mock.patch.object(tls, "verify_material"), \
              mock.patch.object(tls, "restart_and_check") as restart, \
-             mock.patch.object(tls, "prune_managed_generations") as prune, \
+             mock.patch.object(tls, "prune_managed_generations",
+                               return_value=(0, 0)) as prune, \
              mock.patch.object(tls, "command", side_effect=[
                  "active", '{"id":"console","owner":"workstation","status":"running"}']):
             message = tls.activate(self.src, self.dcv)
