@@ -75,23 +75,25 @@ python3 studio workstation connect --stack studio-workstation-cpu-review
 
 DCV login uses local Linux username `workstation`, not AWS IAM credentials. The browser may show an untrusted/self-signed TLS warning; verify the certificate fingerprint through an administrative channel or provision trusted TLS.
 
-### Optional trusted hostname (Issue #43, NOT DEPLOYED)
+### Optional trusted hostname — Issue #43 (draft, not deployed)
 
-The feature branch adds an opt-in `--hostname dcv.kwesidavis.com` flag
-for `connect` and `status`. It only returns the trusted HTTPS URL after
-confirming DNS resolves to this stack's current public IPv4 and that a
-system-trusted TLS certificate validates for the hostname. A self-signed,
-expired, mismatched or unreachable certificate fails closed. This does **not**
-install certificates or alter the default IP-based connection:
+Draft PR #67 contains opt-in `--hostname dcv.kwesidavis.com` for `connect`
+and `status`. It validates that the DNS A record matches the current stack's
+public EC2 IPv4, and then connects directly to that IP with CA-validated TLS
+and SNI for the hostname. It does **not** alter create, start/stop or defaults.
 
 ```bash
 python3 studio workstation connect --stack STACK --hostname dcv.kwesidavis.com
 python3 studio workstation status --stack STACK --hostname dcv.kwesidavis.com
 ```
 
-**Do not rely on this option in `main` until a feature PR is merged.**
-The dynamic-DNS Lambda, on-host renewal and permissions are not deployed.
-See [Issue #43 design and live approval gates](issue43-letsencrypt-dcv.md).
+This flag is **not in main** until the draft PR is separately approved and
+merged. The new EIP, Route 53 A record, exportable ACM certificate and AWCP
+delivery are **not deployed**. Normal IP-based DCV is unchanged.
+
+Review the [Issue #43 simplified ACM/DCV runbook](issue43-acm-dcv.md).
+Neither a trusted certificate nor an Elastic IP closes public TCP 8443;
+see Issue #62.
 
 ## GPU workstation: tested acceptance scope
 
