@@ -76,10 +76,15 @@ ACM certificate remain allocated and billable.
 
 Connect when that CPU is running using:
 `https://dcv.kwesidavis.com:8443` and your existing Linux `workstation`
-account. The optional `connect/status --hostname` CLI flag and offline
-refinements for no-op refresh/retention exist **only in draft PR #67**, not
-in the merged CLI or deployed guest. Do not claim these refinements are
-installed or that a separately launched GPU has trusted hostname support.
+account. The revised no-op refresh and bounded-generation retention hook
+from PR #67 has now **also been installed and accepted on the CPU**: a
+real AWS agent refresh left DCV's PID and current certificate unchanged,
+and retained two validated generations. The optional
+`connect/status --hostname` CLI flag is still **unmerged**. An actual
+guest-side CLI command failed at CloudFormation discovery due to
+deliberately narrow instance-role permissions, although the real DNS/TLS
+verifier passed. Full CLI acceptance should be run from an authorized
+management environment. Do not infer that a GPU has this hostname yet.
 
 See [the Issue #43 acceptance, operations and rollback runbook](docs/issue43-acm-dcv.md)
 and [the Studio CLI instructions](docs/studio-cli.md#optional-trusted-hostname--issue-43).
