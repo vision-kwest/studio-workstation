@@ -197,6 +197,19 @@ class DcvAcmTests(unittest.TestCase):
                 tls.enroll_default(self.src, self.dcv)
         self.assertEqual((self.dcv / "dcv.pem").read_text(), "existing")
 
+    def test_awcp_refresh_sandbox_exception_minimal(self):
+        # Regression: AWCP's ProtectSystem=full and capability bounding set
+        # blocked certificate generation/chown after boot until both exceptions.
+        file = Path(__file__).resolve().parents[1] / "infra/issue43-awcp-dcv-refresh.conf"
+        content = file.read_text()
+        lines = [line.strip() for line in content.splitlines()
+                 if line.strip() and not line.lstrip().startswith("#")]
+        self.assertEqual(lines, ["[Service]",
+                                 "ReadWritePaths=/etc/dcv",
+                                 "CapabilityBoundingSet=CAP_CHOWN"])
+        self.assertNotIn("ProtectSystem=false", content)
+        self.assertNotIn("NoNewPrivileges=false", content)
+
     def test_approved_config_stages_fullchain_without_chain_separate(self):
         root = Path(__file__).resolve().parents[1]
         cfg = (root / "infra/issue43-awcp.review-only.toml").read_text()
