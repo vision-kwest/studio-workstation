@@ -1,10 +1,21 @@
 {
-  "Description": "READ ONLY designs. No policy attached. Instance profile shared by other workstation instances; explicitly evaluate exposure before approving.",
-  "InstanceProfileArn": "arn:aws:iam::401233741942:role/StudioWorkstationSSMRole",
+  "Description": "Issue43 Task5 exact IAM deployed after approval. No other roles/policies modified; reviewed as data, do NOT reapply blindly.",
+  "Account": "401233741942",
+  "CpuInstanceId": "i-0bbfbdc878d3a2320",
+  "BaseRoleArn": "arn:aws:iam::401233741942:role/StudioWorkstationSSMRole",
+  "ExportRoleArn": "arn:aws:iam::401233741942:role/studio-issue43-dcv-acm-export",
+  "CertificateArn": "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243",
+  "SourceRoleInlinePolicyName": "StudioIssue43ExactInstanceAssume",
   "AssumeExportRoleStatement": {
+    "Sid": "AssumeOnlyIssue43ExportRoleFromExactCpuEc2Session",
     "Effect": "Allow",
     "Action": "sts:AssumeRole",
-    "Resource": "REPLACE_EXACT_ACM_EXPORT_ROLE_ARN"
+    "Resource": "arn:aws:iam::401233741942:role/studio-issue43-dcv-acm-export",
+    "Condition": {
+      "StringEquals": {
+        "aws:userid": "AROAV223FBB3JOQHYPKDX:i-0bbfbdc878d3a2320"
+      }
+    }
   },
   "ExportRoleTrustPolicy": {
     "Version": "2012-10-17",
@@ -14,24 +25,31 @@
         "Principal": {
           "AWS": "arn:aws:iam::401233741942:role/StudioWorkstationSSMRole"
         },
-        "Action": "sts:AssumeRole"
+        "Action": "sts:AssumeRole",
+        "Condition": {
+          "StringEquals": {
+            "aws:userid": "AROAV223FBB3JOQHYPKDX:i-0bbfbdc878d3a2320"
+          }
+        }
       }
     ]
   },
+  "ExportRoleInlinePolicyName": "StudioIssue43ExactAcMExport",
   "ExportRolePolicy": {
     "Version": "2012-10-17",
     "Statement": [
       {
+        "Sid": "ExportOnlyOneDcvCertificate",
         "Effect": "Allow",
         "Action": "acm:ExportCertificate",
-        "Resource": "REPLACE_EXACT_ACM_CERTIFICATE_ARN"
+        "Resource": "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243"
       }
     ]
   },
   "SecurityReview": [
-    "The same base role is used by more than one EC2 workstation; any instance holding that role could potentially assume the export role if its policy allows it.",
-    "Prefer separate dedicated profile for certificate-bearing workstation if feasible without modifying GPU acceptance constraints.",
-    "Never add route53:ChangeResourceRecordSets to the existing workstation role for this architecture.",
-    "The export role must be limited to exactly one ACM certificate ARN; no wildcard. Do not store exported keys in SSM, GitHub or CI."
+    "Shared base role remains unchanged for existing SSM and release reads; an additional AssumeRole statement is conditioned on exact CPU EC2 session aws:userid, protecting other GPU/CPU sessions.",
+    "Live STS role assumption from CPU session verified; actual certificate exported by AWS Workload Credentials Provider.",
+    "Do not change any GPU acceptance role, launch template, Image Builder or RES policy.",
+    "Task 6 lifecycle must verify AWCP startup/renewal recovery and DCV console, then separately authorize any retirement."
   ]
 }
