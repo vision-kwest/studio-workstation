@@ -18,9 +18,9 @@
 ## Trusted DCV hostname (CPU deployed; CLI changes in draft PR)
 
 - [Issue #43 — EIP, ACM and AWS Workload Credentials Provider](issue43-acm-dcv.md):
-  live CPU HTTPS and browser-login evidence through Task 6, pinned AWCP,
-  instance-scoped IAM, stopped-instance status, Task 7 offline-only code
-  review and guarded rollback.
+  live CPU HTTPS, browser-login and post-Task-7 no-restart/retention
+  acceptance, pinned AWCP, scoped IAM, stopped state, verified rollback
+  backup and still-blocked privileged CLI/GPU-profile gates.
 - Original Lambda/EventBridge/DDNS proposal was retired in draft PR #67;
   Issue #43 retains dated audit and historical context.
 
