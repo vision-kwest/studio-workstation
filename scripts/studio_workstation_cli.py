@@ -84,7 +84,9 @@ def verified_dcv_hostname(hostname, public_ip):
         if addresses != {public_ip}:
             raise ValueError("DNS A record does not match this stack's public IP")
         context = ssl.create_default_context()
-        with socket.create_connection((hostname, 8443), timeout=5) as connection:
+        # Connect to the verified EC2 address, not a second DNS lookup.
+        # SNI/certificate verification still authenticate the requested hostname.
+        with socket.create_connection((public_ip, 8443), timeout=5) as connection:
             with context.wrap_socket(connection, server_hostname=hostname):
                 pass
     except (OSError, ssl.SSLError) as exc:
