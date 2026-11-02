@@ -5,6 +5,18 @@ This plan supersedes the bespoke Lambda/EventBridge/DynamoDB/DDNS/Certbot
 architecture removed from the feature branch. The approved DNS delegation
 was created before this PR.
 
+**New offline CPU/GPU sharing phase (draft PR #67, NOT DEPLOYED):**
+[CPU/GPU one-EIP handoff design and commands](issue43-shared-cpu-gpu-handoff.md)
+reuse the same `54.159.180.104` allocation, permanent A record and ACM
+certificate. Only exact supervised GPU acceptance scope is supported;
+its existing PR #65 termination/EBS schedules must remain in place.
+The CLI exposes read-only handoff/IAM/return previews and a fully
+implemented failure-tested transfer/rollback path, but the live
+`LIVE_HANDOFF_ENABLED` code gate is `False`. No GPU has been given
+a certificate, new IAM permissions, or this EIP. CPU is still sole owner.
+Separate approval is required to prepare the GPU, enable live handoff,
+and test the return to CPU; PR #67 remains draft and unmerged.
+
 ## Post-Task-7 final controlled CPU acceptance (2026-11-02 UTC; completed)
 
 **Authorization boundary:** User explicitly approved one supervised final test
