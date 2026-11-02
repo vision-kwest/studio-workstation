@@ -106,13 +106,18 @@ python3 studio workstation status --stack studio-workstation-cpu-v013 --hostname
 
 The feature **fails closed on a stopped instance** and rejects a mismatch
 or untrusted certificate. Regular `connect`, `status`, `stop`, `start`
-and existing GPU safeguards are unchanged. The hostname verification was
-exercised against **real DNS/TLS** during Task 6; command output paths
-used mocked AWS stack data. Read-only CloudFormation/EC2 API lookups also
-confirmed the real stack/instance binding while stopped. An **unmocked,
-full AWS CLI invocation** has not yet been performed and requires a
-separately approved live verification. Do not call the draft feature
-production-validated until that gate is cleared.
+and existing GPU safeguards are unchanged. The hostname verifier was exercised against **real DNS/TLS**, and
+AWS's CloudFormation/EC2 APIs independently confirmed the correct
+stack-to-instance binding. During the final supervised CPU acceptance,
+the actual unmocked draft `status` and `connect --hostname` commands
+were attempted from the guest. Both failed **before TLS verification**
+because its intentionally restricted `StudioWorkstationSSMRole` has no
+`cloudformation:DescribeStackResource` permission. The standalone
+hostname verifier did pass, and earlier output-path regression tests
+passed with mocked stack data. To finish release acceptance, run the
+complete commands in an authorized CloudShell/administrator environment;
+**do not grant broad CloudFormation rights to the guest solely to test
+the CLI**. Do not call full CLI acceptance passed until that happens.
 
 See [Issue #43 evidence and final audit](issue43-acm-dcv.md).
 Trusted HTTPS does not fix the public TCP 8443 exposure (Issue #62).
