@@ -225,10 +225,52 @@ class DcvAcmTests(unittest.TestCase):
             message = tls.activate(self.src, self.dcv)
         self.assertIn("unchanged", message)
         restart.assert_not_called()
-        prune.assert_not_called()
+        prune.assert_called_once()
+        self.assertEqual(prune.call_args.args[1:3], ("gen-original", "gen-original"))
         self.assertEqual(before, set(p.name for p in self.store.iterdir()))
         self.assertEqual(os.readlink(self.dcv / tls.ACTIVE_NAME),
                          f"{tls.STORE_NAME}/gen-original")
+
+    def test_unchanged_boot_trims_old_generations_without_restart(self):
+        self.prepare_safe_retention()
+        original = self.store / "gen-original"
+        for staged, installed in (("fullchain.pem", "dcv.pem"),
+                                  ("privkey.pem", "dcv.key")):
+            original.joinpath(installed).write_bytes(self.src.joinpath(staged).read_bytes())
+        older = self.add_managed_pair("gen-olderclean")
+        previous = self.add_managed_pair("gen-priorvalid")
+        os.utime(older, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+        os.utime(previous, ns=(1_800_000_000_000_000_000, 1_800_000_000_000_000_000))
+        with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \
+             mock.patch.object(tls, "verify_material"), \
+             mock.patch.object(tls, "command", side_effect=[
+                 "active", '{"id":"console","owner":"workstation","status":"running"}']), \
+             mock.patch.object(tls, "restart_and_check") as restart:
+            message = tls.activate(self.src, self.dcv)
+        self.assertIn("unchanged", message)
+        restart.assert_not_called()
+        self.assertFalse(older.exists())
+        self.assertTrue(previous.exists())
+        self.assertTrue(original.exists())
+        self.assertEqual(len([p for p in self.store.iterdir()
+                              if p.name.startswith("gen-")]), 2)
+
+    def test_unchanged_boot_does_not_delete_unfamiliar_generation(self):
+        self.prepare_safe_retention()
+        original = self.store / "gen-original"
+        for staged, installed in (("fullchain.pem", "dcv.pem"),
+                                  ("privkey.pem", "dcv.key")):
+            original.joinpath(installed).write_bytes(self.src.joinpath(staged).read_bytes())
+        unfamiliar = self.store / "gen-incomplete"
+        unfamiliar.mkdir(mode=0o700)
+        with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \
+             mock.patch.object(tls, "verify_material"), \
+             mock.patch.object(tls, "command", side_effect=[
+                 "active", '{"id":"console","owner":"workstation","status":"running"}']), \
+             mock.patch.object(tls, "restart_and_check") as restart:
+            tls.activate(self.src, self.dcv)
+        restart.assert_not_called()
+        self.assertTrue(unfamiliar.exists(), "unknown content never removed")
 
     def test_unchanged_material_cannot_mask_failed_console(self):
         (self.store / "gen-original" / "dcv.pem").write_bytes(
