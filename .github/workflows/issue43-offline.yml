@@ -12,6 +12,7 @@ on:
       - 'runtime/issue43_hostname_handoff.py'
       - 'runtime/issue43_gpu_acm_setup.py'
       - 'tests/test_issue43_gpu_acm_setup.py'
+      - 'tests/test_issue43_cli_lifecycle.py'
       - 'infra/issue43-awcp.review-only.toml'
       - 'infra/issue43-awcp-dcv-refresh.conf'
       - 'infra/issue43-acm-iam.review-only.json'
@@ -34,6 +35,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_issue43_hostname_handoff.py' -v
           python3 -m unittest discover -s tests -p 'test_issue43_gpu_acm_setup.py' -v
+          python3 -m unittest discover -s tests -p 'test_issue43_cli_lifecycle.py' -v
           python3 -m unittest discover -s tests -p 'test_pr65_one_shot_guard.py' -v
           python3 -m unittest discover -s tests -p 'test_pr65_gpu_create.py' -v
       - name: Preserve baseline Studio CLI regression suite
