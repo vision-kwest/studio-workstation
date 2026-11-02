@@ -72,6 +72,33 @@ class FakeAWS:
             self.writes.append((service, op, *args[2:]))
             if self.fail_on == op:
                 raise RuntimeError("Simulated failure on " + op)
+        if (service, op) == ("scheduler", "get-schedule-group"):
+            return {"Name": h.guard.GROUP, "State": "ACTIVE"}
+        if (service, op) == ("iam", "get-role"):
+            return {"Role": {
+                "Arn": h.guard.ROLE,
+                "AssumeRolePolicyDocument": {"Version": "2012-10-17", "Statement": [{
+                    "Effect": "Allow", "Action": "sts:AssumeRole",
+                    "Principal": {"Service": "scheduler.amazonaws.com"},
+                    "Condition": {
+                        "ArnEquals": {"aws:SourceArn": "arn:aws:scheduler:us-east-1:401233741942:schedule-group/" + h.guard.GROUP},
+                        "StringEquals": {"aws:SourceAccount": h.ACCOUNT}}}]}}}
+        if (service, op) == ("iam", "get-role-policy"):
+            return {"PolicyDocument": {"Version": "2012-10-17", "Statement": [{
+                "Effect": "Allow", "Action": "ec2:TerminateInstances",
+                "Resource": "arn:aws:ec2:us-east-1:401233741942:instance/*",
+                "Condition": {"StringEquals": {
+                    "ec2:ResourceTag/StudioStack": h.GPU_STACK,
+                    "ec2:ResourceTag/StudioCleanupToken": h.GPU_TOKEN}}},
+                {"Effect": "Allow", "Action": "ec2:DeleteVolume",
+                 "Resource": "arn:aws:ec2:us-east-1:401233741942:volume/*",
+                 "Condition": {"StringEquals": {
+                     "ec2:ResourceTag/StudioStack": h.GPU_STACK,
+                     "ec2:ResourceTag/StudioCleanupToken": h.GPU_TOKEN}}}]}}
+        if (service, op) == ("iam", "list-role-policies"):
+            return {"PolicyNames": [h.pr65_gpu_create.POLICY]}
+        if (service, op) == ("iam", "list-attached-role-policies"):
+            return {"AttachedPolicies": []}
         if (service, op) == ("cloudformation", "describe-stack-resource"):
             stack = args[args.index("--stack-name") + 1]
             iid = h.CPU_ID if stack == h.CPU_STACK else GPU
@@ -200,6 +227,19 @@ class HandoffTests(unittest.TestCase):
         self.aws.gpu["NetworkInterfaces"][0]["Attachment"]["DeviceIndex"] = 1
         with self.assertRaisesRegex(ValueError, "primary ENI"):
             h.gpu_preview(self.aws, now=NOW)
+        self.assertEqual(self.aws.writes, [])
+
+    def test_sched_role_iam_preflight_is_checked_and_fail_closed(self):
+        original = self.aws.__call__
+        def deny_role(region, *args):
+            if args[:2] == ("iam", "get-role"):
+                return {"Role": {"Arn": "arn:aws:iam::401233741942:role/wrong", "AssumeRolePolicyDocument": {}}}
+            return original(region, *args)
+        with mock.patch.object(self.aws, "__call__", side_effect=deny_role):
+            # Special method lookup bypasses instance __call__ patch; wrap
+            # an explicit callable to exercise the same AWS read boundary.
+            with self.assertRaisesRegex(ValueError, "Unexpected expiration role"):
+                h.gpu_preview(lambda *args: deny_role(*args), now=NOW)
         self.assertEqual(self.aws.writes, [])
 
     def test_weakened_gpu_guard_retry_policy_refused(self):
