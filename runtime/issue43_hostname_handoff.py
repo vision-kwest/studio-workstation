@@ -1,11 +1,11 @@
-"""Issue #43: single-EIP CPU/GPU handoff, deliberately DISABLED for live use.
+"""Issue #43: guarded single-EIP CPU/GPU handoff, explicitly invoked by CLI.
 
 There is no DNS daemon, extra IP, new certificate, Image Builder change,
 or change to PR #65's independent EC2/EBS expiration schedules.
 
 The read-only plan uses the existing Studio CLI AWS invocation interface.
-The write path requires a separate explicit code change to enable it, a real
-per-instance TLS readiness probe, and a manager-side TLS trust check.
+The live write path requires explicit --execute, strict per-instance TLS
+readiness, independent expiration guards and a manager-side trust check.
 
 GPU preinstallation of AWCP and the instance-scoped IAM trust are separate,
 reviewed prerequisites. Never attach the EIP before the GPU has a validated
@@ -37,7 +37,7 @@ BASE_ROLE_ID = "AROAV223FBB3JOQHYPKDX"
 CERT_ARN = "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243"
 EXPORT_ROLE = "arn:aws:iam::401233741942:role/studio-issue43-dcv-acm-export"
 SAFETY_MARGIN = dt.timedelta(minutes=60)  # Reserve a full hour for user login and EIP return
-LIVE_HANDOFF_ENABLED = False  # Must be separately reviewed and explicitly changed.
+LIVE_HANDOFF_ENABLED = True  # Explicit --execute and all fail-closed preflights still required.
 
 def _items(aws, *args):
     data = aws(REGION, "ec2", "describe-instances", "--instance-ids", *args)
@@ -239,13 +239,13 @@ def check_gpu_tls(aws, instance_id, *, sleep=time.sleep):
 
 def handoff_gpu(aws, verify_public_tls, *, now=None, allow_live=False,
                 verify_guest=check_gpu_tls, clock=lambda: dt.datetime.now(dt.timezone.utc)):
-    """Live write path tested offline, but hard-disabled pending a separate approval.
+    """Explicit live handoff; preflight and rollback are always mandatory.
 
     Failure after disassociation attempts recovery of original stopped CPU
     association. If another owner has intervened, never steal the allocation.
     """
     if not (LIVE_HANDOFF_ENABLED and allow_live):
-        raise RuntimeError("GPU EIP handoff DISABLED pending separately approved live phase")
+        raise RuntimeError("GPU EIP handoff requires explicit execution authorization")
     pre = gpu_preview(aws, now=now or clock())
     verify_guest(aws, pre["to"])
     # Refresh the guard, source ownership and deadline immediately before writes.
@@ -323,7 +323,7 @@ def cpu_return_preview(aws, gpu_instance_id):
 
 def restore_cpu(aws, gpu_instance_id, *, allow_live=False):
     if not (LIVE_HANDOFF_ENABLED and allow_live):
-        raise RuntimeError("CPU EIP return DISABLED pending separately approved live phase")
+        raise RuntimeError("CPU EIP return requires explicit execution authorization")
     plan = cpu_return_preview(aws, gpu_instance_id)
     if plan["association"]:
         aws(REGION, "ec2", "disassociate-address", "--association-id", plan["association"])
