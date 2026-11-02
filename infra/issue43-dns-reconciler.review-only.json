@@ -1,0 +1,296 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Issue 43 optional DNS reconciler for one pre-approved tagged EC2 instance. REVIEW ONLY; do not deploy without separate approval.",
+  "Parameters": {
+    "InstanceId": {
+      "Type": "String",
+      "AllowedPattern": "i-[0-9a-f]{8,17}",
+      "Description": "Exact approved instance ID; must carry StudioDcvDnsHost and StudioDcvDnsManaged tags"
+    },
+    "CodeBucket": {
+      "Type": "String",
+      "Description": "Approved S3 bucket holding independently reviewed deterministic Lambda zip"
+    },
+    "CodeKey": {
+      "Type": "String",
+      "Description": "Approved immutable S3 key of Lambda zip"
+    },
+    "CodeVersion": {
+      "Type": "String",
+      "Description": "Required immutable S3 object VersionId"
+    },
+    "AlarmTopicArn": {
+      "Type": "String",
+      "AllowedPattern": "arn:aws:sns:us-east-1:[0-9]{12}:.+",
+      "Description": "Approved existing SNS alarm destination; required before deployment"
+    }
+  },
+  "Resources": {
+    "DnsRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "issue43-pinned-dcv-dns",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeInstances"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "route53:ListResourceRecordSets"
+                  ],
+                  "Resource": "arn:aws:route53:::hostedzone/Z02607163QPWX22FZ2Q9M"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "route53:ChangeResourceRecordSets"
+                  ],
+                  "Resource": "arn:aws:route53:::hostedzone/Z02607163QPWX22FZ2Q9M",
+                  "Condition": {
+                    "ForAllValues:StringEquals": {
+                      "route53:ChangeResourceRecordSetsNormalizedRecordNames": [
+                        "dcv.kwesidavis.com"
+                      ],
+                      "route53:ChangeResourceRecordSetsRecordTypes": [
+                        "A"
+                      ],
+                      "route53:ChangeResourceRecordSetsActions": [
+                        "UPSERT",
+                        "DELETE"
+                      ]
+                    },
+                    "Null": {
+                      "route53:ChangeResourceRecordSetsNormalizedRecordNames": "false",
+                      "route53:ChangeResourceRecordSetsRecordTypes": "false",
+                      "route53:ChangeResourceRecordSetsActions": "false"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/aws/lambda/${DnsFunction}:*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "DnsFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Runtime": "python3.12",
+        "Handler": "dcv_dynamic_dns.lambda_handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "DnsRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "CodeBucket"
+          },
+          "S3Key": {
+            "Ref": "CodeKey"
+          },
+          "S3ObjectVersion": {
+            "Ref": "CodeVersion"
+          }
+        },
+        "Timeout": 30,
+        "ReservedConcurrentExecutions": 1,
+        "Environment": {
+          "Variables": {
+            "STUDIO_DNS_INSTANCE_ID": {
+              "Ref": "InstanceId"
+            }
+          }
+        }
+      }
+    },
+    "DnsLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/aws/lambda/${DnsFunction}"
+        },
+        "RetentionInDays": 30
+      }
+    },
+    "StateChangeRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "State": "ENABLED",
+        "EventPattern": {
+          "source": [
+            "aws.ec2"
+          ],
+          "detail-type": [
+            "EC2 Instance State-change Notification"
+          ],
+          "region": [
+            "us-east-1"
+          ],
+          "detail": {
+            "instance-id": [
+              {
+                "Ref": "InstanceId"
+              }
+            ],
+            "state": [
+              "running",
+              "stopping",
+              "stopped",
+              "shutting-down",
+              "terminated"
+            ]
+          }
+        },
+        "Targets": [
+          {
+            "Id": "issue43Dns",
+            "Arn": {
+              "Fn::GetAtt": [
+                "DnsFunction",
+                "Arn"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "StateChangeInvoke": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "DnsFunction"
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "StateChangeRule",
+            "Arn"
+          ]
+        }
+      }
+    },
+    "ReconcileRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "State": "ENABLED",
+        "ScheduleExpression": "rate(5 minutes)",
+        "Targets": [
+          {
+            "Id": "issue43Reconcile",
+            "Arn": {
+              "Fn::GetAtt": [
+                "DnsFunction",
+                "Arn"
+              ]
+            },
+            "Input": {
+              "Fn::Sub": "{\"source\":\"studio.dcv.reconcile\",\"instance-id\":\"${InstanceId}\"}"
+            }
+          }
+        ]
+      }
+    },
+    "ReconcileInvoke": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "DnsFunction"
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "ReconcileRule",
+            "Arn"
+          ]
+        }
+      }
+    },
+    "DnsErrorsAlarm": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Issue 43 Lambda failures require intervention; cannot assume DNS has reconciled",
+        "Namespace": "AWS/Lambda",
+        "MetricName": "Errors",
+        "Statistic": "Sum",
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "Threshold": 0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching",
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "DnsFunction"
+            }
+          }
+        ],
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicArn"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "DnsLambdaArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "DnsFunction",
+          "Arn"
+        ]
+      }
+    },
+    "PinnedInstance": {
+      "Value": {
+        "Ref": "InstanceId"
+      }
+    },
+    "HostedZone": {
+      "Value": "Z02607163QPWX22FZ2Q9M"
+    },
+    "Note": {
+      "Value": "Optional DNS updater only; certbot IAM and DCV certificate deployment separately approved"
+    }
+  }
+}
