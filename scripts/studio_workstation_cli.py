@@ -149,6 +149,15 @@ def gpu_ready(stack, region):
 def command(args):
     # Issue #43: exact-scope EIP transfer/return requires --execute and the
     # existing strict RES/TLS/PR65 guard preflights. No GPU creation here.
+    if args.action in ("hostname-acm-prepare", "hostname-acm-revoke"):
+        from runtime import issue43_gpu_acm_setup as acm
+        if args.region != DEFAULT_REGION or not args.execute:
+            raise ValueError("GPU ACM setup/revoke requires us-east-1 and explicit --execute")
+        if args.action == "hostname-acm-prepare":
+            print(json.dumps(acm.prepare_gpu(aws), indent=2))
+        else:
+            print(json.dumps(acm.revoke_gpu(aws, args.gpu_instance_id), indent=2))
+        return
     if args.action in ("hostname-plan", "hostname-iam", "hostname-handoff",
                        "hostname-return-plan", "hostname-return"):
         from runtime import issue43_hostname_handoff as handoff
@@ -326,17 +335,18 @@ def main(argv=None):
     sub = p.add_subparsers(dest="action", required=True)
     for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready",
                    "hostname-plan", "hostname-iam", "hostname-handoff",
-                   "hostname-return-plan", "hostname-return"):
+                   "hostname-return-plan", "hostname-return",
+                   "hostname-acm-prepare", "hostname-acm-revoke"):
         s = sub.add_parser(action)
         s.add_argument("--stack", default=DEFAULT_STACK if action != "create" else None,
                        required=action == "create")
         s.add_argument("--region", default=DEFAULT_REGION)
-        if action in ("hostname-iam", "hostname-return-plan", "hostname-return"):
+        if action in ("hostname-iam", "hostname-return-plan", "hostname-return", "hostname-acm-revoke"):
             s.add_argument("--gpu-instance-id", required=True,
                            help="Exact supervised GPU EC2 ID, no wildcard discovery")
-        if action in ("hostname-handoff", "hostname-return"):
+        if action in ("hostname-handoff", "hostname-return", "hostname-acm-prepare", "hostname-acm-revoke"):
             s.add_argument("--execute", action="store_true",
-                           help="Perform the exact-scope guarded EIP transfer or return (AWS writes)")
+                           help="Explicitly authorize guarded hostname/ACM AWS writes")
         if action == "create":
             s.add_argument("--dry-run", action="store_true",
                            help="Render and validate without launching AWS resources")
