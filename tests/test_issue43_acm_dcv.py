@@ -210,6 +210,139 @@ class DcvAcmTests(unittest.TestCase):
         self.assertNotIn("ProtectSystem=false", content)
         self.assertNotIn("NoNewPrivileges=false", content)
 
+    def test_unchanged_cert_pair_does_not_restart_or_allocate_generation(self):
+        (self.store / "gen-original" / "dcv.pem").write_bytes(
+            (self.src / "fullchain.pem").read_bytes())
+        (self.store / "gen-original" / "dcv.key").write_bytes(
+            (self.src / "privkey.pem").read_bytes())
+        before = set(p.name for p in self.store.iterdir())
+        with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \
+             mock.patch.object(tls, "verify_material"), \
+             mock.patch.object(tls, "restart_and_check") as restart, \
+             mock.patch.object(tls, "prune_managed_generations") as prune, \
+             mock.patch.object(tls, "command", side_effect=[
+                 "active", '{"id":"console","owner":"workstation","status":"running"}']):
+            message = tls.activate(self.src, self.dcv)
+        self.assertIn("unchanged", message)
+        restart.assert_not_called()
+        prune.assert_not_called()
+        self.assertEqual(before, set(p.name for p in self.store.iterdir()))
+        self.assertEqual(os.readlink(self.dcv / tls.ACTIVE_NAME),
+                         f"{tls.STORE_NAME}/gen-original")
+
+    def test_unchanged_material_cannot_mask_failed_console(self):
+        (self.store / "gen-original" / "dcv.pem").write_bytes(
+            (self.src / "fullchain.pem").read_bytes())
+        (self.store / "gen-original" / "dcv.key").write_bytes(
+            (self.src / "privkey.pem").read_bytes())
+        with mock.patch.object(tls.os, "geteuid", return_value=0), \
+             mock.patch.object(tls, "verify_material"), \
+             mock.patch.object(tls, "command", return_value="inactive"), \
+             mock.patch.object(tls, "restart_and_check") as restart:
+            with self.assertRaisesRegex(RuntimeError, "not active"):
+                tls.activate(self.src, self.dcv)
+            restart.assert_not_called()
+        self.assertEqual(os.readlink(self.dcv / tls.ACTIVE_NAME),
+                         f"{tls.STORE_NAME}/gen-original")
+
+    def test_invalid_source_pair_is_rejected_even_when_current_matches(self):
+        for filename, current in (("fullchain.pem", "dcv.pem"),
+                                  ("privkey.pem", "dcv.key")):
+            (self.store / "gen-original" / current).write_bytes(
+                (self.src / filename).read_bytes())
+        with mock.patch.object(tls.os, "geteuid", return_value=0), \
+             mock.patch.object(tls, "verify_material",
+                               side_effect=ValueError("invalid certificate")), \
+             mock.patch.object(tls, "restart_and_check") as restart:
+            with self.assertRaisesRegex(ValueError, "invalid certificate"):
+                tls.activate(self.src, self.dcv)
+            restart.assert_not_called()
+
+    def prepare_safe_retention(self):
+        os.chmod(self.store, 0o700)
+        orig = self.store / "gen-original"
+        os.chmod(orig, 0o700)
+        for name in tls.LINKS:
+            os.chmod(orig / name, 0o600)
+
+    def add_managed_pair(self, name):
+        d = self.store / name
+        d.mkdir(mode=0o700)
+        for filename in tls.LINKS:
+            (d / filename).write_text("OLD SENSITIVE CONTENT")
+            os.chmod(d / filename, 0o600)
+        return d
+
+    def test_prune_preserves_active_and_immediate_previous(self):
+        self.prepare_safe_retention()
+        old = self.add_managed_pair("gen-oldervalid")
+        unknown = self.store / "user-owned-backup"
+        unknown.mkdir()
+        with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \
+             mock.patch.object(tls.os, "fchown"), mock.patch.object(tls.os, "chown"), \
+             mock.patch.object(tls, "verify_material"), \
+             mock.patch.object(tls, "restart_and_check") as restarted:
+            message = tls.activate(self.src, self.dcv)
+        self.assertIn("Activated", message)
+        self.assertEqual(restarted.call_count, 1)
+        self.assertFalse(old.exists(), "old validated generation should be pruned")
+        self.assertTrue(unknown.exists(), "unfamiliar directory must be preserved")
+        self.assertTrue((self.store / "gen-original").exists(), "rollback generation retained")
+        target = os.readlink(self.dcv / tls.ACTIVE_NAME).split("/")[-1]
+        self.assertTrue((self.store / target).exists(), "active generation retained")
+        self.assertEqual(
+            len([x for x in self.store.iterdir()
+                 if x.name.startswith("gen-")]), tls.RETAIN_GENERATIONS)
+
+    def test_prune_refuses_symlinks_unexpected_files_and_hardlinks(self):
+        self.prepare_safe_retention()
+        untouched = self.add_managed_pair("gen-symlinkbad")
+        (untouched / "dcv.key").unlink()
+        (untouched / "dcv.key").symlink_to(self.src / "privkey.pem")
+        extra = self.add_managed_pair("gen-extrafiles")
+        (extra / "foreign.txt").write_text("not owned by our lifecycle")
+        hardlink = self.add_managed_pair("gen-hardlinks")
+        (hardlink / "dcv.key").unlink()
+        os.link(self.src / "privkey.pem", hardlink / "dcv.key")
+        removed, skipped = tls.prune_managed_generations(
+            self.store, "gen-original", "gen-currentnow", os.getuid(), os.getgid())
+        self.assertEqual(removed, 0)
+        self.assertEqual(skipped, 3)
+        self.assertTrue(untouched.is_dir())
+        self.assertTrue(extra.is_dir())
+        self.assertTrue(hardlink.is_dir())
+        self.assertTrue((self.src / "privkey.pem").exists())
+
+    def test_failed_retention_cleanup_does_not_roll_back_good_certificate(self):
+        self.prepare_safe_retention()
+        with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \
+             mock.patch.object(tls.os, "fchown"), mock.patch.object(tls.os, "chown"), \
+             mock.patch.object(tls, "verify_material"), \
+             mock.patch.object(tls, "restart_and_check") as ready, \
+             mock.patch.object(tls, "prune_managed_generations",
+                               side_effect=OSError("cleanup blocked")):
+            text = tls.activate(self.src, self.dcv)
+        self.assertIn("Activated", text)
+        ready.assert_called_once()
+        self.assertNotEqual(os.readlink(self.dcv / tls.ACTIVE_NAME),
+                            f"{tls.STORE_NAME}/gen-original")
+
+    def test_rollback_on_failed_restart_does_not_prune(self):
+        self.prepare_safe_retention()
+        old = self.add_managed_pair("gen-recoverold")
+        with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \
+             mock.patch.object(tls.os, "fchown"), mock.patch.object(tls.os, "chown"), \
+             mock.patch.object(tls, "verify_material"), \
+             mock.patch.object(tls, "prune_managed_generations") as prune, \
+             mock.patch.object(tls, "restart_and_check",
+                               side_effect=[RuntimeError("new cert failed"), None]):
+            with self.assertRaisesRegex(RuntimeError, "new cert failed"):
+                tls.activate(self.src, self.dcv)
+        prune.assert_not_called()
+        self.assertTrue(old.exists())
+        self.assertEqual(os.readlink(self.dcv / tls.ACTIVE_NAME),
+                         f"{tls.STORE_NAME}/gen-original")
+
     def test_approved_config_stages_fullchain_without_chain_separate(self):
         root = Path(__file__).resolve().parents[1]
         cfg = (root / "infra/issue43-awcp.review-only.toml").read_text()
