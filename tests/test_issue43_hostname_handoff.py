@@ -212,7 +212,7 @@ class HandoffTests(unittest.TestCase):
         self.aws.schedules["studio-pr65-i-" + GPU]["ScheduleExpression"] = "at(2026-11-02T12:00:00)"
         with self.assertRaisesRegex(ValueError, "supervised guard bound"):
             h.gpu_preview(self.aws, now=NOW)
-        self.aws.schedules["studio-pr65-i-" + GPU]["ScheduleExpression"] = "at(" + EXPIRES + ")"
+        self.aws.schedules["studio-pr65-i-" + GPU]["ScheduleExpression"] = "at(2026-11-02T08:00:00)"
         self.aws.schedules["studio-pr65-v-" + VOLUME]["ScheduleExpression"] = "at(2026-11-02T10:30:00)"
         with self.assertRaisesRegex(ValueError, "timing outside"):
             h.gpu_preview(self.aws, now=NOW)
