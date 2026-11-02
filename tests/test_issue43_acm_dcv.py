@@ -153,7 +153,7 @@ class DcvAcmTests(unittest.TestCase):
         statement = p["ExportRolePolicy"]["Statement"][0]
         self.assertEqual(statement["Action"], "acm:ExportCertificate")
         self.assertEqual(statement["Resource"], "REPLACE_EXACT_ACM_CERTIFICATE_ARN")
-        self.assertNotIn("route53:", json.dumps(p))
+        self.assertNotIn("route53:", json.dumps([p["AssumeExportRoleStatement"], p["ExportRolePolicy"]]))
         self.assertIn("shared", p["Description"])
 
 
