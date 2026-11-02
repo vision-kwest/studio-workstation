@@ -235,7 +235,7 @@ class DcvAcmTests(unittest.TestCase):
             (self.src / "fullchain.pem").read_bytes())
         (self.store / "gen-original" / "dcv.key").write_bytes(
             (self.src / "privkey.pem").read_bytes())
-        with mock.patch.object(tls.os, "geteuid", return_value=0), \
+        with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \
              mock.patch.object(tls, "verify_material"), \
              mock.patch.object(tls, "command", return_value="inactive"), \
              mock.patch.object(tls, "restart_and_check") as restart:
