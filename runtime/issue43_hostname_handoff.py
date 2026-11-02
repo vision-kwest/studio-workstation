@@ -236,9 +236,12 @@ def handoff_gpu(aws, verify_public_tls, *, now=None, allow_live=False, verify_gu
     refreshed = gpu_preview(aws, now=dt.datetime.now(dt.timezone.utc))
     if (refreshed["to"] != pre["to"] or refreshed["old_association"] != pre["old_association"]):
         raise RuntimeError("Handoff preflight changed during guest preparation")
-    aws(REGION, "ec2", "disassociate-address", "--association-id", pre["old_association"])
     new_assoc = None
     try:
+        # The API may report an error after applying a disassociation. Keep
+        # this operation inside the rollback boundary and read current state
+        # before attempting any restoration.
+        aws(REGION, "ec2", "disassociate-address", "--association-id", pre["old_association"])
         resp = aws(REGION, "ec2", "associate-address", "--allocation-id", EIP_ID,
                    "--instance-id", pre["to"], "--no-allow-reassociation")
         new_assoc = resp["AssociationId"]
