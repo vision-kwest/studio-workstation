@@ -1,5 +1,5 @@
-# Issue #43 — review-only AWS Workload Credentials Provider v3.1.2 config
-# NOT DEPLOYED; substitute exact certificate and role ARNs after approval.
+# Issue #43 — approved AWS Workload Credentials Provider v3.1.2 config
+# Installed only on approved CPU i-0bbfbdc878d3a2320 in Task 5; no secrets.
 # Do not place private keys or AWS access keys in this file.
 # Install AWCP only with exact pinned release and verified artifact integrity.
 [logging]
