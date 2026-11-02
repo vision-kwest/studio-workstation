@@ -98,7 +98,7 @@
                     "logs:PutLogEvents"
                   ],
                   "Resource": {
-                    "Fn::Sub": "arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/aws/lambda/${DnsFunction}:*"
+                    "Fn::Sub": "arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-dcv-dns:*"
                   }
                 }
               ]
@@ -137,6 +137,9 @@
               "Ref": "InstanceId"
             }
           }
+        },
+        "FunctionName": {
+          "Fn::Sub": "${AWS::StackName}-dcv-dns"
         }
       }
     },
