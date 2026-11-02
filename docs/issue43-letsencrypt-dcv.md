@@ -49,6 +49,36 @@ hostname to simultaneous CPU and GPU instances. If a pinned instance is gone
 before it can be described, the handler **raises and requires manual recovery**:
 it never assumes an empty inventory proves DNS is safe.
 
+### Optional Lambda stack packaging and review (NOT deployed)
+
+The separately reviewed `infra/issue43-dns-reconciler.review-only.json`
+CloudFormation template creates **only** an instance-pinned Lambda execution
+role, Lambda function, EventBridge state-change rule, five-minute reconciliation
+rule, invocation permissions, bounded CloudWatch log retention and an error
+alarm wired to a pre-existing SNS topic. It does not create EC2, security
+groups, Route 53 zones or A records during template validation. It requires
+a specific approved instance ID, immutable S3 Lambda archive VersionId and
+approved alarm SNS ARN. The template uses a stack-derived Lambda function name
+to avoid IAM/Function circular references.
+
+Build the exact upload *candidate* locally without AWS operations:
+
+```bash
+python3 scripts/package_issue43_dns.py --output /tmp/issue43-dcv-dns.zip
+```
+
+The script produces stable bytes and SHA-256; the `dcv_dynamic_dns.py` file
+is placed at the ZIP root to match the Lambda handler. **Do not upload**
+until a separate approval; the template references an S3 object version,
+not a mutable unpinned key. A read-only CloudFormation `ValidateTemplate`
+on 2026-11-01 succeeded and reported `CAPABILITY_IAM`; validation is not
+proof of working live IAM, event delivery, DNS or Lambda execution.
+
+Do not launch an EC2 instance merely to configure the hostname: the
+managed owner must be an independently approved existing instance. For a
+new EC2 instance, complete the normal guarded workstation launch
+acceptance separately before binding the DNS hostname.
+
 ## Component 2: on-host Let's Encrypt (NOT installed)
 
 `scripts/dcv_tls.py ensure --email OPERATOR_EMAIL` runs only as root. It invokes
