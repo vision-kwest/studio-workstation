@@ -162,15 +162,15 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual((p["from"], p["to"]), (h.CPU_ID, GPU))
         self.assertEqual(p["gpu_eni"], "eni-0123456789abcdef0")
         self.assertEqual(p["guard"]["root_volume_id"], VOLUME)
-        self.assertFalse(p["writes_enabled"])
+        self.assertTrue(p["writes_enabled"])
         self.assertEqual(self.aws.writes, [])
         self.assertNotIn("gpu_tls_ready", p)
 
-    def test_no_live_action_even_with_explicit_execute(self):
-        with self.assertRaisesRegex(RuntimeError, "DISABLED"):
-            h.handoff_gpu(self.aws, lambda *_: None, allow_live=True)
-        with self.assertRaisesRegex(RuntimeError, "DISABLED"):
-            h.restore_cpu(self.aws, GPU, allow_live=True)
+    def test_live_action_requires_explicit_authorization_before_aws_access(self):
+        with self.assertRaisesRegex(RuntimeError, "explicit execution authorization"):
+            h.handoff_gpu(self.aws, lambda *_: None, allow_live=False)
+        with self.assertRaisesRegex(RuntimeError, "explicit execution authorization"):
+            h.restore_cpu(self.aws, GPU, allow_live=False)
         self.assertEqual(self.aws.calls, [])
 
     def test_cpu_must_be_stopped(self):
@@ -417,12 +417,27 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(self.aws.eip["InstanceId"], h.CPU_ID)
         self.assertEqual(h._tags(self.aws.eip)["StudioDcvInstanceId"], h.CPU_ID)
 
-    def test_cli_handoff_is_disabled_before_aws_or_gpu_mutation(self):
+    def test_cli_handoff_requires_execute_before_aws_or_gpu_mutation(self):
         with mock.patch.object(cli, "aws") as aws, redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
-                cli.main(["hostname-handoff", "--execute"])
+                cli.main(["hostname-handoff"])
             with self.assertRaises(SystemExit):
-                cli.main(["hostname-return", "--execute", "--gpu-instance-id", GPU])
+                cli.main(["hostname-return", "--gpu-instance-id", GPU])
+        aws.assert_not_called()
+
+    def test_cli_execute_dispatches_guarded_handoff_and_return(self):
+        with (mock.patch.object(cli, "aws") as aws,
+              mock.patch.object(h, "handoff_gpu", return_value={"owner": GPU}) as handoff,
+              mock.patch.object(h, "restore_cpu", return_value={"owner": h.CPU_ID}) as restore,
+              redirect_stdout(io.StringIO()) as output):
+            cli.main(["hostname-handoff", "--execute"])
+            self.assertEqual(json.loads(output.getvalue())["owner"], GPU)
+            output.seek(0)
+            output.truncate(0)
+            cli.main(["hostname-return", "--execute", "--gpu-instance-id", GPU])
+            self.assertEqual(json.loads(output.getvalue())["owner"], h.CPU_ID)
+        handoff.assert_called_once_with(aws, cli.verified_dcv_hostname, allow_live=True)
+        restore.assert_called_once_with(aws, GPU, allow_live=True)
         aws.assert_not_called()
 
     def test_cli_iam_dry_run_has_no_aws_calls(self):
