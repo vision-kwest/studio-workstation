@@ -9,6 +9,7 @@ on:
       - 'scripts/studio_workstation_cli.py'
       - 'tests/test_issue43_acm_dcv.py'
       - 'infra/issue43-awcp.review-only.toml'
+      - 'infra/issue43-awcp-dcv-refresh.conf'
       - 'infra/issue43-acm-iam.review-only.json'
       - 'docs/issue43-acm-dcv.md'
       - '.github/workflows/issue43-offline.yml'
