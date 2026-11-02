@@ -151,8 +151,10 @@ def _guest_script():
         "systemctl is-active gdm3 dcvserver >/dev/null",
         "test ! -e /etc/dcv/dcv.pem && test ! -L /etc/dcv/dcv.pem",
         "test ! -e /etc/dcv/dcv.key && test ! -L /etc/dcv/dcv.key",
-        "test ! -e /opt/aws/workload-credentials-provider/bin/aws-workload-credentials-provider",
-        "test ! -e /usr/local/sbin/studio-dcv-acm-activate",
+        # Refuse pre-existing mismatched files, but allow a safe retry after
+        # a partial first installation interrupted by bootstrap/SSM.
+        "if test -e /opt/aws/workload-credentials-provider/bin/aws-workload-credentials-provider; then test \"$(sha256sum /opt/aws/workload-credentials-provider/bin/aws-workload-credentials-provider | cut -d' ' -f1)\" = '" + AWCP_SHA256 + "'; fi",
+        "if test -e /usr/local/sbin/studio-dcv-acm-activate; then test -f /usr/local/sbin/studio-dcv-acm-activate && test ! -L /usr/local/sbin/studio-dcv-acm-activate; fi",
         "install -d -m 0700 -o root -g root " + root,
     ]
     for name, (url, _) in ARTIFACTS.items():
@@ -175,6 +177,8 @@ def _guest_script():
         "assert c[0]['role_arn']=='" + handoff.EXPORT_ROLE + "'",
         "PY",
         "chmod 0600 " + root + "/*",
+        "if test -e /usr/local/sbin/studio-dcv-acm-activate; then cmp -s " + root + "/activate.py /usr/local/sbin/studio-dcv-acm-activate; fi",
+        "if test -e /etc/aws-workload-credentials-provider/config.toml; then cmp -s " + root + "/awcp.toml /etc/aws-workload-credentials-provider/config.toml; fi",
         "groupadd -f awscreds",
         "groupadd -f aws-wcp-token",
         "useradd -r -M -d /opt/aws/workload-credentials-provider -s /sbin/nologin -g awscreds -G aws-wcp-token aws-wcp || test \"$?\" -eq 9",
