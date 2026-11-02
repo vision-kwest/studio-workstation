@@ -147,8 +147,8 @@ def gpu_ready(stack, region):
 
 
 def command(args):
-    # Issue #43: all live EIP reassociation remains disabled in the separate
-    # handoff module. These opt-in commands cannot launch/modify GPU/RES.
+    # Issue #43: exact-scope EIP transfer/return requires --execute and the
+    # existing strict RES/TLS/PR65 guard preflights. No GPU creation here.
     if args.action in ("hostname-plan", "hostname-iam", "hostname-handoff",
                        "hostname-return-plan", "hostname-return"):
         from runtime import issue43_hostname_handoff as handoff
@@ -336,7 +336,7 @@ def main(argv=None):
                            help="Exact supervised GPU EC2 ID, no wildcard discovery")
         if action in ("hostname-handoff", "hostname-return"):
             s.add_argument("--execute", action="store_true",
-                           help="Currently blocked by code-level live gate; separate approval required")
+                           help="Perform the exact-scope guarded EIP transfer or return (AWS writes)")
         if action == "create":
             s.add_argument("--dry-run", action="store_true",
                            help="Render and validate without launching AWS resources")
