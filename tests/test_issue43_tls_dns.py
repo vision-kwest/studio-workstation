@@ -227,6 +227,7 @@ class CliHostnameTests(unittest.TestCase):
         url = cli.verified_dcv_hostname("dcv.kwesidavis.com", IP)
         self.assertEqual(url, "https://dcv.kwesidavis.com:8443")
         context.return_value.wrap_socket.assert_called_once()
+        connection.assert_called_once_with((IP, 8443), timeout=5)
         self.assertEqual(context.return_value.wrap_socket.call_args.kwargs["server_hostname"],
                          "dcv.kwesidavis.com")
 
