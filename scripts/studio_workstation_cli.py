@@ -206,7 +206,9 @@ def complete_gpu_setup(stack, region, instance, *, manager=aws,
     transfer = handoff.handoff_gpu(manager, verified_dcv_hostname, allow_live=True)
     if transfer["owner"] != instance:
         raise RuntimeError("GPU EIP handoff owner mismatch")
-    return trusted_url(stack, instance, manager=manager)
+    # handoff_gpu already verified trusted TLS, the exact EIP owner/tag,
+    # and unchanged DNS; avoid a second, non-rollback-protected network check.
+    return "https://" + handoff.HOST + ":8443"
 
 
 def complete_gpu_stop(stack, instance, *, manager=aws):
