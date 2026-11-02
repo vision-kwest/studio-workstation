@@ -36,7 +36,7 @@ BASE_PROFILE = "arn:aws:iam::401233741942:instance-profile/StudioWorkstationSSMR
 BASE_ROLE_ID = "AROAV223FBB3JOQHYPKDX"
 CERT_ARN = "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243"
 EXPORT_ROLE = "arn:aws:iam::401233741942:role/studio-issue43-dcv-acm-export"
-SAFETY_MARGIN = dt.timedelta(minutes=30)
+SAFETY_MARGIN = dt.timedelta(minutes=60)  # Reserve a full hour for user login and EIP return
 LIVE_HANDOFF_ENABLED = False  # Must be separately reviewed and explicitly changed.
 
 def _items(aws, *args):
