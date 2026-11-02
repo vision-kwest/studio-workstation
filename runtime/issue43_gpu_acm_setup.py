@@ -51,10 +51,13 @@ def _statement(session):
 
 
 def _policy(session):
-    return {"Version": "2012-10-17", "Statement": [{
-        "Effect": "Allow", "Action": "sts:AssumeRole",
-        "Resource": handoff.EXPORT_ROLE,
-        "Condition": {"StringEquals": {"aws:userid": session}}}]}
+    statement = {"Effect": "Allow", "Action": "sts:AssumeRole",
+                 "Resource": handoff.EXPORT_ROLE,
+                 "Condition": {"StringEquals": {"aws:userid": session}}}
+    if session == CPU_SESSION:
+        # Preserve the already-live CPU policy verbatim, including its Sid.
+        statement["Sid"] = "AssumeOnlyIssue43ExportRoleFromExactCpuEc2Session"
+    return {"Version": "2012-10-17", "Statement": [statement]}
 
 
 def _get_role_state(aws, gpu_id):
