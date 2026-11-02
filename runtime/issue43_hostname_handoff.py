@@ -92,6 +92,7 @@ def _guard_schedule(aws, name, iid, action, payload, now):
             sched.get("ScheduleExpressionTimezone") != "UTC" or
             sched.get("FlexibleTimeWindow") != {"Mode": "OFF"} or
             target.get("Arn") != action or target.get("RoleArn") != guard.ROLE or
+            target.get("RetryPolicy") != {"MaximumRetryAttempts": 3, "MaximumEventAgeInSeconds": 3600} or
             json.loads(target.get("Input", "null")) != payload):
         raise ValueError("PR #65 independent expiration guard mismatch")
     expr = sched.get("ScheduleExpression", "")
@@ -164,8 +165,12 @@ def gpu_preview(aws, *, now=None):
         raise ValueError("GPU AMI, profile, or VPC mismatch")
     if len(gpu.get("NetworkInterfaces", [])) != 1:
         raise ValueError("GPU has unexpected ENI inventory")
-    if any(n.get("Association", {}).get("AllocationId") == EIP_ID for n in gpu["NetworkInterfaces"]):
-        raise ValueError("GPU already has the managed EIP")
+    gpu_eni = gpu["NetworkInterfaces"][0]
+    if (gpu_eni.get("Attachment", {}).get("DeviceIndex") != 0 or
+            gpu_eni.get("Attachment", {}).get("Status") != "attached"):
+        raise ValueError("GPU primary ENI attachment mismatch")
+    if gpu_eni.get("Association", {}).get("AllocationId"):
+        raise ValueError("GPU already has an associated Elastic IP; do not replace it")
     address = _eip(aws)
     if (address.get("InstanceId") != CPU_ID or address.get("NetworkInterfaceId") != CPU_ENI or
             address.get("AssociationId") is None or
