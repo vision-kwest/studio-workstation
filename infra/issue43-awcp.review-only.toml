@@ -3,19 +3,19 @@
 # Do not place private keys or AWS access keys in this file.
 # Install AWCP only with exact pinned release and verified artifact integrity.
 [logging]
-log_level = "info"
+log_level = "INFO"
 log_to_file = true
 
 [capabilities.acm]
 enabled = true
 
 [[capabilities.acm.certificates]]
-certificate_arn = "REPLACE_APPROVED_EXPORTABLE_CERT_ARN"
-role_arn = "REPLACE_APPROVED_EXPORT_ROLE_ARN"
+certificate_arn = "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243"
+role_arn = "arn:aws:iam::401233741942:role/studio-issue43-dcv-acm-export"
 certificate_path = "/var/lib/studio/dcv-acm/fullchain.pem"
 private_key_path = "/var/lib/studio/dcv-acm/privkey.pem"
 # Omit chain_path: AWS agent appends the chain to certificate_path.
-certificate_and_chain_permission = "0600"
-key_permission = "0600"
+certificate_and_chain_permission = { mode = "0600" }
+key_permission = { mode = "0600" }
 # An exact, root-owned, non-user-writable executable installed during supervised enrollment.
 refresh_command = "/usr/local/sbin/studio-dcv-acm-activate"
