@@ -203,6 +203,20 @@ class StudioCliTests(unittest.TestCase):
         self.assertEqual(command[0], "aws")
         self.assertIn("--no-cli-pager", command)
 
+    @mock.patch.object(cli.subprocess, "check_output", return_value="")
+    def test_successful_empty_aws_write_response_is_not_json_error(self, check_output):
+        self.assertEqual(cli.aws("us-east-1", "ec2", "create-tags",
+                                 "--resources", "eipalloc-review", "--tags", "Key=Test,Value=Yes"), {})
+        self.assertEqual(check_output.call_count, 1)
+
+    @mock.patch.object(cli.subprocess, "check_output",
+                       side_effect=__import__("subprocess").CalledProcessError(
+                           254, "aws", stderr="AccessDenied"))
+    def test_failed_aws_write_is_not_misread_as_empty_success(self, check_output):
+        with self.assertRaises(__import__("subprocess").CalledProcessError):
+            cli.aws("us-east-1", "iam", "delete-role-policy",
+                    "--role-name", "example", "--policy-name", "example")
+
     @mock.patch.object(cli, "run")
     def test_create_dry_run_validates_without_launch(self, run):
         self.invoke(["create", "--stack", "studio-cpu-test", "--dry-run"])
