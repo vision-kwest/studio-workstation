@@ -212,9 +212,10 @@ class DcvAcmTests(unittest.TestCase):
         p = json.loads((root / "infra/issue43-acm-iam.review-only.json").read_text())
         statement = p["ExportRolePolicy"]["Statement"][0]
         self.assertEqual(statement["Action"], "acm:ExportCertificate")
-        self.assertEqual(statement["Resource"], "REPLACE_EXACT_ACM_CERTIFICATE_ARN")
+        self.assertEqual(statement["Resource"], "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243")
         self.assertNotIn("route53:", json.dumps([p["AssumeExportRoleStatement"], p["ExportRolePolicy"]]))
-        self.assertIn("shared", p["Description"])
+        self.assertEqual(p["CpuInstanceId"], "i-0bbfbdc878d3a2320")
+        self.assertEqual(p["AssumeExportRoleStatement"]["Condition"]["StringEquals"]["aws:userid"], "AROAV223FBB3JOQHYPKDX:i-0bbfbdc878d3a2320")
 
 
 if __name__ == "__main__":
