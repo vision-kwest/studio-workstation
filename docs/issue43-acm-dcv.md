@@ -382,18 +382,20 @@ until the new one has been confirmed and retained for rollback. The agent
 refresh runs approximately daily when the workstation is powered on,
 including at boot after a long stop; ACM renews independently off-host.
 
-## IAM design (review-only)
+## IAM inventory — Task 5 deployed; policy file is review-only reference
 
 [`infra/issue43-acm-iam.review-only.json`](../infra/issue43-acm-iam.review-only.json)
-is a template for: (a) base instance profile ability to assume ONE approved
-export role, (b) dedicated export role trust, and (c) that role's
-`acm:ExportCertificate` on exactly ONE certificate ARN. No Route 53 writer
-permission is needed for the guest. The existing `StudioWorkstationSSMRole`
-is shared by several instances: granting it `sts:AssumeRole` would let
-other holders assume the certificate-export role, so approve explicit
-ownership, rotation and isolation or a separate instance profile before
-changing IAM. Do not change GPU acceptance profile pinning without a
-separate GPU review.
+records the **exact policies deployed during Task 5**: (a) the base
+instance role's `sts:AssumeRole` permission only for the dedicated export
+role **and only when `aws:userid` identifies the original CPU instance
+session**; (b) the export role's matching instance-session trust; and (c)
+`acm:ExportCertificate` on exactly one certificate ARN. This JSON is
+an **audit reference, not an executable deployment script**. No Route 53
+writer permission was added to the guest. The existing
+`StudioWorkstationSSMRole` is shared by CPU/GPU instances, but the
+newly added permission does not authorize other instance sessions.
+Do not broaden or reapply these policies or change GPU profile pinning
+without separately approved review.
 
 No IAM, S3, ACM or instance resources have been changed by Task 2.
 
@@ -546,9 +548,9 @@ aws ec2 describe-instances --region us-east-1 \
 5. Confirm the certificate and CNAME are absent and no unrelated ACM/DNS
    resources were touched. EIP retirement is a distinct Task 3 process.
 
-This rollback was documented, **not executed**. Task 5 requires a
-separate approval for IAM permissions, on-host AWCP installation,
-first certificate export, key storage and controlled DCV testing.
+This Task 4 rollback was documented, **not executed**; the subsequent
+Task 5 installation and scoped IAM deployment were separately authorized
+and completed. Any future rollback requires a new explicit approval.
 
 ## Completion and remaining authorizations
 
@@ -576,8 +578,9 @@ are unchanged.
 
 **Security:** never copy an exported private key into Git, user data, CI
 artifacts, an unrestricted SSM command, or publicly readable filesystem.
-CloudFormation and IAM plans remain review-only and must not broaden
-DCV public ingress. Keep this solution separate from Issue #62.
+No new CloudFormation or IAM resources are authorized by this offline
+Task 7. The exact Task 5 IAM policies are already live, documented above;
+future policy edits require explicit approval. Never broaden DCV public ingress. Keep this solution separate from Issue #62.
 
 ## Upstream authoritative references
 
