@@ -14,6 +14,7 @@ on:
       - 'infra/issue43-awcp-dcv-refresh.conf'
       - 'infra/issue43-acm-iam.review-only.json'
       - 'docs/issue43-acm-dcv.md'
+      - 'docs/issue43-shared-cpu-gpu-handoff.md'
       - '.github/workflows/issue43-offline.yml'
   workflow_dispatch:
 permissions:
