@@ -282,5 +282,47 @@ class PolicyTests(unittest.TestCase):
                          ["_acme-challenge.dcv.kwesidavis.com"])
 
 
+class DeploymentTemplateTests(unittest.TestCase):
+    def test_optional_stack_never_launches_workstation(self):
+        root = Path(__file__).resolve().parents[1]
+        t = json.loads((root / "infra/issue43-dns-reconciler.review-only.json").read_text())
+        resources = t["Resources"]
+        self.assertEqual(t["Parameters"]["InstanceId"]["AllowedPattern"],
+                         "i-[0-9a-f]{8,17}")
+        self.assertEqual(resources["DnsFunction"]["Properties"]
+                         ["Environment"]["Variables"]["STUDIO_DNS_INSTANCE_ID"],
+                         {"Ref": "InstanceId"})
+        self.assertIn("DnsErrorsAlarm", resources)
+        self.assertIn("rate(5 minutes)",
+                      resources["ReconcileRule"]["Properties"]["ScheduleExpression"])
+        self.assertFalse(any(r["Type"] in ("AWS::EC2::Instance", "AWS::EC2::SecurityGroup",
+                                           "AWS::Route53::HostedZone", "AWS::Route53::RecordSet")
+                             for r in resources.values()))
+        self.assertEqual(resources["DnsFunction"]["Properties"]["Code"]
+                         ["S3ObjectVersion"], {"Ref": "CodeVersion"})
+        self.assertEqual(resources["DnsFunction"]["Properties"]["Handler"],
+                         "dcv_dynamic_dns.lambda_handler")
+        role = resources["DnsRole"]["Properties"]["Policies"][0]["PolicyDocument"]
+        changer = [s for s in role["Statement"] if
+                   "route53:ChangeResourceRecordSets" in s["Action"]][0]
+        self.assertEqual(changer["Condition"]["ForAllValues:StringEquals"]
+                         ["route53:ChangeResourceRecordSetsRecordTypes"], ["A"])
+        self.assertEqual(set(changer["Condition"]["Null"].values()), {"false"})
+        self.assertNotIn("DnsFunction", json.dumps(resources["DnsRole"]))
+        self.assertIn("AWS::StackName", json.dumps(resources["DnsRole"]))
+
+    def test_lambda_package_determinism_and_handler(self):
+        import zipfile
+        from scripts import package_issue43_dns as pack
+        with tempfile.TemporaryDirectory() as root:
+            one, two = Path(root) / "one.zip", Path(root) / "two.zip"
+            a, b = pack.package(one), pack.package(two)
+            self.assertEqual(a["sha256"], b["sha256"])
+            self.assertEqual(one.read_bytes(), two.read_bytes())
+            with zipfile.ZipFile(one) as archive:
+                self.assertEqual(archive.namelist(), ["dcv_dynamic_dns.py"])
+                self.assertIn(b"def lambda_handler(", archive.read("dcv_dynamic_dns.py"))
+
+
 if __name__ == "__main__":
     unittest.main()
