@@ -56,7 +56,10 @@ def run(args, *, capture=True):
     return ""
 
 def aws(region, *args):
-    return json.loads(run(["aws", *args, "--region", region, "--output", "json"]))
+    output = run(["aws", *args, "--region", region, "--output", "json"])
+    # Several successful AWS writes (IAM policy, EC2 tags/EIP detach) emit no JSON.
+    # Empty stdout is success only because run() already raises on nonzero exit.
+    return json.loads(output) if output.strip() else {}
 
 def instance_id(stack, region):
     result = aws(region, "cloudformation", "describe-stack-resource",
