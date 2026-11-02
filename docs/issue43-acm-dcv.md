@@ -5,6 +5,77 @@ This plan supersedes the bespoke Lambda/EventBridge/DynamoDB/DDNS/Certbot
 architecture removed from the feature branch. The approved DNS delegation
 was created before this PR.
 
+## Task 6 — initial live restart/renewal check (2026-11-02 UTC; IN PROGRESS)
+
+**Status:** Awaiting actual user browser DCV login; do not mark Task 6 done or
+stop/restart a session while the user is testing. CPU
+`i-0bbfbdc878d3a2320` was started solely under Task 6 approval.
+
+### Verified before the user's browser test
+
+- CPU running; public IP `54.159.180.104`; exact Route 53 hostname
+  `dcv.kwesidavis.com` resolves to the unchanged EIP.
+- After the Task 5 stop / Task 6 start, SSM came online without repair.
+  Ubuntu 24.04, Amazon DCV 2026.0, `gdm3`, `dcvserver` and the
+  `aws-workload-credentials-provider-acm` service were active.
+  RES readiness semaphore present; DCV console `running`, owner
+  `workstation`. Existing `dcv.pem` and `dcv.key` resolved to
+  `dcv:dcv` mode `0600`; AWCP staging remained `aws-wcp:awscreds`
+  mode `0700` and private staged files mode `0600`.
+- Direct connection to `54.159.180.104:8443` with SNI and hostname
+  `dcv.kwesidavis.com` validated via the guest's standard trust store:
+  TLS 1.3, `Verification: OK`, verified peer name.
+- Feature-branch Studio CLI `verified_dcv_hostname` ran against
+  **real DNS and real TLS** using verified pinned file SHA. The opt-in
+  `connect` and `status --hostname` output paths passed with **mocked
+  CloudFormation/EC2 describe data**; full CloudShell CLI AWS discovery
+  is not yet live-tested.
+
+### Startup failure discovered and corrected under Task 6
+
+The first AWCP post-boot refresh failed despite its service being active:
+
+1. AWCP's `ProtectSystem=full` service sandbox made `/etc/dcv`
+   read-only. The root-owned hook failed on creating a new generation
+   with `OSError: [Errno 30] Read-only file system`.
+2. An exact `ReadWritePaths=/etc/dcv` exception allowed the new
+   directory but the service capability bounding set excluded
+   `CAP_CHOWN`. The hook failed attempting to set the generation
+   owner to `dcv` with `PermissionError: [Errno 1]`.
+3. Only these two exceptions were added to the existing ACM service,
+   using a root-owned systemd drop-in:
+   [`infra/issue43-awcp-dcv-refresh.conf`](../infra/issue43-awcp-dcv-refresh.conf).
+   The original AWCP sandbox and IAM remain otherwise unchanged.
+4. Restarting only the AWS ACM agent then succeeded. Agent logs report
+   **`Refresh command succeeded`** and **`Certificate refresh successful`**,
+   DCV returned to console `running`, and a new generation
+   `studio-tls-generations/gen-2fbmncn8` became active.
+   Cert/key targets remained `dcv:dcv 0600`. The old working
+   generation was retained for rollback.
+5. A fresh TLS handshake again passed `Verification: OK` and
+   hostname validation. This shows the _active_ agent-driven refresh
+   path is working, not merely systemd process startup.
+
+The narrow drop-in must be installed on future instances **before**
+enabling AWCP's automatic ACM refresh. Its two directives are guarded
+by an offline regression test. Do not broaden `ReadWritePaths` to
+`/etc`, disable `ProtectSystem`, or grant broad AWS permissions.
+
+### Remaining Task 6 gate
+
+- User must open `https://dcv.kwesidavis.com:8443` from an external
+  browser and report no certificate warning plus successful login as
+  local `workstation` user. The guest-side TLS test does not constitute
+  this human UI acceptance.
+- Once user confirms, complete supervised stop/start persistence
+  and AWS/DNS/EIP checks, test the full CLI AWS discovery in an authorized
+  AWS CLI environment if available, and stop the EC2 instance after testing
+  unless user requests otherwise.
+- Keep Issue #43 Task 6 unchecked and PR #67 draft/unmerged until
+  final evidence is gathered. Preserve RES bootstrap/GPU/Image Builder.
+
+---
+
 ## Task 5 — approved AWCP installation and DCV TLS enrollment (2026-11-02 UTC)
 
 **Live result: PASS for this task's guest, IAM, certificate and console gates.**
