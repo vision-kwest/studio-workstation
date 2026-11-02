@@ -447,7 +447,11 @@ class HandoffTests(unittest.TestCase):
         aws.assert_not_called()
 
     def test_cli_plan_read_only_calls_only_approved_aws_queries(self):
-        with mock.patch.object(cli, "aws", side_effect=self.aws), redirect_stdout(io.StringIO()) as out:
+        # The fake PR65 expiration is anchored at NOW; never depend on wall time.
+        original = h.gpu_preview
+        with (mock.patch.object(cli, "aws", side_effect=self.aws),
+              mock.patch.object(h, "gpu_preview", wraps=lambda aws: original(aws, now=NOW)),
+              redirect_stdout(io.StringIO()) as out):
             cli.main(["hostname-plan"])
         self.assertEqual(json.loads(out.getvalue())["to"], GPU)
         self.assertEqual(self.aws.writes, [])
