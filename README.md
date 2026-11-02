@@ -63,27 +63,36 @@ The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`
 
 After provisioning, set a unique local `workstation` password interactively via SSM (`sudo passwd workstation`); DCV uses **Linux system credentials**, not AWS console credentials. Login through the DCV URL printed by `connect`.
 
-## Optional trusted DCV TLS — Issue #43 (DRAFT; not deployed)
+## Trusted DCV HTTPS — Issue #43 (CPU live; draft PR #67 unmerged)
 
-The simplified design uses a dedicated Elastic IP, a single Route 53 A record,
-one exportable AWS ACM public certificate, and AWS Workload Credentials Provider
-(v3.1.2) to refresh trusted TLS on the workstation. A minimal, offline-tested
-DCV activation hook validates and switches a versioned certificate/key pair.
-**Tasks 3–5 are deployed to the approved CPU only:** dedicated Elastic IP,
-A record, exportable ACM certificate, exact session-scoped IAM, AWS provider
-and trusted DCV TLS have passed guest/console verification. The feature branch
-Studio CLI remains unmerged; browser login and stop/start recovery are Task 6.
+The approved CPU workstation `studio-workstation-cpu-v013` has a dedicated
+Elastic IP `54.159.180.104` and permanent Route 53 hostname
+`dcv.kwesidavis.com`. AWS ACM manages the exportable trusted certificate,
+and AWS Workload Credentials Provider v3.1.2 delivers it to Amazon DCV.
+The user confirmed **browser login without certificate warnings**, and
+certificate refresh, console recovery and saved-file persistence passed a
+supervised EC2 stop/start test. The CPU is now **stopped**; the EIP, DNS and
+ACM certificate remain allocated and billable.
 
-See [Issue #43 simplified ACM/DCV runbook](docs/issue43-acm-dcv.md).
-Draft [PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
-remains deliberately unmerged. The former Lambda/DDNS/Certbot proposal is retired.
+Connect when that CPU is running using:
+`https://dcv.kwesidavis.com:8443` and your existing Linux `workstation`
+account. The optional `connect/status --hostname` CLI flag and offline
+refinements for no-op refresh/retention exist **only in draft PR #67**, not
+in the merged CLI or deployed guest. Do not claim these refinements are
+installed or that a separately launched GPU has trusted hostname support.
+
+See [the Issue #43 acceptance, operations and rollback runbook](docs/issue43-acm-dcv.md)
+and [the Studio CLI instructions](docs/studio-cli.md#optional-trusted-hostname--issue-43).
+[Draft PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
+is deliberately unmerged; the older custom Lambda/DDNS/Certbot architecture
+has been retired. Public TCP 8443 hardening remains separate Issue #62.
 
 ## Security and operating costs
 
 - No inbound SSH is needed. Use Systems Manager for maintenance and Amazon DCV for the graphical desktop.
 - The CPU CLI's historical default is public TCP 8443 (`0.0.0.0/0`); **supply `--client-cidr` to restrict it**. In the scoped GPU CLI, public DCV is permitted only with explicit `--allow-public-dcv`. Public exposure is **not** a private network; prefer a trusted CIDR or future identity-aware private access for long-lived deployments.
 - Treat the self-signed DCV TLS certificate as untrusted until you verify its fingerprint or install a trusted certificate. Use a strong, unique local password. Do not put passwords, private keys, tokens or NVIDIA driver binaries in the repository or CloudFormation user data.
-- Stopping an instance stops running-instance compute charges, **not EBS charges**. Starting the same instance can give it a new public IP. Retained GPU root EBS volumes use `DeleteOnTermination=false`.
+- Stopping an instance stops running-instance compute charges, **not EBS charges**. Without a dedicated Elastic IP, restarting an instance can change its public IP; Issue #43's assigned CPU Elastic IP persists. Retained GPU root EBS volumes use `DeleteOnTermination=false`.
 - The tested GPU acceptance schedules were one-time safeguards (instance termination and a subsequent **best-effort** EBS deletion attempt), not a reusable production lifecycle service. The completed acceptance test's instance, volume, SG, launch template and schedules were verified removed; the scoped expiration IAM role remains.
 - The GPU source AMI snapshot is unencrypted; the validated GPU test launched with an explicitly encrypted root EBS volume. Re-evaluate AMI/snapshot encryption before wider use.
 
