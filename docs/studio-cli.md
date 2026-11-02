@@ -15,8 +15,9 @@ Use a repository checkout in AWS CloudShell or another machine with:
 
 ```bash
 cd ~/studio-workstation
-git switch main
-git pull --ff-only origin main
+git fetch origin
+git switch feature/issue-43-letsencrypt-dynamic-dns
+# PR #67 is draft; these commands are not yet available on main
 python3 -m pip install -r requirements.txt
 python3 studio workstation --help
 ```
@@ -32,11 +33,11 @@ The command is **`python3 studio workstation`**. It is not an installed system-l
 | `create ... --dry-run` | Renders and calls CloudFormation ValidateTemplate; **no EC2 launch** |
 | `status --stack NAME` | Reads the current EC2 instance ID, status, public IP and DCV URL |
 | `check-ready --stack NAME` | Uses SSM Run Command for guest-side RES/DCV/GPU diagnostic checks; doesn't prove a human login |
-| `connect --stack NAME` | Prints the current `https://PUBLIC_IP:8443` URL; doesn't launch a browser |
+| `connect --stack NAME` | For the approved CPU/GPU stack, verifies EIP ownership, DNS and system-trusted HTTPS and prints `https://dcv.kwesidavis.com:8443`; other stacks retain the raw-IP behavior |
 | `connect --stack NAME --ssm` | Opens an administrative SSM Session Manager session |
 | `stop --stack NAME` | Stops the resolved EC2 instance; waits for `stopped` |
-| `start --stack NAME` | Starts the same instance; waits for EC2 health, **not DCV readiness** |
-| `destroy --stack NAME --delete-stack` | Permanently deletes stack-managed resources; requires a **separate EBS/Scheduler audit** |
+| `start --stack NAME` | Starts the same instance; approved CPU waits for trusted DCV HTTPS and approved GPU rechecks RES/ACM/EIP before advertising HTTPS; other CPU stacks retain basic EC2 health wait |
+| `destroy --stack NAME --delete-stack` | Approved GPU scope: verified stack, retained EBS, exact IAM and two expiration schedules cleaned in guarded order; non-anchor CPU stacks use scoped cleanup. Original shared-hostname CPU anchor is protected. Failures require operator reconciliation |
 
 `--yes`, `--confirm-stack`, and `--confirm-instance` **were removed**. Running a command is authorization; you will not be asked to type the same stack or instance twice. `--delete-stack` remains mandatory for destructive teardown; `--dry-run` is how to preview creation. AWS subprocesses pass `--no-cli-pager`, so CloudShell should no longer stop at `(END)` after ValidateTemplate.
 
@@ -119,37 +120,21 @@ complete commands in an authorized CloudShell/administrator environment;
 **do not grant broad CloudFormation rights to the guest solely to test
 the CLI**. Do not call full CLI acceptance passed until that happens.
 
-### CPU/GPU shared hostname — guarded draft commands
+### CPU/GPU shared hostname — Task 5 draft CLI behavior
 
-Draft PR #67 also adds the following optional commands for one-at-a-time
-CPU/GPU sharing, **without changing the existing GPU create/start/stop or
-PR #65 expiration safeguards**:
+Use the **PR #67 feature branch** in an authorized management environment, not the restricted workstation guest role. The original shared-hostname CPU stack is `studio-workstation-cpu-v013`; only the exact PR #65 GPU stack/token is accepted. The GPU retains its independent time-limited termination and retained-EBS deletion safeguards.
 
 ```bash
-# Read-only GPU handoff preflight: exact stack/EIP/DNS/expiration checks
 python3 studio workstation hostname-plan
-
-# Print additive-only, per-GPU-instance ACM export IAM proposal; no AWS call
 python3 studio workstation hostname-iam --gpu-instance-id i-REPLACE
-
-# Review returning the EIP to the original stopped CPU
 python3 studio workstation hostname-return-plan --gpu-instance-id i-REPLACE
 ```
 
-The transfer/return commands are intentionally hard-disabled even when
-`--execute` is present. They must not become executable until separate
-authorization and real GPU guest preparation (AWCP, exact instance-scoped
-IAM and verified trusted localhost DCV certificate). The GPU's independent
-termination and retained-EBS cleanup schedules **must remain enabled**,
-so a handoff is temporary and must finish before its deadline. The
-single EIP remains reserved and DNS remains unchanged. Neither a GPU
-launch nor a GPU TLS deployment has been performed.
+Normal approved CPU/GPU `start`, `stop`, and `connect` use guarded hostname ownership and verified trusted HTTPS. GPU create uses the original PR #65 guarded launcher first, then validates RES/DCV readiness, adds only exact-instance ACM access, and transfers the existing EIP. GPU stop returns that EIP to the original stopped CPU and revokes only GPU-scoped ACM access. Explicit `hostname-handoff --execute`, `hostname-return --execute`, `hostname-acm-prepare --execute`, and `hostname-acm-revoke --gpu-instance-id ... --execute` are privileged AWS-writing operations, not previews; do not run during offline testing.
 
-[Read the reviewed CPU/GPU handoff, failure and rollback design](issue43-shared-cpu-gpu-handoff.md)
-before proposing any live activation.
+**Live CLI acceptance is still pending Task 6.** An earlier supervised AWS API handoff proved trusted GPU browser login and manual resource cleanup, but did not exercise this entire self-service CLI unmocked. No claim of general GPU production support or unlimited runtime is made.
 
-See [Issue #43 evidence and final audit](issue43-acm-dcv.md).
-Trusted HTTPS does not fix the public TCP 8443 exposure (Issue #62).
+[Shared hostname security and rollback details](issue43-shared-cpu-gpu-handoff.md). The public 8443 exposure remains separate Issue #62.
 
 ## GPU workstation: tested acceptance scope
 
@@ -212,37 +197,24 @@ python3 studio workstation connect --stack studio-gpu-cli-accept65
 
 A newly launched GPU instance can take multiple minutes and reboot during RES startup. Readiness means `linux_vdi_config_host_ready.lock`, GDM, DCV, console ownership, Xorg and GPU OpenGL all pass; `check-ready` does not replace an actual interactive login. A TLS certificate can still be untrusted.
 
-## Daily stop, start, status and reconnect
+## Daily operation and safe cleanup (PR #67 draft)
+
+From the **authorized management checkout**:
 
 ```bash
 python3 studio workstation status --stack STACK_NAME
 python3 studio workstation connect --stack STACK_NAME
 python3 studio workstation stop --stack STACK_NAME
 python3 studio workstation start --stack STACK_NAME
-python3 studio workstation check-ready --stack STACK_NAME
 python3 studio workstation connect --stack STACK_NAME
-```
-
-Save documents before stopping. **Stop** ends EC2 running-instance compute charges but keeps EBS billing. A GPU shutdown during acceptance produced an NVIDIA DRM warning in the serial console and an unusually slow EC2 stop transition; the test nevertheless reached `stopped` and recovered successfully. After **start**, check the refreshed public IP, SSM readiness and DCV console; the instance's public IPv4 can change. GPU expiration schedules do **not** pause when EC2 is stopped.
-
-## Destroy and verify cleanup
-
-```bash
 python3 studio workstation destroy --stack STACK_NAME --delete-stack
 ```
 
-This is **permanent**. The CLI checks CloudFormation resource types and deletes the stack; it does **not** automatically guarantee removal of a GPU root EBS volume retained with `DeleteOnTermination=false`, nor does it automatically remove the test expiration schedules. The 2026-11-01 acceptance test's retained EBS happened to be absent at the final independent AWS audit; **do not infer that every future deletion will do the same**.
+For the original CPU anchor and exact scoped GPU, connect verifies `dcv.kwesidavis.com` DNS, shared EIP owner and system CA TLS before printing the trusted URL. It does not open a browser; use the Linux `workstation` account. CPU start requires CPU EIP ownership and waits for trusted HTTPS. GPU start requires the original CPU stopped and owning the EIP, and reenrolls/reverifies RES, ACM, EIP and HTTPS after EC2 health; stop waits for EC2 stopped before returning EIP and revoking GPU-only ACM permission. **The GPU's PR #65 expiration deadlines continue while stopped.** A restarted GPU may have insufficient time remaining for a safe handoff; the guard must still pass.
 
-For a GPU acceptance stack, record the exact instance/volume/SG/LaunchTemplate physical IDs **before** stack deletion, then independently verify all of the following in the same account/region:
+The `destroy --delete-stack` operation is irreversible. It **refuses the original shared-hostname CPU anchor**, which must be deliberately migrated before destruction. For the approved GPU, it independently verifies stack identity, EIP owner, expiration schedules and exact tagged resource inventory; returns EIP to the original stopped CPU; revokes GPU IAM; deletes the exact stack; verifies instance, launch template and security group removal; deletes only the independently verified detached retained EBS; and removes both schedules **only after cleanup**. Non-anchor CPU stacks use their own scoped stack and EBS cleanup. Unexpected resources, IAM denial, attached volumes or partially deleted stacks fail closed and may require operator reconciliation; do not treat CLI failure as cleanup success. Verify absence in AWS after any failed destroy.
 
-1. CloudFormation reaches `DELETE_COMPLETE`; the original EC2 instance is `terminated`.
-2. The recorded retained root EBS ID is absent (or, if `available`, inspect its two exact ownership tags and delete only that verified volume).
-3. The recorded security group and launch template are absent.
-4. Both one-time EventBridge schedules have been checked and removed **only after** no scoped instance/volume remains. Do not delete the schedules prematurely.
-5. A tag-filtered inventory finds no remaining test volumes, security groups or launch templates. Verify any recorded IDs directly as well: tags can be missing on orphaned resources.
-6. Recheck unexpected orphaned EBS, snapshots and public ingress; **never** delete an unverified volume. A leftover IAM Scheduler execution role is an access-control artifact and can be reviewed for later retirement, not an active EC2 cost.
-
-The full pass, evidence, and final absence check are recorded in [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46). No acceptance instance or public security group was left running by that test.
+Task 5 regressions run offline with mocked AWS interfaces. **One supervised unmocked CLI create/connect/stop/resume/destroy acceptance is Task 6 and still pending**.
 
 ## Other references
 
