@@ -264,14 +264,18 @@ def revoke_gpu(aws, gpu_id):
         raise ValueError("Return EIP and ownership tag to CPU before revoking GPU ACM")
     # An active GPU must not lose its certificate-renewal permission.
     try:
-        vm = handoff._items(aws, gpu_id)[gpu_id]
+        response = aws(handoff.REGION, 'ec2', 'describe-instances', '--instance-ids', gpu_id)
+        matches = [i for r in response.get('Reservations', []) for i in r.get('Instances', [])]
+        if len(matches) > 1 or (matches and matches[0].get('InstanceId') != gpu_id):
+            raise ValueError('GPU identity mismatch')
+        vm = matches[0] if matches else None
     except subprocess.CalledProcessError as e:
         if "InvalidInstanceID.NotFound" not in (e.stderr or ""):
             raise
     else:
-        if vm.get("State", {}).get("Name") not in ("stopped", "terminated"):
+        if vm is not None and vm.get("State", {}).get("Name") not in ("stopped", "terminated"):
             raise ValueError("Stop/terminate GPU before revoking certificate access")
-        if (handoff._tags(vm).get("StudioStack") != handoff.GPU_STACK or
+        if vm is not None and (handoff._tags(vm).get("StudioStack") != handoff.GPU_STACK or
                 handoff._tags(vm).get("StudioCleanupToken") != handoff.GPU_TOKEN):
             raise ValueError("GPU instance ownership differs")
     revoked = _revoke_grant(aws, gpu_id)
