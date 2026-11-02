@@ -19,6 +19,7 @@ class FakeCleanup(IAMFake):
     def __init__(self):
         super().__init__()
         self.gpu["State"]["Name"] = "running"
+        self.volume["Encrypted"] = True
         self.stack = {"StackName": h.GPU_STACK,
                       "StackId": "arn:aws:cloudformation:us-east-1:" + h.ACCOUNT +
                                  ":stack/" + h.GPU_STACK + "/abcdef",
