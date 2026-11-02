@@ -147,6 +147,29 @@ def gpu_ready(stack, region):
 
 
 def command(args):
+    # Issue #43: all live EIP reassociation remains disabled in the separate
+    # handoff module. These opt-in commands cannot launch/modify GPU/RES.
+    if args.action in ("hostname-plan", "hostname-iam", "hostname-handoff",
+                       "hostname-return-plan", "hostname-return"):
+        from runtime import issue43_hostname_handoff as handoff
+        if args.region != handoff.REGION:
+            raise ValueError("Issue #43 hostname handoff supports only us-east-1")
+        if args.action == "hostname-iam":
+            print(json.dumps(handoff.review_gpu_iam(args.gpu_instance_id), indent=2))
+            return
+        if args.action == "hostname-plan":
+            print(json.dumps(handoff.gpu_preview(aws), indent=2))
+            return
+        if args.action == "hostname-return-plan":
+            print(json.dumps(handoff.cpu_return_preview(aws, args.gpu_instance_id), indent=2))
+            return
+        if not args.execute:
+            raise ValueError("Live hostname handoff requires a separately approved --execute")
+        if args.action == "hostname-handoff":
+            print(json.dumps(handoff.handoff_gpu(aws, verified_dcv_hostname, allow_live=True), indent=2))
+        else:
+            print(json.dumps(handoff.restore_cpu(aws, args.gpu_instance_id, allow_live=True), indent=2))
+        return
     if args.action == "create":
         if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9-]{0,127}", args.stack):
             raise ValueError("Invalid CloudFormation stack name")
@@ -301,11 +324,19 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="studio workstation",
                                 description="Validated CPU RES workstation lifecycle wrapper")
     sub = p.add_subparsers(dest="action", required=True)
-    for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready"):
+    for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready",
+                   "hostname-plan", "hostname-iam", "hostname-handoff",
+                   "hostname-return-plan", "hostname-return"):
         s = sub.add_parser(action)
         s.add_argument("--stack", default=DEFAULT_STACK if action != "create" else None,
                        required=action == "create")
         s.add_argument("--region", default=DEFAULT_REGION)
+        if action in ("hostname-iam", "hostname-return-plan", "hostname-return"):
+            s.add_argument("--gpu-instance-id", required=True,
+                           help="Exact supervised GPU EC2 ID, no wildcard discovery")
+        if action in ("hostname-handoff", "hostname-return"):
+            s.add_argument("--execute", action="store_true",
+                           help="Currently blocked by code-level live gate; separate approval required")
         if action == "create":
             s.add_argument("--dry-run", action="store_true",
                            help="Render and validate without launching AWS resources")
