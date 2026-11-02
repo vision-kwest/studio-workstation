@@ -75,27 +75,47 @@ python3 studio workstation connect --stack studio-workstation-cpu-review
 
 DCV login uses local Linux username `workstation`, not AWS IAM credentials. The browser may show an untrusted/self-signed TLS warning; verify the certificate fingerprint through an administrative channel or provision trusted TLS.
 
-### Optional trusted hostname — Issue #43 (draft, not deployed)
+### Optional trusted hostname — Issue #43 (CPU deployed; CLI feature in draft)
 
-Draft PR #67 contains opt-in `--hostname dcv.kwesidavis.com` for `connect`
-and `status`. It validates that the DNS A record matches the current stack's
-public EC2 IPv4, and then connects directly to that IP with CA-validated TLS
-and SNI for the hostname. It does **not** alter create, start/stop or defaults.
+For the **approved CPU instance only**, Route 53 permanently resolves
+`dcv.kwesidavis.com` to retained Elastic IP `54.159.180.104`. The
+browser login was confirmed without certificate warnings, and the AWS
+certificate agent plus RES/DCV console recovered through stop/start.
+The CPU is currently **stopped**. It must be running and DCV ready before
+the URL is usable:
 
-```bash
-python3 studio workstation connect --stack STACK --hostname dcv.kwesidavis.com
-python3 studio workstation status --stack STACK --hostname dcv.kwesidavis.com
+```
+https://dcv.kwesidavis.com:8443
 ```
 
-This flag is **not in main** until the draft PR is separately approved and
-merged. The dedicated EIP, Route 53 A record, exportable ACM certificate and AWCP
-were installed for the approved CPU in Task 3–5 and verified by SSM.
-**Task 6 browser login and stop/start acceptance remain pending.**
-Normal IP-based CLI behavior is unchanged in main.
+Use the existing Linux `workstation` account. This stable hostname **does not
+automatically follow new CPU/GPU instances**; a GPU needs separately approved
+EIP handoff, trusted certificate installation and IAM integration.
 
-Review the [Issue #43 simplified ACM/DCV runbook](issue43-acm-dcv.md).
-Neither a trusted certificate nor an Elastic IP closes public TCP 8443;
-see Issue #62.
+Draft PR #67 adds opt-in `--hostname dcv.kwesidavis.com` for `connect`
+and `status` (not yet in `main`). When a stack is **running**, these
+commands compare public DNS A answers against the stack's actual EC2 IPv4
+and verify the certificate chain and hostname with the system CA store.
+The TLS client connects to the **verified IP** with SNI set to the hostname
+rather than resolving the hostname a second time:
+
+```bash
+python3 studio workstation connect --stack studio-workstation-cpu-v013 --hostname dcv.kwesidavis.com
+python3 studio workstation status --stack studio-workstation-cpu-v013 --hostname dcv.kwesidavis.com
+```
+
+The feature **fails closed on a stopped instance** and rejects a mismatch
+or untrusted certificate. Regular `connect`, `status`, `stop`, `start`
+and existing GPU safeguards are unchanged. The hostname verification was
+exercised against **real DNS/TLS** during Task 6; command output paths
+used mocked AWS stack data. Read-only CloudFormation/EC2 API lookups also
+confirmed the real stack/instance binding while stopped. An **unmocked,
+full AWS CLI invocation** has not yet been performed and requires a
+separately approved live verification. Do not call the draft feature
+production-validated until that gate is cleared.
+
+See [Issue #43 evidence and final audit](issue43-acm-dcv.md).
+Trusted HTTPS does not fix the public TCP 8443 exposure (Issue #62).
 
 ## GPU workstation: tested acceptance scope
 
