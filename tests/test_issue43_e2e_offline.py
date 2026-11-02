@@ -131,5 +131,42 @@ class OfflineLifecycleJourney(unittest.TestCase):
             setup.assert_not_called()
 
 
+    def test_cpu_create_dispatches_only_reviewed_deploy(self):
+        calls = []
+        def run(argv, *, capture=True):
+            calls.append(argv)
+            return ""
+        with (mock.patch.object(cli, "run", side_effect=run),
+              mock.patch.object(cli, "aws", side_effect=subprocess.CalledProcessError(
+                  254, "aws", stderr="Stack with id studio-workstation-cpu-review does not exist")),
+              mock.patch.object(cli, "describe", return_value={
+                  "stack": "studio-workstation-cpu-review", "instance": "i-cpu", "state": "running"})):
+            self.invoke("create", "--stack", "studio-workstation-cpu-review",
+                        "--profile", "cpu", "--client-cidr", "203.0.113.9/32")
+        self.assertEqual(sum("deploy" in cmd for cmd in calls), 1)
+        self.assertEqual(sum("validate-template" in cmd for cmd in calls), 1)
+        self.assertFalse(any("create-stack" in cmd for cmd in calls))
+
+    def test_gpu_create_requires_armed_guard_before_trusted_handoff(self):
+        from runtime import pr65_gpu_create
+        outcome = {"guard": {"guard_armed": True, "instance_id": GPU_ID}}
+        with (mock.patch.object(cli, "run", return_value=""),
+              mock.patch.object(cli, "aws", side_effect=subprocess.CalledProcessError(
+                  254, "aws", stderr="Stack with id studio-gpu-cli-accept65 does not exist")),
+              mock.patch.object(cli, "gpu_release_preflight") as release,
+              mock.patch.object(cli, "shared_gpu_source_ready") as source,
+              mock.patch.object(pr65_gpu_create, "create_guarded",
+                                return_value=outcome) as guarded,
+              mock.patch.object(cli, "complete_gpu_setup", return_value=TLS) as setup):
+            result = self.invoke("create", "--stack", GPU, "--profile", "gpu",
+                                 "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
+                                 "--client-cidr", "0.0.0.0/0", "--allow-public-dcv")
+        self.assertIn(TLS, result)
+        release.assert_called_once()
+        source.assert_called_once()
+        guarded.assert_called_once()
+        setup.assert_called_once_with(GPU, cli.DEFAULT_REGION, GPU_ID)
+
+
 if __name__ == "__main__":
     unittest.main()
