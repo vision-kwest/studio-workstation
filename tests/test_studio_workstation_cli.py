@@ -49,19 +49,22 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "run")
     @mock.patch.object(cli, "describe", return_value=STATE)
     def test_connect_prints_url_without_aws_mutation(self, describe, run):
-        self.invoke(["connect"])
+        with mock.patch.object(cli, "trusted_url",
+                               return_value="https://dcv.kwesidavis.com:8443") as tls:
+            self.invoke(["connect"])
+        tls.assert_called_once_with(STACK, INSTANCE)
         run.assert_not_called()
 
     def test_trusted_hostname_connect_uses_verified_stack_identity(self):
         vm = dict(STATE, public_ip="54.159.180.104", state="running")
         with mock.patch.object(cli, "describe", return_value=vm), \
-             mock.patch.object(cli, "verified_dcv_hostname",
+             mock.patch.object(cli, "trusted_url",
                                return_value="https://dcv.kwesidavis.com:8443") as tls, \
              mock.patch.object(cli, "run") as run, \
              contextlib.redirect_stdout(io.StringIO()) as output:
             cli.main(["connect", "--stack", STACK,
                       "--hostname", "dcv.kwesidavis.com"])
-        tls.assert_called_once_with("dcv.kwesidavis.com", "54.159.180.104")
+        tls.assert_called_once_with(STACK, INSTANCE)
         self.assertIn("https://dcv.kwesidavis.com:8443", output.getvalue())
         run.assert_not_called()
 
