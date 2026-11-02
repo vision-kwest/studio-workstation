@@ -1,0 +1,37 @@
+{
+  "Description": "READ ONLY designs. No policy attached. Instance profile shared by other workstation instances; explicitly evaluate exposure before approving.",
+  "InstanceProfileArn": "arn:aws:iam::401233741942:role/StudioWorkstationSSMRole",
+  "AssumeExportRoleStatement": {
+    "Effect": "Allow",
+    "Action": "sts:AssumeRole",
+    "Resource": "REPLACE_EXACT_ACM_EXPORT_ROLE_ARN"
+  },
+  "ExportRoleTrustPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::401233741942:role/StudioWorkstationSSMRole"
+        },
+        "Action": "sts:AssumeRole"
+      }
+    ]
+  },
+  "ExportRolePolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "acm:ExportCertificate",
+        "Resource": "REPLACE_EXACT_ACM_CERTIFICATE_ARN"
+      }
+    ]
+  },
+  "SecurityReview": [
+    "The same base role is used by more than one EC2 workstation; any instance holding that role could potentially assume the export role if its policy allows it.",
+    "Prefer separate dedicated profile for certificate-bearing workstation if feasible without modifying GPU acceptance constraints.",
+    "Never add route53:ChangeResourceRecordSets to the existing workstation role for this architecture.",
+    "The export role must be limited to exactly one ACM certificate ARN; no wildcard. Do not store exported keys in SSM, GitHub or CI."
+  ]
+}
