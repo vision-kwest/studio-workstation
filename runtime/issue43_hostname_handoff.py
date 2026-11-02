@@ -14,6 +14,7 @@ DCV console and trusted certificate.
 import datetime as dt
 import json
 import re
+import subprocess
 import time
 
 from runtime import pr65_one_shot_guard as guard
@@ -217,8 +218,15 @@ def check_gpu_tls(aws, instance_id, *, sleep=time.sleep):
     cmd_id = response["Command"]["CommandId"]
     for _ in range(14):
         sleep(5)
-        reply = aws(REGION, "ssm", "get-command-invocation", "--command-id", cmd_id,
-                    "--instance-id", instance_id)
+        try:
+            reply = aws(REGION, "ssm", "get-command-invocation", "--command-id", cmd_id,
+                        "--instance-id", instance_id)
+        except subprocess.CalledProcessError as exc:
+            # SSM GetCommandInvocation is eventually consistent immediately
+            # after SendCommand. Never mask AccessDenied or other failures.
+            if "InvocationDoesNotExist" not in (exc.stderr or ""):
+                raise
+            continue
         status = reply.get("Status")
         if status == "Success":
             if (reply.get("ResponseCode") != 0 or
