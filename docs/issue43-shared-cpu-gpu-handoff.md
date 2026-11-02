@@ -98,11 +98,11 @@ EventBridge schedules:
 - `studio-pr65-v-<gpu-root-volume-id>`: enabled exact EBS cleanup;
 - existing `studio-task7-pr61` group, scoped Scheduler execution role,
   configured retries/target and correct immutable payloads;
-- at least **30 minutes remain** before termination, a deadline
+- at least **60 minutes remain** before termination, a deadline
   **no more than 240 minutes away** (the original PR #65 guard bound),
   and EBS cleanup 30–120 minutes after termination.
 
-This 30-minute threshold is a *minimum safety gate*, not authorization
+This 60-minute threshold is a *minimum safety gate*, not authorization
 to keep the GPU online past its scheduled expiration. The GPU may still
 be automatically terminated; an allocated EIP does **not** suspend the
 schedule. One-at-a-time handoff must end with a supervised return to CPU
