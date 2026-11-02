@@ -202,6 +202,138 @@ both workstations are stopped, but the reserved IP **cannot be
 reassigned to a stranger while retained**. This is the desired
 cost/simplicity tradeoff rather than custom Lambda reconciliation.
 
+## Phase 2 — Task 2 final offline readiness (2026-11-02 UTC)
+
+**PASS for offline design/tests; NO LIVE-GPU authorization implied.** This
+review did not modify AWS, start instances, allocate resources, attach IAM,
+reassociate the EIP, or edit the original RES/GPU/Image Builder code.
+Draft PR #67 remains unmerged and `LIVE_HANDOFF_ENABLED=False`.
+
+### Concrete, separately approved Task 3 prerequisites
+
+1. **Management client:** use existing approved AWS management credentials
+   with read-only CloudFormation (`DescribeStackResource`),
+   EC2 instance/EIP/volume inventory, IAM role/policy reads, Scheduler
+   group/schedule reads, Route 53 record inspection and SSM diagnostics.
+   The CPU/GPU guest's intentionally limited instance profile is **not**
+   a CLI management identity. Final, unmocked CLI hostname commands
+   remain unproven from an authorized operator environment because no
+   running workstation or AWS management CLI was used for Task 2.
+2. **Guarded GPU launch:** reuse the existing `studio-gpu-cli-accept65`
+   stack/token/AMI and original PR #65 launch path. Verify **both**
+   independently armed schedules, their immutable EC2/EBS targets,
+   retries, trust role, exact IAM policy, and no other policies. Existing
+   `runtime/pr65_gpu_create.preflight()` is now reused in the handoff
+   preview: a weakened or missing Scheduler execution-role policy fails
+   before transferring any EIP. A healthy running GPU, RES console,
+   NVIDIA/T4 readiness and root EBS ownership are mandatory.
+3. **Handoff clock:** each transfer rechecks the actual termination
+   deadline using UTC; it requires **at least 60 minutes** remaining,
+   no more than the original 240-minute bound, and volume cleanup
+   30–120 minutes after termination. The 60-minute buffer is for user
+   login, EIP return and independent resource cleanup. Abort rather than
+   extending/cancelling a one-time safeguard. No work should continue
+   beyond the Scheduler deadline.
+4. **GPU IAM:** obtain the **actual new GPU instance ID** from the guarded
+   launch (not a guessed ID). Review the output of
+   `hostname-iam --gpu-instance-id <actual-id>`; add a separate inline
+   statement on `StudioWorkstationSSMRole` permitting
+   `sts:AssumeRole` only when
+   `aws:userid=AROAV223FBB3JOQHYPKDX:<actual-id>` and update
+   `studio-issue43-dcv-acm-export` role trust with that matching
+   additional instance-session condition. **Preserve** existing CPU
+   session trust, the single-certificate `acm:ExportCertificate` grant,
+   and original PR #65 IAM/schedules. Revoke the specific GPU permission
+   and trust addition only as separately approved cleanup after
+   GPU acceptance, without revoking CPU access.
+5. **Pinned AWS agent / provenance:**
+   - AWS Workload Credentials Provider v3.1.2, tagged release
+     (2026-10-28). Pin upstream Linux installer to
+     `aws/aws-workload-credentials-provider` **tag `v3.1.2`**
+     (Git blob SHA-1
+     `fe77b1db02b9a61acb6027611d260b52fefd1f6d`).
+   - CPU-validated installed x86_64 agent binary SHA-256:
+     `1480c04bddfdea241f9b67fedd15f1006e53d33d234b5aca3f8eec6e563f420a`.
+     On the GPU Ubuntu x86_64 guest, fetch the same pinned
+     version over TLS; check the resulting installed binary against
+     this **previously tested CPU artifact hash**, plus a version check.
+     The upstream Linux bootstrap installer itself checks that the
+     download has ELF magic but **does not authenticate an upstream
+     publisher-provided binary digest**. A CPU binary match is an
+     identity cross-check, **not a vendor signature/attestation**.
+   - Use the same reviewed certificate hook, AWCP TOML (exact ACM and
+     export role ARNs), and minimal
+     `infra/issue43-awcp-dcv-refresh.conf` systemd permissions
+     (`ReadWritePaths=/etc/dcv`, `CapabilityBoundingSet=CAP_CHOWN`).
+     Install services disabled/not-started first; review sudoers and
+     sandbox before starting only the ACM provider.
+     Stage fullchain/key separately in mode 0600 under an
+     `aws-wcp`-owned mode 0700 directory. Do not output private key
+     contents to SSM/GitHub/CI. Start/enroll and verify healthy DCV.
+6. **GPU trusted readiness:** only after SSM is online and RES/GDM/DCV
+   automatic console is running should the GPU local certificate/key
+   be validated. The SSM probe checks hostname, expiration, matching
+   public key, restricted file permissions and trusted localhost
+   TLS handshake; `InvocationDoesNotExist` eventual-consistency
+   errors retry within the bounded poll, while `AccessDenied` and
+   real failures propagate immediately. The **public** trusted TLS
+   check follows the EIP association and must use the exact hostname
+   and pinned IPv4, without weakening trust.
+7. **Return and cleanup:** before any move, confirm CPU is stopped,
+   exact EIP association and tags unchanged, and the GPU still has
+   enough deadline margin. On failure, attempt to restore only the
+   original CPU association and tag, without stealing an unknown
+   association. On success, perform the user's GPU DCV browser login
+   checkpoint, then stop/terminate GPU under the original safeguards,
+   return EIP to CPU and verify it before GPU resource cleanup.
+   Independently verify retained EBS, security group, launch template
+   and Scheduler schedule removal; the expiry EBS delete remains
+   best effort. If CPU EIP restoration cannot be verified, stop
+   automatically and escalate for manual intervention.
+
+### Task 2 verification and outstanding limitations
+
+- **Verified via AWS read-only queries:** the exact original PR #65
+  Scheduler execution role trust is scoped to
+  `studio-task7-pr61` and account `401233741942`, its
+  `StudioPr65ExactTaggedExpiry` grants exactly the tagged EC2
+  terminate and retained-volume delete operations, it has no
+  other inline/managed policies, and the Scheduler group is active.
+- **Verified via IAM `SimulateCustomPolicy`:** proposed GPU-only
+  source-role permission allows only the new exact GPU-instance
+  `aws:userid`; the original CPU session, unrelated instance ID and
+  missing session identity all receive `implicitDeny` **under that
+  proposed statement**. This does not simulate the future combined
+  source/export-role trust, SCPs, runtime credentials or policy
+  propagation. Re-verify exact runtime identity during Task 3.
+- **Verified AWS CLI contract:** `ec2 associate-address` supports
+  `--no-allow-reassociation` for preventing an implicit EIP steal.
+  The plan uses explicit disassociation and readback; EC2 documents
+  that an EIP reassignment can momentarily interrupt availability.
+  Expect and bound a brief handoff outage.
+- **Offline fixes:** handoff now reuses full PR #65 role
+  `preflight()` before any transfer and again on recheck;
+  the SSM probe tolerates bounded
+  `InvocationDoesNotExist` propagation but rejects any other
+  authorization error. Original CPU return, bad TLS, partial
+  disassociation, wrong owner, stale expiry and unexpected GPU EIP
+  are tested with AWS mocks.
+- **Unproven until separately approved live GPU task:** actual GPU
+  bootstrap and AWCP installation, IAM grant propagation, trusted
+  localhost/public DCV certificate, EIP transfer/rollback, expiration
+  delivery, GPU→CPU return, complete retained-EBS cleanup and real
+  management-client CLI commands. Keep all these as explicit checks,
+  **not** implied successes.
+
+### External reference sources
+
+- [AWS CLI AssociateAddress and no-allow-reassociation](https://docs.aws.amazon.com/cli/latest/reference/ec2/associate-address.html)
+- [AWS EC2 Elastic IP reassociation](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/working-with-eips.html)
+- [Pinned AWS Workload Credentials Provider](https://github.com/aws/aws-workload-credentials-provider/tree/v3.1.2)
+- [Existing PR #65 guard role and schedules](../runtime/pr65_gpu_create.py)
+
+---
+
 ## Test matrix and release gates
 
 [`tests/test_issue43_hostname_handoff.py`](../tests/test_issue43_hostname_handoff.py)
