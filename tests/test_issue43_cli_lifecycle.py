@@ -130,6 +130,38 @@ class LifecycleTests(unittest.TestCase):
         restore.assert_not_called()
         revoke.assert_called_once()
 
+    def test_gpu_source_preflight_rejects_running_cpu_before_ec2(self):
+        vm = {"State": {"Name": "running"},
+              "NetworkInterfaces": [{"NetworkInterfaceId": handoff.CPU_ENI}]}
+        with (mock.patch.object(handoff, "_stack_iid", return_value=CPU),
+              mock.patch.object(handoff, "_items", return_value={CPU: vm}),
+              mock.patch.object(cli, "trusted_owner") as trust):
+            with self.assertRaisesRegex(ValueError, "CPU must be stopped"):
+                cli.shared_gpu_source_ready(manager=mock.Mock())
+        trust.assert_not_called()
+
+    def test_gpu_source_preflight_checks_ownership_after_cpu_stop(self):
+        vm = {"State": {"Name": "stopped"},
+              "NetworkInterfaces": [{"NetworkInterfaceId": handoff.CPU_ENI}]}
+        with (mock.patch.object(handoff, "_stack_iid", return_value=CPU),
+              mock.patch.object(handoff, "_items", return_value={CPU: vm}),
+              mock.patch.object(cli, "trusted_owner",
+                                side_effect=ValueError("EIP moved")) as trust):
+            with self.assertRaisesRegex(ValueError, "EIP moved"):
+                cli.shared_gpu_source_ready(manager=mock.Mock())
+        trust.assert_called_once()
+
+    def test_gpu_start_refuses_running_cpu_before_ec2(self):
+        vm = {"stack": GPU_STACK, "instance": GPU, "state": "stopped"}
+        with (mock.patch.object(cli, "describe", return_value=vm),
+              mock.patch.object(cli, "shared_gpu_source_ready",
+                                side_effect=ValueError("CPU running")),
+              mock.patch.object(cli, "run") as run,
+              contextlib.redirect_stderr(io.StringIO())):
+            with self.assertRaises(SystemExit):
+                cli.main(["start", "--stack", GPU_STACK])
+        run.assert_not_called()
+
     def test_gpu_restart_wires_setup_after_ec2_waiter(self):
         states = [
             {"stack": GPU_STACK, "instance": GPU, "state": "stopped"},
@@ -139,10 +171,13 @@ class LifecycleTests(unittest.TestCase):
             events.append("ec2-start" if "start-instances" in cmd else "ec2-wait")
         with (mock.patch.object(cli, "describe", side_effect=states),
               mock.patch.object(cli, "run", side_effect=run),
+              mock.patch.object(cli, "shared_gpu_source_ready", side_effect=lambda:
+                                events.append("cpu-eip-preflight")),
               mock.patch.object(cli, "complete_gpu_setup", side_effect=lambda *a:
                                 (events.append("trusted-setup") or TRUSTED))):
             self.command(["start", "--stack", GPU_STACK])
-        self.assertEqual(events, ["ec2-start", "ec2-wait", "trusted-setup"])
+        self.assertEqual(events, ["cpu-eip-preflight", "ec2-start", "ec2-wait",
+                                  "trusted-setup"])
 
     def test_cpu_restart_verifies_owner_before_ec2_start(self):
         states = [
