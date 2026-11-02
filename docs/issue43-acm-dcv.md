@@ -1,9 +1,99 @@
-# Issue #43 — Simple stable-IP + ACM trusted DCV (Tasks 3–4 deployed; Task 5 pending)
+# Issue #43 — Stable IP + ACM trusted DCV (Tasks 3–5 deployed; Task 6 pending)
 
-**Status:** Draft PR #67 remains unmerged. Task 3's approved EIP/A record and Task 4's approved ACM certificate/DNS validation CNAME are live. The AWCP agent, IAM configuration, DCV certificate activation hook and CLI changes in this branch are NOT deployed.
+**Status:** Draft PR #67 remains unmerged. Tasks 3–5 are live: EIP/DNS, ACM certificate, scoped IAM, AWCP v3.1.2 and verified DCV TLS enrollment. The Studio CLI changes in PR #67 are NOT merged, and Task 6 browser/stop-start acceptance is still pending.
 This plan supersedes the bespoke Lambda/EventBridge/DynamoDB/DDNS/Certbot
 architecture removed from the feature branch. The approved DNS delegation
 was created before this PR.
+
+## Task 5 — approved AWCP installation and DCV TLS enrollment (2026-11-02 UTC)
+
+**Live result: PASS for this task's guest, IAM, certificate and console gates.**
+Task 6 browser login and stop/start recovery acceptance remain separate.
+No changes were made to RES 2026.06 source, Image Builder, GPU IAM/expiration
+mechanisms or the original DCV `dcv.conf`.
+
+### Exact resource and evidence inventory
+
+| Resource / verification | Observed |
+| --- | --- |
+| Approved CPU | `i-0bbfbdc878d3a2320` (Ubuntu 24.04, `m7i.large`) |
+| Static IP | `54.159.180.104`, allocation `eipalloc-0879a34aa1a1298dd` |
+| Certificate | `arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243` |
+| Certificate state | `ISSUED`, `Export=ENABLED`, `RenewalEligibility=ELIGIBLE` **after first AWCP export** |
+| Base EC2 role | `StudioWorkstationSSMRole` (RoleId `AROAV223FBB3JOQHYPKDX`) |
+| Base new inline policy | `StudioIssue43ExactInstanceAssume`: `sts:AssumeRole` only to exact export-role ARN, with `aws:userid` equal to `AROAV223FBB3JOQHYPKDX:i-0bbfbdc878d3a2320` |
+| Newly created target role | `studio-issue43-dcv-acm-export` |
+| Export role policy | `StudioIssue43ExactAcMExport`: only `acm:ExportCertificate` on exact ACM ARN |
+| Export role trust | Only base role principal with matching exact CPU instance `aws:userid` |
+| Live instance STS test | `AssumeRole` succeeded for exact CPU session; no secret credentials printed |
+| AWCP version | `v3.1.2` pinned from official AWS release and tag |
+| Installed binary SHA-256 | `1480c04bddfdea241f9b67fedd15f1006e53d33d234b5aca3f8eec6e563f420a` |
+| AWCP service | `aws-workload-credentials-provider-acm.service`: active, enabled |
+| Unused capabilities | AWCP Secrets Manager/token services disabled |
+| Staged certificate | `/var/lib/studio/dcv-acm/fullchain.pem` — `aws-wcp:awscreds`, mode `0600` |
+| Staged key | `/var/lib/studio/dcv-acm/privkey.pem` — `aws-wcp:awscreds`, mode `0600` |
+| Staging directory | `aws-wcp:awscreds`, mode `0700` |
+| DCV version | Amazon DCV `2026.0 (r24952)` |
+| Initial DCV certificate baseline | `/etc/dcv/dcv.pem` and `dcv.key` absent — built-in self-signed certificate |
+| First enrollment | Reviewed `studio-dcv-acm-activate --enroll-default`; successful generation creation and DCV service restart |
+| DCV certificate/key | Symlink targets both `dcv:dcv`, mode `0600` |
+| Active generation link | `studio-tls-generations/gen-initial-59b9fb57fae105fa` |
+| DCV readiness | `systemctl is-active dcvserver` active, `dcv describe-session console` running, owner `workstation` |
+| TLS handshake on guest | TLS 1.3, TLS_AES_256_GCM_SHA384, `Verification: OK`, verified peername `dcv.kwesidavis.com` |
+| Original DCV config | `/etc/dcv/dcv.conf` untouched by this task, root:root mode 0644 |
+
+**Integrity nuance:** The installer and integration files were downloaded from
+immutable pinned GitHub refs and verified against their exact upstream Git blob
+SHA-1 object identities before execution. The AWS release binary was downloaded
+by the version-pinned official AWS installer via HTTPS, and its installed SHA-256
+was recorded above. An independently published SHA-256 signature/attestation
+of that release binary was **not** separately verified; do not claim otherwise.
+
+**Compatibility findings:** The original DCV installation had **no custom TLS
+file pair to back up**. The branch was updated with a guarded
+`enroll_default` path which only accepts missing certificate/key paths,
+installs a validated new generation, then restarts DCV. If startup fails, it
+removes its own links and retries the default self-signed certificate.
+The existing normal `activate()` hook remains strict and uses a single
+generation-pointer switch for subsequent renewals. Offline tests for the
+new first-install path and rollback passed before live application.
+
+**First export:** The ACM provider automatically exported the certificate into
+the privately owned staging directory. The first refresh hook was allowed
+to fail closed before enrollment, after which supervised
+`--enroll-default` succeeded. ACM later reported
+`RenewalEligibility=ELIGIBLE`. No private key contents were printed in
+SSM/CI or stored in the repository.
+
+### Rollback / Task 6 approval gate
+
+Do not run these operations without an explicit rollback authorization.
+To return to the pre-Task-5 default DCV TLS state:
+
+1. Preserve the exact current DCV symlink targets, `dcv.conf`, guest session
+   readiness and the root-owned hook before changing anything.
+2. Disable/stop the ACM provider service to prevent simultaneous writes.
+3. Verify that `/etc/dcv/dcv.pem` and `dcv.key` are the two **expected
+   Issue #43 symlinks** (not arbitrary regular files). Remove only those
+   exact symlinks and the expected active pointer; preserve the private
+   generations for forensic review until the default DCV restart succeeds.
+4. Restart `dcvserver`, validate that the default built-in certificate
+   returns, that `dcv describe-session console` is running and that the
+   local workstation account still works.
+5. Separately revoke the two Issue #43 inline policies and retire the
+   dedicated export role only after a deliberate decision not to use the
+   certificate. Keep the ACM certificate, validation CNAME, dedicated EIP
+   and DNS A record unchanged unless their separately approved retirement
+   is explicitly requested.
+6. Restore the ACMP service/certificate only via a supervised reversal with
+   fresh verification of certificate/key and console readiness.
+
+Do not manually print or paste any exported private key into the console,
+SSM command, CI logs or GitHub. Task 6 separately verifies browser login,
+stop/start, automatic restart reconciliation, TLS renewal/recovery and
+operator-facing CLI `connect`.
+
+---
 
 ## Objective, boundaries, and ownership
 
