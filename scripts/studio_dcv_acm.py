@@ -10,6 +10,7 @@ This script is an AWCP refresh_command, invoked through its exact sudoers rule.
 """
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import pwd
@@ -90,7 +91,8 @@ def restart_and_check():
         try:
             if command(["systemctl", "is-active", "dcvserver"]) == "active":
                 session = command(["dcv", "describe-session", "console", "--json"])
-                if '"status": "running"' in session or '"status":"running"' in session:
+                details = json.loads(session)
+                if isinstance(details, dict) and details.get("status") == "running":
                     return
         except subprocess.CalledProcessError:
             pass
