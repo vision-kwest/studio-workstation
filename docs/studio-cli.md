@@ -88,8 +88,10 @@ python3 studio workstation status --stack STACK --hostname dcv.kwesidavis.com
 ```
 
 This flag is **not in main** until the draft PR is separately approved and
-merged. The new EIP, Route 53 A record, exportable ACM certificate and AWCP
-delivery are **not deployed**. Normal IP-based DCV is unchanged.
+merged. The dedicated EIP, Route 53 A record, exportable ACM certificate and AWCP
+were installed for the approved CPU in Task 3–5 and verified by SSM.
+**Task 6 browser login and stop/start acceptance remain pending.**
+Normal IP-based CLI behavior is unchanged in main.
 
 Review the [Issue #43 simplified ACM/DCV runbook](issue43-acm-dcv.md).
 Neither a trusted certificate nor an Elastic IP closes public TCP 8443;
