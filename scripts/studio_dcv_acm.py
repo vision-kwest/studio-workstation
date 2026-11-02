@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Issue #43: activate one AWCP-exported certificate generation for Amazon DCV.
 
-This hook is OFFLINE-REVIEWED ONLY: it is not installed or executed on EC2.
-It requires a separately supervised enrollment that prepares exact two DCV
-symlinks pointing through the common versioned-generation pointer.
+The initial enrollment was validated on the Issue #43 CPU workstation. Future
+changes to this hook require offline tests and a separately approved rollout.
+It expects the two enrolled DCV links through one versioned-generation pointer.
 
 AWCP should write to /var/lib/studio/dcv-acm/ (NOT directly into /etc/dcv).
 This script is an AWCP refresh_command, invoked through its exact sudoers rule.
@@ -14,7 +14,10 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import secrets
+import stat
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +30,10 @@ STORE_NAME = "studio-tls-generations"
 ACTIVE_NAME = "studio-tls-current"
 LINKS = {"dcv.pem": f"{ACTIVE_NAME}/dcv.pem",
          "dcv.key": f"{ACTIVE_NAME}/dcv.key"}
+GEN_NAME = re.compile(r"^gen-(?:initial-)?[a-z0-9_-]{6,64}$")
+# A successful rotation retains exactly the active and preceding managed
+# generation; unrecognized or unexpectedly owned paths are left untouched.
+RETAIN_GENERATIONS = 2
 
 
 def command(argv):
@@ -60,6 +67,8 @@ def check_enrolled(dcv: Path):
     target = Path(os.readlink(active))
     if target.is_absolute() or len(target.parts) != 2 or target.parts[0] != STORE_NAME or target.parts[1] in (".", ".."):
         raise RuntimeError("Invalid active certificate generation")
+    if not GEN_NAME.fullmatch(target.name):
+        raise RuntimeError("Invalid active certificate generation name")
     return store, target
 
 
@@ -110,6 +119,100 @@ def switch(dcv: Path, new_target: str):
             tmp.unlink()
 
 
+def same_file_contents(first: Path, second: Path) -> bool:
+    """Compare complete PEM bytes without exposing private key material."""
+    try:
+        with first.open("rb") as a, second.open("rb") as b:
+            while True:
+                x, y = a.read(65536), b.read(65536)
+                if x != y:
+                    return False
+                if not x:
+                    return True
+    except (OSError, ValueError):
+        # Never call an unchanged refresh safe if the current pair is missing
+        # or unreadable: the next path must either rotate or fail closed.
+        return False
+
+
+def current_pair_matches(source: Path, dcv: Path) -> bool:
+    return all(
+        same_file_contents(source / staged, dcv / installed)
+        for staged, installed in (("fullchain.pem", "dcv.pem"),
+                                  ("privkey.pem", "dcv.key"))
+    )
+
+
+def validate_console_without_restart():
+    """Do not hide a failed DCV console just because certificates are unchanged."""
+    if command(["systemctl", "is-active", "dcvserver"]) != "active":
+        raise RuntimeError("DCV service is not active")
+    info = json.loads(command(["dcv", "describe-session", "console", "--json"]))
+    if not isinstance(info, dict) or info.get("id") != "console" or info.get("status") != "running":
+        raise RuntimeError("DCV console not ready")
+
+
+def prune_managed_generations(store: Path, active: str, previous: str,
+                              uid: int, gid: int) -> tuple[int, int]:
+    """Best-effort bounded retention, never follow links or delete unknowns.
+
+    Operates relative to O_NOFOLLOW directory descriptors, validating exact
+    two-file contents, owner and restrictive modes. Preserve active and the
+    immediate rollback generation even when a third generation exists.
+    Unexpected entries are skipped for manual inspection, not force-deleted.
+    No cleanup is attempted before a successful DCV restart.
+    """
+    removed = skipped = 0
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    with os.scandir(store) as iterator:
+        names = [entry.name for entry in iterator]
+    store_fd = os.open(store, flags)
+    try:
+        root = os.fstat(store_fd)
+        if not stat.S_ISDIR(root.st_mode) or root.st_uid != uid or root.st_gid != gid or stat.S_IMODE(root.st_mode) != 0o700:
+            raise RuntimeError("DCV generation store has unexpected owner or permissions")
+        preserved = {active, previous}
+        for name in names:
+            if name in preserved:
+                continue
+            if not GEN_NAME.fullmatch(name):
+                skipped += 1
+                continue
+            try:
+                gen_fd = os.open(name, flags, dir_fd=store_fd)
+            except OSError:
+                skipped += 1
+                continue
+            try:
+                gen_stat = os.fstat(gen_fd)
+                if (gen_stat.st_uid != uid or gen_stat.st_gid != gid
+                        or stat.S_IMODE(gen_stat.st_mode) != 0o700
+                        or set(os.listdir(gen_fd)) != set(LINKS)):
+                    skipped += 1
+                    continue
+                valid = True
+                for filename in LINKS:
+                    s = os.stat(filename, dir_fd=gen_fd, follow_symlinks=False)
+                    if (not stat.S_ISREG(s.st_mode) or s.st_uid != uid
+                            or s.st_gid != gid or stat.S_IMODE(s.st_mode) != 0o600
+                            or s.st_nlink != 1):
+                        valid = False
+                        break
+                if not valid:
+                    skipped += 1
+                    continue
+                # unlink removes entries themselves, never follows symlinks.
+                for filename in LINKS:
+                    os.unlink(filename, dir_fd=gen_fd)
+            finally:
+                os.close(gen_fd)
+            os.rmdir(name, dir_fd=store_fd)
+            removed += 1
+    finally:
+        os.close(store_fd)
+    return removed, skipped
+
+
 def activate(source: Path = SOURCE, dcv: Path = DCV):
     if os.geteuid() != 0:
         raise PermissionError("DCV TLS activation requires root via exact AWCP refresh-command sudoers")
@@ -119,6 +222,9 @@ def activate(source: Path = SOURCE, dcv: Path = DCV):
     assert_local_file(key)
     verify_material(cert, key)  # Before any DCV file or pointer changes.
     dcvu = pwd.getpwnam("dcv")
+    if current_pair_matches(source, dcv):
+        validate_console_without_restart()
+        return "Certificate unchanged; DCV console ready (no restart or new generation)"
     # The store was created by supervised enrollment, not by the AWS agent.
     generation = Path(tempfile.mkdtemp(prefix="gen-", dir=store))
     new_target = f"{STORE_NAME}/{generation.name}"
@@ -141,6 +247,16 @@ def activate(source: Path = SOURCE, dcv: Path = DCV):
             # if rollback/restart also fails.
             restart_and_check()
         raise
+    # Cleanup may not interrupt an already-working console or roll back the
+    # newly activated certificate; log an operator-actionable warning instead.
+    try:
+        removed, skipped = prune_managed_generations(
+            store, generation.name, previous.name, dcvu.pw_uid, dcvu.pw_gid)
+        if skipped:
+            logging.warning("DCV TLS retention left %d unfamiliar or unsafe entries for review", skipped)
+        logging.info("DCV TLS retention pruned %d old managed generations", removed)
+    except (OSError, RuntimeError) as exc:
+        logging.warning("DCV TLS retention incomplete (active cert unchanged): %s", exc)
     return "Activated a verified DCV certificate generation; console ready"
 
 
