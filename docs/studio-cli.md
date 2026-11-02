@@ -76,49 +76,18 @@ python3 studio workstation connect --stack studio-workstation-cpu-review
 
 DCV login uses local Linux username `workstation`, not AWS IAM credentials. The browser may show an untrusted/self-signed TLS warning; verify the certificate fingerprint through an administrative channel or provision trusted TLS.
 
-### Optional trusted hostname — Issue #43 (CPU deployed; CLI feature in draft)
+### Trusted DCV hostname — Issue #43 (draft PR #67)
 
-For the **approved CPU instance only**, Route 53 permanently resolves
-`dcv.kwesidavis.com` to retained Elastic IP `54.159.180.104`. The
-browser login was confirmed without certificate warnings, and the AWS
-certificate agent plus RES/DCV console recovered through stop/start.
-The CPU is currently **stopped**. It must be running and DCV ready before
-the URL is usable:
+`dcv.kwesidavis.com` resolves through the existing Route 53 A record to retained EIP `54.159.180.104`. The certificate is ACM-managed and delivered to DCV by AWCP. The user previously confirmed warning-free browser login on both the original CPU and a supervised GPU handoff. The CPU was stopped at the final live audit.
 
-```
-https://dcv.kwesidavis.com:8443
-```
-
-Use the existing Linux `workstation` account. This stable hostname **does not
-automatically follow new CPU/GPU instances**; a GPU needs separately approved
-EIP handoff, trusted certificate installation and IAM integration.
-
-Draft PR #67 adds opt-in `--hostname dcv.kwesidavis.com` for `connect`
-and `status` (not yet in `main`). When a stack is **running**, these
-commands compare public DNS A answers against the stack's actual EC2 IPv4
-and verify the certificate chain and hostname with the system CA store.
-The TLS client connects to the **verified IP** with SNI set to the hostname
-rather than resolving the hostname a second time:
+On **approved CPU and scoped GPU** stacks, ordinary `connect` now checks the expected EIP ownership tag, DNS, and system-CA-verified TLS and prints `https://dcv.kwesidavis.com:8443`; `status --hostname dcv.kwesidavis.com` also verifies TLS while running. A stopped host, DNS mismatch, untrusted certificate, or foreign EIP owner fails closed.
 
 ```bash
-python3 studio workstation connect --stack studio-workstation-cpu-v013 --hostname dcv.kwesidavis.com
+python3 studio workstation connect --stack studio-workstation-cpu-v013
 python3 studio workstation status --stack studio-workstation-cpu-v013 --hostname dcv.kwesidavis.com
 ```
 
-The feature **fails closed on a stopped instance** and rejects a mismatch
-or untrusted certificate. Regular `connect`, `status`, `stop`, `start`
-and existing GPU safeguards are unchanged. The hostname verifier was exercised against **real DNS/TLS**, and
-AWS's CloudFormation/EC2 APIs independently confirmed the correct
-stack-to-instance binding. During the final supervised CPU acceptance,
-the actual unmocked draft `status` and `connect --hostname` commands
-were attempted from the guest. Both failed **before TLS verification**
-because its intentionally restricted `StudioWorkstationSSMRole` has no
-`cloudformation:DescribeStackResource` permission. The standalone
-hostname verifier did pass, and earlier output-path regression tests
-passed with mocked stack data. To finish release acceptance, run the
-complete commands in an authorized CloudShell/administrator environment;
-**do not grant broad CloudFormation rights to the guest solely to test
-the CLI**. Do not call full CLI acceptance passed until that happens.
+Run management commands from an **authorized CloudShell/administrator checkout**. The restricted guest EC2 role intentionally lacks CloudFormation discovery privileges. The end-to-end self-service CLI remains **offline-tested only until Task 6's supervised live acceptance**. Do not grant guest-role CloudFormation rights to work around this limit.
 
 ### CPU/GPU shared hostname — Task 5 draft CLI behavior
 
