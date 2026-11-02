@@ -21,6 +21,10 @@
   live CPU HTTPS, browser-login and post-Task-7 no-restart/retention
   acceptance, pinned AWCP, scoped IAM, stopped state, verified rollback
   backup and still-blocked privileged CLI/GPU-profile gates.
+- [CPU/GPU shared hostname and EIP handoff](issue43-shared-cpu-gpu-handoff.md):
+  new offline-only, fail-closed IP handoff plan, per-instance certificate
+  access proposal, PR #65 GPU expiration safeguards and supervised return.
+  Live EIP reassociation and GPU certificate setup remain unapproved.
 - Original Lambda/EventBridge/DDNS proposal was retired in draft PR #67;
   Issue #43 retains dated audit and historical context.
 
