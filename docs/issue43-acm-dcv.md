@@ -1,9 +1,125 @@
-# Issue #43 — Stable IP + ACM trusted DCV (Tasks 3–6 accepted; Task 7 offline audit)
+# Issue #43 — Stable IP + ACM trusted DCV (CPU live acceptance completed; draft PR unmerged)
 
-**Status:** Draft PR #67 remains **unmerged**. Tasks 3–6 were accepted live on the CPU: static EIP/DNS, exportable ACM, session-scoped IAM, AWCP v3.1.2, successful browser login and two stop/start TLS/persistence checks. The CPU is **stopped**. Task 7's no-op refresh, retention and CLI regression refinements are **offline-only on this feature branch**, not installed on that EC2 instance. No GPU hostname handoff is authorized.
+**Status:** Draft PR #67 remains **unmerged**. Tasks 3–6 were accepted live on the CPU: static EIP/DNS, exportable ACM, session-scoped IAM, AWCP v3.1.2, successful browser login and two stop/start TLS/persistence checks. The CPU is **stopped**. Task 7's revised no-op/retention hook **has now been deployed and accepted in a separately approved final CPU test**, with a protected executable rollback copy. Full Studio CLI execution from a privileged management client and GPU-profile hostname integration remain open. No GPU hostname handoff is authorized.
 This plan supersedes the bespoke Lambda/EventBridge/DynamoDB/DDNS/Certbot
 architecture removed from the feature branch. The approved DNS delegation
 was created before this PR.
+
+## Post-Task-7 final controlled CPU acceptance (2026-11-02 UTC; completed)
+
+**Authorization boundary:** User explicitly approved one supervised final test
+of draft PR #67 on stopped CPU `i-0bbfbdc878d3a2320` and ordered it
+stopped afterward. No GPU, additional EC2, IAM, DNS, EIP, ACM, RES 2026.06,
+Image Builder or unrelated AWS resources were changed. PR #67 remains draft.
+
+### Immutable source and executable rollback
+
+- Verified PR head `8da4ab5104629cb5c07b82320c2a089c31f68616`;
+  both Issue43 ACM/DCV and existing Studio CLI CI had passed at that head.
+- Fetched only the hook file from that exact GitHub commit and compared its
+  Git blob object hash with `383042c98986917167e0359709dac6b2b2d0d770`;
+  compilation succeeded before installation.
+- Original installed hook SHA-256:
+  `894e816ff72fc24ce37b5d6a42f37f18d166590bdb5971c0d4fff862e1794990`.
+  Protected rollback copy at
+  `/var/lib/studio/issue43-final-acceptance/studio-dcv-acm-activate.before`,
+  root-owned, inside a directory with mode 0700. Its exact SHA-256 and
+  Python compilation were rechecked before the final stop.
+- New installed hook:
+  `/usr/local/sbin/studio-dcv-acm-activate`, `root:root`, mode 0755;
+  SHA-256:
+  `2df5630a31a72ce9fd5a6dab0564fe3db512f6a1fe5468b1f3a0a32f146ea1b3`.
+  An installer failure would have restored the previous executable
+  automatically. No rollback was needed or executed during acceptance.
+  The downloaded candidate was removed after successful testing.
+- **Guarded rollback procedure if separately approved:** Verify exact
+  executable path and protected old-hash first, then copy the preserved
+  original hook with `install -T -o root -g root -m 0755` to
+  `/usr/local/sbin/studio-dcv-acm-activate`. Verify hash, DCV console
+  and ACM service again. This restores the script, not deleted historical
+  generation directories. A future rollback authorization must also decide
+  whether to temporarily disable AWCP refresh during replacement.
+
+### Actual DCV no-op and retention evidence
+
+1. Before direct invocation, `dcvserver` MainPID `1214`, active
+   generation `gen-0v6mye7y` and **four** stored generations.
+2. Executed the revised root-owned hook using already-staged ACM PEM files.
+   Hook response: **`Certificate unchanged; DCV console ready
+   (no restart or new generation)`**. After invocation, MainPID remained
+   **1214** and active generation remained `gen-0v6mye7y`.
+   Retention went from **4 → 2** managed generations, preserving
+   `gen-0v6mye7y` (active) and `gen-9uzn3i9q` (rollback).
+3. Restarted **only the AWCP ACM service** to test the real scheduled
+   provider hook execution context. Its log on 2026-11-02 at
+   `06:25:50Z` reported `Refresh command succeeded` and
+   `Certificate refresh successful`. MainPID remained **1214**,
+   active pointer unchanged, generation count still **two**.
+4. DCV 2026.0 console remained `running`, owner `workstation`;
+   GDM and AWCP services active; PEM targets remain `dcv:dcv 0600`.
+   TLS 1.3 handshake on `54.159.180.104:8443` with SNI
+   `dcv.kwesidavis.com` reported `Verification: OK` and
+   verified peername. No private-key contents were printed or exported.
+5. Final guest validation checked both original and revised hook hashes,
+   rollback compilation, exactly two protected generations, correct
+   file permissions, healthy DCV console and TLS identity. The CPU was
+   then **stopped**, and EC2 `DescribeInstances` confirmed `stopped`.
+
+**Limit:** The no-op/retention path was live tested. It does not prove
+future behavior against a genuinely ACM-**reissued** certificate; that
+requires observing actual ACM managed renewal. The changed-certificate
+activation and failure-rollback branches are covered by offline tests,
+not by issuance of a new certificate in this acceptance.
+
+### Full unmocked Studio CLI execution — honest outcome
+
+The draft `scripts/studio_workstation_cli.py` was downloaded from the
+pinned commit and its Git blob hash
+`3694b6841c91e987634112f46052c037a9c56731` verified.
+Its real `verified_dcv_hostname('dcv.kwesidavis.com','54.159.180.104')`
+function **passed** live public DNS, pinned-IP, system CA chain, SNI and
+hostname verification, returning
+`https://dcv.kwesidavis.com:8443`.
+
+The **actual unmocked** `status --stack studio-workstation-cpu-v013
+--hostname dcv.kwesidavis.com` and matching `connect` commands were also
+run on the guest. Both could not complete: the guest's deliberately
+limited `StudioWorkstationSSMRole` lacks
+`cloudformation:DescribeStackResource` on the existing CPU stack.
+The commands correctly failed at the AWS stack lookup **before** TLS
+evaluation. This is an **IAM test-environment limitation, not a passing
+full CLI acceptance**. No additional IAM rights were granted.
+Independently, read-only CloudFormation/EC2 AWS calls with an already
+authorized management identity confirmed the real stack-to-instance,
+public IP and state binding. Finish the *whole CLI workflow* from
+CloudShell or another approved AWS admin client with existing credentials;
+no change to workstation IAM is recommended solely to support CLI testing.
+
+### Final state and outstanding merge decision
+
+The final read-only account audit confirmed:
+`i-0bbfbdc878d3a2320` **stopped**;
+EIP `eipalloc-0879a34aa1a1298dd` still associated through
+`eipassoc-0e09a0e9afddda6db`, address `54.159.180.104`;
+Route 53 authoritative `A` answer `NOERROR` with that address;
+ACM `ISSUED`, `Export=ENABLED`, `RenewalEligibility=ELIGIBLE`;
+and CPU stack `CREATE_COMPLETE`.
+
+Two deliberate remaining decisions before merging:
+1. Verify full unmocked Studio CLI commands using an authorized
+   management environment; the instance role is not intended to manage
+   its own CloudFormation stack.
+2. Decide whether PR #67 should include **GPU hostname handoff**. The
+   CPU is the sole owner today. GPU support is technically compatible,
+   but the actual EIP handoff, per-GPU AWCP installation, scoped certificate
+   access and PR #65 safeguards have **not** been implemented or tested,
+   and require separate approval. The user previously preferred both
+   CPU and GPU profiles to ultimately share this hostname one at a time.
+
+PR #67 stays **draft and unmerged**. This separately approved CPU test
+did not authorize either of the above changes.
+
+---
 
 ## Task 7 — offline final adoption, security and release audit (2026-11-02 UTC)
 
