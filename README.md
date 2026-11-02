@@ -63,14 +63,19 @@ The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`
 
 After provisioning, set a unique local `workstation` password interactively via SSM (`sudo passwd workstation`); DCV uses **Linux system credentials**, not AWS console credentials. Login through the DCV URL printed by `connect`.
 
-## Optional trusted DCV TLS / dynamic DNS — Issue #43 (NOT DEPLOYED)
+## Optional trusted DCV TLS — Issue #43 (DRAFT; not deployed)
 
-A feature-branch implementation proposes Let's Encrypt DNS-01 via delegated
-Route 53 subdomain `dcv.kwesidavis.com`, lifecycle-driven DNS for one
-approved EC2 instance, and opt-in validated hostname in `connect`/`status`.
-**No certificate, Lambda, IAM change, DNS A record or on-host renewal
-component has been deployed.** The working IP-based connection still applies.
-See [Issue #43 design and deployment gates](docs/issue43-letsencrypt-dcv.md).
+The simplified design uses a dedicated Elastic IP, a single Route 53 A record,
+one exportable AWS ACM public certificate, and AWS Workload Credentials Provider
+(v3.1.2) to refresh trusted TLS on the workstation. A minimal, offline-tested
+DCV activation hook validates and switches a versioned certificate/key pair.
+**No Elastic IP, A record, ACM certificate, IAM change, or agent installation
+has been authorized or deployed.** The working IP-based connection and
+self-signed certificate remain unchanged.
+
+See [Issue #43 simplified ACM/DCV runbook](docs/issue43-acm-dcv.md).
+Draft [PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
+is deliberately unmerged. The former Lambda/DDNS/Certbot proposal is retired.
 
 ## Security and operating costs
 
