@@ -1,6 +1,6 @@
-# Issue #43 — Simple stable-IP + ACM trusted DCV (Task 2 / OFFLINE)
+# Issue #43 — Simple stable-IP + ACM trusted DCV (Tasks 3–4 deployed; Task 5 pending)
 
-**Status: Draft PR #67. Nothing in this file has been deployed.**
+**Status:** Draft PR #67 remains unmerged. Task 3's approved EIP/A record and Task 4's approved ACM certificate/DNS validation CNAME are live. The AWCP agent, IAM configuration, DCV certificate activation hook and CLI changes in this branch are NOT deployed.
 This plan supersedes the bespoke Lambda/EventBridge/DynamoDB/DDNS/Certbot
 architecture removed from the feature branch. The approved DNS delegation
 was created before this PR.
@@ -8,8 +8,9 @@ was created before this PR.
 ## Objective, boundaries, and ownership
 
 - Hostname: `dcv.kwesidavis.com:8443`.
-- Route 53 public hosted zone `Z02607163QPWX22FZ2Q9M` already exists with
-  NS/SOA only. Bluehost remains authoritative for `kwesidavis.com`.
+- Route 53 public hosted zone `Z02607163QPWX22FZ2Q9M` now contains the
+  delegated NS/SOA, the approved A record and ACM validation CNAME. Bluehost
+  remains authoritative for `kwesidavis.com`.
 - ONE newly allocated, dedicated Elastic IP is associated with ONE explicitly
   approved workstation/ENI. Do not repurpose the two RES NAT Gateway EIPs.
 - Route 53 apex A record points to that EIP once. No dynamic DNS process.
@@ -169,6 +170,92 @@ Do **not** release or disassociate this EIP without first removing or
 reassigning the corresponding DNS record, and never touch the two RES NAT
 gateway EIPs. Reassociation with another CPU/GPU machine is an explicit
 future handoff operation, not automatic.
+
+## Task 4 — approved ACM exportable certificate and DNS validation (completed 2026-11-02 UTC)
+
+The owner approved one $7 public exportable ACM certificate issuance and only
+its associated DNS validation CNAME. The certificate was requested with
+`ValidationMethod=DNS`, `KeyAlgorithm=RSA_2048`, and
+`Options.Export=ENABLED`. ACM status is **ISSUED**, and Route 53 change is
+**INSYNC**. The validated domain is the exact FQDN only, no wildcard/SAN.
+
+| Resource | Independently verified |
+| --- | --- |
+| Certificate ARN | `arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243` |
+| Account / region | `401233741942` / `us-east-1` |
+| Name | `dcv.kwesidavis.com` |
+| Type / key | `AMAZON_ISSUED` / `RSA-2048` |
+| Exportability | `Options.Export=ENABLED` |
+| ACM status | **ISSUED** |
+| ACM DNS validation | **SUCCESS** |
+| IssuedAt | `2026-11-02T03:04:21.949000Z` |
+| NotAfter | `2027-05-18T23:59:59Z` |
+| Hosted zone | `Z02607163QPWX22FZ2Q9M` |
+| Validation DNS change | `/change/C062287530VSNSWTJKAXZ` — **INSYNC** |
+| Validation CNAME name | `_20c57ecf24474ce9d94e7d4c3dcf91fb.dcv.kwesidavis.com.` |
+| Validation CNAME target | `_4e04c3f88921dbe651941c99854d906f.wzccmgtwzk.acm-validations.aws.` |
+| Validation DNS TTL | `300` seconds |
+| RenewalEligibility before first export | **INELIGIBLE** (expected) |
+| Certificate exported/installed | **No — Task 5 gate** |
+| Workstation EC2 state | **stopped — unchanged** |
+
+A Route 53 authoritative DNS test returned `NOERROR` with the exact
+ACM-supplied CNAME. The existing `dcv.kwesidavis.com` A record still points
+to EIP `54.159.180.104`; parent delegation NS and SOA were unchanged.
+Do **not** remove the CNAME after issuance; ACM needs it for managed renewal.
+
+### Costs, first export, and renewal
+
+- ACM charges **$7 for this exact FQDN upon issuance** and **$7 again
+  on each subsequent certificate renewal**. Charge appears on AWS billing,
+  not necessarily immediately in cost explorer.
+- Public certificate validity is 198 days, and ACM attempts renewal 45 days
+  before expiry **once renewal eligibility requirements are satisfied**.
+- Renewal eligibility currently reports `INELIGIBLE` because the newly
+  issued certificate has **not yet been exported or attached**. An initial
+  successful export in separately approved **Task 5** should change
+  eligibility to `ELIGIBLE`; recheck via `DescribeCertificate` and do
+  not describe auto-renewal as working before this is verified.
+- AWCP v3.1.2 will later retrieve renewed material on the running guest; the
+  actual agent setup, permissions, certificate export, private-key handling
+  and DCV deployment remain **unperformed**. No private key was requested
+  or exposed in this task.
+
+### Exact read-only verification commands
+
+```bash
+aws acm describe-certificate --region us-east-1 \
+  --certificate-arn arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243 \
+  --query 'Certificate.{Arn:CertificateArn,Name:DomainName,Status:Status,Export:Options.Export,Renewal:RenewalEligibility,IssuedAt:IssuedAt,NotAfter:NotAfter,Validation:DomainValidationOptions}' \
+  --no-cli-pager
+aws route53 get-change --id C062287530VSNSWTJKAXZ --no-cli-pager
+aws route53 list-resource-record-sets --hosted-zone-id Z02607163QPWX22FZ2Q9M --no-cli-pager
+aws ec2 describe-instances --region us-east-1 \
+  --instance-ids i-0bbfbdc878d3a2320 \
+  --query 'Reservations[].Instances[].{Instance:InstanceId,State:State.Name}' --no-cli-pager
+```
+
+### Guarded rollback / retirement procedure (NOT EXECUTED)
+
+1. Explicitly authorize certificate retirement. Check exact ARN/domain,
+   whether the certificate was exported or installed, and any current
+   consuming services. Do not delete an in-use certificate.
+2. If certificate has been deployed, switch the DCV service to a safely
+   validated alternate certificate **before** ACM deletion and verify
+   login/recovery. Revoke any dedicated export permissions only after
+   ensuring the replacement no longer depends on them.
+3. Call `acm delete-certificate` **only** for the exact ARN after all
+   dependencies are removed. This does not reverse the $7 issuance fee.
+4. If there is no other consumer requiring DNS validation, delete **only**
+   the exact CNAME above, with exact name/type/TTL/value, and verify
+   `INSYNC`; preserve the EIP A record and NS/SOA records. Removing
+   validation DNS before retirement would break future managed renewal.
+5. Confirm the certificate and CNAME are absent and no unrelated ACM/DNS
+   resources were touched. EIP retirement is a distinct Task 3 process.
+
+This rollback was documented, **not executed**. Task 5 requires a
+separate approval for IAM permissions, on-host AWCP installation,
+first certificate export, key storage and controlled DCV testing.
 
 ## AWS steps requiring separate approvals
 
