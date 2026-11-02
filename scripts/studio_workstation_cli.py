@@ -13,6 +13,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,8 +36,8 @@ GPU_KEYS = {
     "virtual-desktop.tar.gz": GPU_APP_PREFIX + "/virtual-desktop.tar.gz",
 }
 
-# Task 3: IAM role and exact scope verified; no EC2 launch performed.
-# Only this one acceptance stack/token may reach the supervised create path.
+# The PR #65 GPU acceptance launcher is limited to this exact stack/token.
+# Automatic TLS/hostname orchestration never overrides its expiration guard.
 GPU_ACCEPTANCE_LIVE_ENABLED = True
 GPU_ACCEPTANCE_STACK = "studio-gpu-cli-accept65"
 GPU_ACCEPTANCE_TOKEN = "pr65-b23c8e5fdf67b683cd35"
@@ -144,6 +145,112 @@ def gpu_ready(stack, region):
         if result["Status"] in ("Failed", "Cancelled", "TimedOut"):
             raise ValueError("GPU readiness failed: " + result.get("StandardErrorContent", "")[-1200:])
     raise ValueError("GPU readiness timed out; inspect SSM and RES bootstrap logs")
+
+
+def wait_gpu_bootstrap(stack, region, *, attempts=12, sleep=time.sleep):
+    """Wait through RES reboots/SSM reconnects without bypassing its readiness gate."""
+    for attempt in range(attempts):
+        try:
+            gpu_ready(stack, region)
+            return
+        except subprocess.CalledProcessError as exc:
+            # SSM can disconnect while RES reboots. Never retry an IAM denial.
+            failure = (exc.stderr or "") + " " + str(exc)
+            if not any(message in failure for message in
+                       ("TargetNotConnected", "InvalidInstanceId",
+                        "InvalidInstanceID.NotFound", "InvocationDoesNotExist")):
+                raise
+        except ValueError as exc:
+            if not any(message in str(exc) for message in
+                       ("GPU readiness failed", "GPU readiness timed out")):
+                raise
+        if attempt + 1 < attempts:
+            sleep(15)
+    raise RuntimeError("GPU RES/DCV bootstrap did not become ready; "
+                       "PR #65 instance and volume expiry schedules remain armed")
+
+
+def trusted_owner(stack, instance, *, manager=aws):
+    """Only the already-approved CPU/GPU stack may claim the shared EIP."""
+    from runtime import issue43_hostname_handoff as handoff
+    expected = {DEFAULT_STACK: handoff.CPU_ID,
+                GPU_ACCEPTANCE_STACK: instance}
+    if stack not in expected or instance != expected[stack]:
+        raise ValueError("Shared hostname is restricted to the approved CPU/GPU stack")
+    if handoff._stack_iid(manager, stack) != instance:
+        raise ValueError("CloudFormation workstation identity changed")
+    address = handoff._eip(manager)
+    if (address.get("InstanceId") != instance or
+            handoff._tags(address).get("StudioDcvInstanceId") != instance):
+        raise ValueError("Shared EIP is not owned by this workstation")
+    handoff._dns(manager)
+    return handoff.HOST, handoff.EIP_IP
+
+
+def trusted_url(stack, instance, *, manager=aws, check_tls=verified_dcv_hostname):
+    host, ip = trusted_owner(stack, instance, manager=manager)
+    return check_tls(host, ip)
+
+
+def complete_gpu_setup(stack, region, instance, *, manager=aws,
+                       wait=wait_gpu_bootstrap):
+    """Run existing ACM + EIP components AFTER PR65 guarded launch/start."""
+    if stack != GPU_ACCEPTANCE_STACK or region != DEFAULT_REGION:
+        raise ValueError("GPU trusted setup limited to approved acceptance scope")
+    wait(stack, region)
+    from runtime import issue43_gpu_acm_setup as acm
+    from runtime import issue43_hostname_handoff as handoff
+    result = acm.prepare_gpu(manager)
+    if result["instance_id"] != instance:
+        raise RuntimeError("GPU instance changed during ACM enrollment")
+    transfer = handoff.handoff_gpu(manager, verified_dcv_hostname, allow_live=True)
+    if transfer["owner"] != instance:
+        raise RuntimeError("GPU EIP handoff owner mismatch")
+    return trusted_url(stack, instance, manager=manager)
+
+
+def complete_gpu_stop(stack, instance, *, manager=aws):
+    """After EC2 confirms stopped, restore CPU EIP and revoke GPU-only IAM."""
+    from runtime import issue43_gpu_acm_setup as acm
+    from runtime import issue43_hostname_handoff as handoff
+    if stack != GPU_ACCEPTANCE_STACK:
+        raise ValueError("Not an approved GPU acceptance stack")
+    address = handoff._eip(manager)
+    owner = address.get("InstanceId")
+    tag_owner = handoff._tags(address).get("StudioDcvInstanceId")
+    if owner == instance or (owner is None and tag_owner == instance):
+        result = handoff.restore_cpu(manager, instance, allow_live=True)
+        if result["owner"] != handoff.CPU_ID:
+            raise RuntimeError("CPU EIP return not verified")
+    elif owner != handoff.CPU_ID or tag_owner != handoff.CPU_ID:
+        raise ValueError("Unexpected EIP owner; refusing GPU cleanup")
+    return acm.revoke_gpu(manager, instance)
+
+
+def interactive_ssm(instance, region, *, attempts=8, sleep=time.sleep,
+                    execute=subprocess.run):
+    """Retry only transient SSM TargetNotConnected; preserve interactive input."""
+    cmd = ["aws", "ssm", "start-session", "--target", instance,
+           "--region", region, "--no-cli-pager"]
+    for attempt in range(attempts):
+        completed = execute(cmd, text=True, stderr=subprocess.PIPE, check=False)
+        if completed.returncode == 0:
+            return
+        error = completed.stderr or ""
+        if "TargetNotConnected" not in error or attempt + 1 == attempts:
+            raise RuntimeError("SSM interactive session failed: " + error.strip())
+        sleep(8)
+
+
+def wait_cpu_https(stack, instance, *, attempts=30, sleep=time.sleep):
+    """The approved CPU already has AWCP; wait for trusted DCV after EC2 start."""
+    for attempt in range(attempts):
+        try:
+            return trusted_url(stack, instance)
+        except (OSError, ValueError):
+            if attempt + 1 == attempts:
+                raise
+            sleep(10)
 
 
 def command(args):
@@ -269,7 +376,12 @@ def command(args):
                 # Runtime IAM and schedule-group verification still fail closed.
                 outcome = pr65_gpu_create.create_guarded(
                     aws, args.region, args.stack, args.cleanup_token, template, parameters)
-                print(json.dumps(outcome, indent=2))
+                print(json.dumps(outcome, indent=2), flush=True)
+                if not outcome.get("guard", {}).get("guard_armed"):
+                    raise RuntimeError("PR #65 expiration safeguard not confirmed; no trusted handoff")
+                print("GPU guard armed; waiting for RES/DCV and trusted HTTPS...", flush=True)
+                url = complete_gpu_setup(args.stack, args.region, outcome["guard"]["instance_id"])
+                print("TRUSTED DCV:", url)
                 return
             run(deploy, capture=False)
             print(json.dumps(describe(args.stack, args.region), indent=2))
@@ -282,7 +394,10 @@ def command(args):
         if args.hostname:
             if state["state"] != "running":
                 raise ValueError("Cannot verify trusted TLS while workstation is stopped")
-            state["trusted_dcv_url"] = verified_dcv_hostname(args.hostname, state["public_ip"])
+            if args.stack in (DEFAULT_STACK, GPU_ACCEPTANCE_STACK):
+                state["trusted_dcv_url"] = trusted_url(args.stack, state["instance"])
+            else:
+                state["trusted_dcv_url"] = verified_dcv_hostname(args.hostname, state["public_ip"])
         print(json.dumps(state, indent=2))
         return
     state = describe(args.stack, args.region)
@@ -291,25 +406,45 @@ def command(args):
         if state["state"] != "running":
             raise ValueError("Instance is not running")
         if args.ssm:
-            run(["aws", "ssm", "start-session", "--target", iid, "--region", args.region], capture=False)
+            interactive_ssm(iid, args.region)
+        elif args.stack in (DEFAULT_STACK, GPU_ACCEPTANCE_STACK):
+            print(trusted_url(args.stack, iid))
+            print("Trusted HTTPS verified; log in with the local workstation account.")
+        elif args.hostname:
+            print(verified_dcv_hostname(args.hostname, state["public_ip"]))
+            print("DNS and certificate validated; log in with the local workstation account.")
         else:
-            if args.hostname:
-                print(verified_dcv_hostname(args.hostname, state["public_ip"]))
-                print("DNS and certificate validated; log in with the local workstation account.")
-            else:
-                print(state["dcv_url"] or "No public IPv4 address. Use --ssm for administrative access.")
-                print("Use the local workstation account; browser certificate trust is not yet configured.")
+            print(state["dcv_url"] or "No public IPv4 address. Use --ssm for administrative access.")
+            print("Use the local workstation account; browser certificate trust is not yet configured.")
         return
     if args.action in ("start", "stop"):
         desired = "stopped" if args.action == "start" else "running"
         if state["state"] != desired:
             raise ValueError(f"Expected {desired} before {args.action}, got {state['state']}")
+        if args.action == "start" and args.stack == DEFAULT_STACK:
+            trusted_owner(args.stack, iid)  # Never start CPU against GPU EIP.
+        if args.action == "stop" and args.stack == GPU_ACCEPTANCE_STACK:
+            from runtime import issue43_hostname_handoff as handoff
+            address = handoff._eip(aws)
+            owner = address.get("InstanceId")
+            tagged = handoff._tags(address).get("StudioDcvInstanceId")
+            if not ((owner == iid and tagged == iid) or
+                    (owner == handoff.CPU_ID and tagged == handoff.CPU_ID) or
+                    (owner is None and tagged == iid)):
+                raise ValueError("Unexpected EIP ownership; refusing GPU stop orchestration")
         run(["aws", "ec2", f"{args.action}-instances", "--instance-ids", iid,
              "--region", args.region], capture=False)
         waiter = "instance-status-ok" if args.action == "start" else "instance-stopped"
         run(["aws", "ec2", "wait", waiter, "--instance-ids", iid, "--region", args.region], capture=False)
+        if args.stack == GPU_ACCEPTANCE_STACK:
+            if args.action == "start":
+                print("GPU restarted; checking RES/ACM/EIP before advertising HTTPS...", flush=True)
+                print("TRUSTED DCV:", complete_gpu_setup(args.stack, args.region, iid))
+            else:
+                print(json.dumps(complete_gpu_stop(args.stack, iid), indent=2))
+        elif args.stack == DEFAULT_STACK and args.action == "start":
+            print("TRUSTED DCV:", wait_cpu_https(args.stack, iid))
         print(json.dumps(describe(args.stack, args.region), indent=2))
-        print("Check SSM and DCV separately; EC2 health alone does not prove desktop readiness.")
         return
     if args.action == "destroy":
         if not args.delete_stack:
