@@ -13,6 +13,7 @@ on:
       - 'runtime/issue43_gpu_acm_setup.py'
       - 'runtime/issue43_destroy.py'
       - 'tests/test_issue43_destroy.py'
+      - 'tests/test_issue43_cpu_destroy.py'
       - 'tests/test_issue43_gpu_acm_setup.py'
       - 'tests/test_issue43_cli_lifecycle.py'
       - 'infra/issue43-awcp.review-only.toml'
@@ -39,6 +40,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_issue43_gpu_acm_setup.py' -v
           python3 -m unittest discover -s tests -p 'test_issue43_cli_lifecycle.py' -v
           python3 -m unittest discover -s tests -p 'test_issue43_destroy.py' -v
+          python3 -m unittest discover -s tests -p 'test_issue43_cpu_destroy.py' -v
           python3 -m unittest discover -s tests -p 'test_pr65_one_shot_guard.py' -v
           python3 -m unittest discover -s tests -p 'test_pr65_gpu_create.py' -v
       - name: Preserve baseline Studio CLI regression suite
