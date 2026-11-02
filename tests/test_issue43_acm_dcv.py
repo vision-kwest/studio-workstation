@@ -155,6 +155,48 @@ class DcvAcmTests(unittest.TestCase):
                 tls.restart_and_check()
         self.assertEqual(sleep.call_count, 12)
 
+    def test_enroll_builtin_default_without_preexisting_files(self):
+        (self.dcv / "dcv.pem").unlink()
+        (self.dcv / "dcv.key").unlink()
+        (self.dcv / tls.ACTIVE_NAME).unlink()
+        import shutil
+        shutil.rmtree(self.store)
+        with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \\
+             mock.patch.object(tls.os, "fchown"), mock.patch.object(tls.os, "chown"), \\
+             mock.patch.object(tls, "verify_material"), \\
+             mock.patch.object(tls, "restart_and_check") as ready:
+            text = tls.enroll_default(self.src, self.dcv)
+        self.assertIn("First custom certificate installed", text)
+        ready.assert_called_once()
+        self.assertEqual((self.dcv / "dcv.pem").read_text(), "FULLCHAIN CERT\\n")
+        self.assertEqual((self.dcv / "dcv.key").read_text(), "PRIVATE KEY\\n")
+
+    def test_enroll_failure_restores_builtin_default(self):
+        (self.dcv / "dcv.pem").unlink()
+        (self.dcv / "dcv.key").unlink()
+        (self.dcv / tls.ACTIVE_NAME).unlink()
+        import shutil
+        shutil.rmtree(self.store)
+        with mock.patch.object(tls.os, "geteuid", return_value=0), self.perms(), \\
+             mock.patch.object(tls.os, "fchown"), mock.patch.object(tls.os, "chown"), \\
+             mock.patch.object(tls, "verify_material"), \\
+             mock.patch.object(tls, "restart_and_check",
+                               side_effect=[RuntimeError("failed new TLS"), None]) as ready:
+            with self.assertRaisesRegex(RuntimeError, "failed new TLS"):
+                tls.enroll_default(self.src, self.dcv)
+        self.assertEqual(ready.call_count, 2)
+        for name in ("dcv.pem", "dcv.key", tls.ACTIVE_NAME):
+            self.assertFalse((self.dcv / name).exists())
+            self.assertFalse((self.dcv / name).is_symlink())
+
+    def test_enroll_refuses_to_replace_existing_custom_certificate(self):
+        (self.dcv / "dcv.pem").unlink()
+        (self.dcv / "dcv.pem").write_text("existing")
+        with mock.patch.object(tls.os, "geteuid", return_value=0):
+            with self.assertRaisesRegex(RuntimeError, "preexisting"):
+                tls.enroll_default(self.src, self.dcv)
+        self.assertEqual((self.dcv / "dcv.pem").read_text(), "existing")
+
     def test_approved_config_stages_fullchain_without_chain_separate(self):
         root = Path(__file__).resolve().parents[1]
         cfg = (root / "infra/issue43-awcp.review-only.toml").read_text()
