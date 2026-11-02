@@ -419,6 +419,15 @@ def command(args):
                 state["trusted_dcv_url"] = verified_dcv_hostname(args.hostname, state["public_ip"])
         print(json.dumps(state, indent=2))
         return
+    if args.action == "destroy" and args.stack in (GPU_ACCEPTANCE_STACK, DEFAULT_STACK):
+        if not args.delete_stack:
+            raise ValueError("Refusing destruction: add --delete-stack")
+        if args.stack == DEFAULT_STACK:
+            raise ValueError("Refusing to destroy the original CPU anchor for the shared EIP; "
+                             "migrate the shared hostname first")
+        from runtime import issue43_destroy
+        print(json.dumps(issue43_destroy.destroy_gpu(aws, run, args.stack, args.region), indent=2))
+        return
     state = describe(args.stack, args.region)
     iid = state["instance"]
     if args.action == "connect":
