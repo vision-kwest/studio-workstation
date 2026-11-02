@@ -96,7 +96,7 @@ class ACMSetupTests(unittest.TestCase):
               mock.patch.object(h, "check_gpu_tls") as tls,
               mock.patch.object(setup, "_ssm") as ssm):
             setup.prepare_gpu(self.aws, sleep=lambda _: None)
-        tls.assert_called_once()
+        self.assertEqual(tls.call_count, 2)  # Preflight and final TLS checks
         ssm.assert_not_called()
         self.assertEqual(self.aws.iam_writes, [])
 
