@@ -69,13 +69,14 @@ The simplified design uses a dedicated Elastic IP, a single Route 53 A record,
 one exportable AWS ACM public certificate, and AWS Workload Credentials Provider
 (v3.1.2) to refresh trusted TLS on the workstation. A minimal, offline-tested
 DCV activation hook validates and switches a versioned certificate/key pair.
-**No Elastic IP, A record, ACM certificate, IAM change, or agent installation
-has been authorized or deployed.** The working IP-based connection and
-self-signed certificate remain unchanged.
+**Tasks 3–5 are deployed to the approved CPU only:** dedicated Elastic IP,
+A record, exportable ACM certificate, exact session-scoped IAM, AWS provider
+and trusted DCV TLS have passed guest/console verification. The feature branch
+Studio CLI remains unmerged; browser login and stop/start recovery are Task 6.
 
 See [Issue #43 simplified ACM/DCV runbook](docs/issue43-acm-dcv.md).
 Draft [PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
-is deliberately unmerged. The former Lambda/DDNS/Certbot proposal is retired.
+remains deliberately unmerged. The former Lambda/DDNS/Certbot proposal is retired.
 
 ## Security and operating costs
 
