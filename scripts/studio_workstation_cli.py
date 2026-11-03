@@ -44,6 +44,35 @@ GPU_ACCEPTANCE_STACK = "studio-gpu-cli-accept65"
 GPU_ACCEPTANCE_TOKEN = "pr65-b23c8e5fdf67b683cd35"
 TRUSTED_DCV_HOSTNAME = "dcv.kwesidavis.com"  # Issue #43: opt-in, never an IP alias
 
+# Exact PR65 supervised defaults; Task 2 will route selected values to Scheduler.
+GPU_EXPIRATION_DEFAULT_MINUTES = 150
+GPU_VOLUME_CLEANUP_DEFAULT_MINUTES = 45
+
+
+def gpu_duration_minutes(value):
+    """Parse an explicit whole-minute duration such as 180m (no implicit units)."""
+    if not re.fullmatch(r"[1-9][0-9]{0,3}m", value):
+        raise argparse.ArgumentTypeError("Expected whole minutes such as 180m")
+    return int(value[:-1])
+
+
+def gpu_expiration_options(args):
+    """Validate bounded, GPU-only expiry options without changing PR65 defaults."""
+    explicit = args.expires_in is not None or args.volume_cleanup_delay is not None
+    if args.profile != "gpu":
+        if explicit:
+            raise ValueError("GPU expiration options require --profile gpu")
+        return None
+    minutes = (GPU_EXPIRATION_DEFAULT_MINUTES if args.expires_in is None
+               else args.expires_in)
+    delay = (GPU_VOLUME_CLEANUP_DEFAULT_MINUTES if args.volume_cleanup_delay is None
+             else args.volume_cleanup_delay)
+    if not 60 <= minutes <= 240:
+        raise ValueError("--expires-in must be between 60m and 240m")
+    if not 30 <= delay <= 120:
+        raise ValueError("--volume-cleanup-delay must be between 30m and 120m")
+    return (minutes, delay)
+
 
 
 def run(args, *, capture=True):
@@ -343,6 +372,13 @@ def command(args):
             raise ValueError("Release must be a version such as v0.1.3")
         ipaddress.IPv4Network(args.client_cidr, strict=False)
         gpu = args.profile == "gpu"
+        expiration = gpu_expiration_options(args)
+        # Task 1 introduces validated inputs only. Never silently accept a
+        # non-default live duration until Task 2 wires it to both schedules.
+        if gpu and not args.dry_run and expiration != (
+                GPU_EXPIRATION_DEFAULT_MINUTES, GPU_VOLUME_CLEANUP_DEFAULT_MINUTES):
+            raise ValueError("Custom GPU expiration requires Task 2 Scheduler wiring; "
+                             "no AWS resources created")
         if gpu:
             if args.region != "us-east-1" or args.image_id != GPU_AMI or args.instance_type != "g4dn.xlarge":
                 raise ValueError("GPU profile requires us-east-1, validated AMI and g4dn.xlarge")
@@ -548,6 +584,11 @@ def main(argv=None):
             s.add_argument("--allow-public-dcv", action="store_true",
                            help="Explicit supervised GPU acceptance: permit TCP 8443 from any IPv4 address")
             s.add_argument("--cleanup-token", default=None, help="Unique scope for independently guarded GPU acceptance test")
+            s.add_argument("--expires-in", type=gpu_duration_minutes, metavar="MINUTESm",
+                           help="GPU-only termination deadline: 60m–240m (default 150m)")
+            s.add_argument("--volume-cleanup-delay", type=gpu_duration_minutes,
+                           metavar="MINUTESm",
+                           help="GPU-only EBS cleanup delay: 30m–120m (default 45m)")
         if action in ("connect", "status"):
             s.add_argument("--hostname", choices=[TRUSTED_DCV_HOSTNAME],
                            help="Opt-in trusted hostname; verify DNS, TLS trust, and instance IPv4")
