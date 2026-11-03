@@ -378,7 +378,9 @@ class GpuExpirationCliParsingTests(unittest.TestCase):
                  mock.patch.object(cli, "shared_gpu_source_ready"), \
                  mock.patch.object(flow, "create_guarded",
                                    return_value={"guard": {"guard_armed": True,
-                                                            "instance_id": "i-0123456789abcdef0"}}) as guarded, \
+                                                            "instance_id": "i-0123456789abcdef0"},
+                                                  "terminate_at": "2026-11-01T20:30:00+00:00",
+                                                  "volume_cleanup_at": "2026-11-01T21:15:00+00:00"}) as guarded, \
                  mock.patch.object(cli, "complete_gpu_setup",
                                    return_value="https://dcv.kwesidavis.com:8443") as setup:
                 self.invoke(*flags, "--client-cidr", "8.8.8.8/32",
