@@ -295,7 +295,9 @@ class GuardedCreateTests(unittest.TestCase):
         with patch.object(cli, "run") as render, patch.object(
                 cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
                 cli, "gpu_release_preflight") as release, patch.object(
-                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID}}) as guarded, patch.object(
+                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID},
+                    "terminate_at": "2026-11-01T20:30:00+00:00",
+                    "volume_cleanup_at": "2026-11-01T21:15:00+00:00"}) as guarded, patch.object(
                 cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup, patch.object(
                 cli, "shared_gpu_source_ready") as source:
             with contextlib.redirect_stdout(io.StringIO()):
@@ -356,7 +358,9 @@ class GuardedCreateTests(unittest.TestCase):
         with patch.object(cli, "run") as render, patch.object(
                 cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
                 cli, "gpu_release_preflight") as release, patch.object(
-                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID}}) as guarded, patch.object(
+                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID},
+                    "terminate_at": "2026-11-01T20:30:00+00:00",
+                    "volume_cleanup_at": "2026-11-01T21:15:00+00:00"}) as guarded, patch.object(
                 cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup, patch.object(
                 cli, "shared_gpu_source_ready") as source:
             with contextlib.redirect_stdout(io.StringIO()):
