@@ -91,6 +91,7 @@ class OfflineLifecycleJourney(unittest.TestCase):
         with (mock.patch.object(cli, "describe", side_effect=describe),
               mock.patch.object(cli, "run", side_effect=run),
               mock.patch.object(cli, "shared_gpu_source_ready") as preflight,
+              mock.patch.object(cli, "gpu_restart_preflight") as expiration,
               mock.patch.object(cli, "complete_gpu_setup", return_value=TLS) as setup,
               mock.patch.object(cli, "complete_gpu_stop", return_value={"revoked": True}) as stop,
               mock.patch.object(cli, "trusted_url", return_value=TLS),
@@ -107,6 +108,7 @@ class OfflineLifecycleJourney(unittest.TestCase):
             self.invoke("stop", "--stack", GPU)
             self.invoke("destroy", "--stack", GPU, "--delete-stack")
             self.assertEqual(preflight.call_count, 2)
+            self.assertEqual(expiration.call_count, 2)
             self.assertEqual(setup.call_count, 2)
             self.assertEqual(stop.call_count, 2)
             destroy.assert_called_once_with(cli.aws, cli.run, GPU, cli.DEFAULT_REGION)
