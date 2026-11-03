@@ -457,5 +457,21 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(self.aws.writes, [])
 
 
+    def test_gpu_tls_probe_checks_expiry_and_hostname_separately(self):
+        fake = FakeAWS()
+        h.check_gpu_tls(fake, GPU, sleep=lambda *_: None)
+        sent = next(call for call in fake.calls if call[1:3] == ("ssm", "send-command"))
+        payload = json.loads(sent[sent.index("--parameters") + 1])
+        commands = payload["commands"]
+        expiry = [c for c in commands if "openssl x509" in c and "-checkend 172800" in c]
+        hostname = [c for c in commands if "openssl x509" in c and "-checkhost" in c]
+        self.assertEqual(len(expiry), 1)
+        self.assertEqual(len(hostname), 1)
+        self.assertNotIn("-checkhost", expiry[0])
+        self.assertNotIn("-checkend", hostname[0])
+        self.assertIn("grep -q 'does match'", hostname[0])
+
+
+
 if __name__ == "__main__":
     unittest.main()
