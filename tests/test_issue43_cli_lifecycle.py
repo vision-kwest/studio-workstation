@@ -483,6 +483,7 @@ class GpuExpirationVisibilityTests(unittest.TestCase):
         run.assert_not_called()
 
         cpu = dict(gpu, stack=CPU_STACK, instance=CPU)
+        cpu.pop("expiration", None)  # First mocked describe object was enriched in-place.
         with (mock.patch.object(cli, "describe", return_value=cpu),
               mock.patch.object(cli, "gpu_expiration_status") as verify,
               contextlib.redirect_stdout(io.StringIO()) as output):
