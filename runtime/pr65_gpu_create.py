@@ -125,7 +125,8 @@ def _emergency(aws_call, region, stack_id, stack, token, iid, stack_owned):
 
 
 def create_guarded(aws_call, region, stack, token, template, parameters,
-                   *, clock=time.monotonic, sleep=time.sleep, utc_now=None):
+                   *, minutes=150, volume_delay_minutes=45,
+                   clock=time.monotonic, sleep=time.sleep, utc_now=None):
     """Create asynchronously; arm both schedules as soon as the retained root EBS is seen.
 
     On discovery/arming failure request termination and stack deletion, but
@@ -133,6 +134,7 @@ def create_guarded(aws_call, region, stack, token, template, parameters,
     """
     if region != "us-east-1":
         raise ValueError("Only validated us-east-1 is supported")
+    guard.validate_durations(minutes, volume_delay_minutes)
     # Do not create ANY CloudFormation resources if the independent IAM/scheduler
     # configuration is missing, untrusted or scoped to a different test.
     preflight(aws_call, region, stack, token)
@@ -189,7 +191,9 @@ def create_guarded(aws_call, region, stack, token, template, parameters,
                     if not _tags_match(vols[0], stack, token):
                         raise RuntimeError("Retained EBS ownership mismatch")
                     if vols[0].get("State") == "in-use":
-                        proposal = guard.plan(vm, vols[0], stack, token, now())
+                        proposal = guard.plan(vm, vols[0], stack, token, now(),
+                                              minutes=minutes,
+                                              volume_delay_minutes=volume_delay_minutes)
                         activated = guard.arm(Scheduler(aws_call, region), EC2(aws_call, region), proposal)
                         return {"stack_id": stack_id, "cloudformation_status": state,
                                 "guard": activated, "terminate_at": proposal["terminate_at"],
