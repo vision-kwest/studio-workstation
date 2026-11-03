@@ -88,11 +88,13 @@ cannot discover CloudFormation stacks; do not widen its rights for CLI access.
 The same EIP and ACM certificate were used for the CPU and a separately guarded
 GPU. User-confirmed warning-free GNOME login, trusted TLS, explicit guarded
 GPU handoff, stop/return and exact-resource destroy all passed. A stop/start
-persistence test preserved the GPU's test file. **One limitation remains:**
-with fewer than 60 minutes before its mandatory termination deadline,
-the GPU resumed EC2/RES successfully but correctly refused automatic ACM/EIP
-handoff *after* the instance had started. A pre-billing deadline check and
-configurable expiration are tracked in [Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68).
+persistence test preserved the GPU's test file. A late restart previously started
+EC2 before rejecting an unsafe hostname handoff. **The draft CLI now checks
+the exact PR #65 expiration safeguards before starting the GPU**, requiring at
+least 80 minutes remaining (60 minutes of handoff margin plus 20 minutes for
+startup). This pre-start fix passed offline tests; it has **not** been live
+retested. Configurable expiration is separately tracked in
+[Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68).
 This is not a general-purpose production GPU launcher. PR #67 remains
 **draft/unmerged** pending explicit review and merge authorization.
 
