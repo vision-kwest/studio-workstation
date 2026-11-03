@@ -390,9 +390,9 @@ def command(args):
         from runtime import issue68_expiration_extension as extension
         if args.stack != GPU_ACCEPTANCE_STACK or args.region != DEFAULT_REGION:
             raise ValueError("Expiration extension restricted to approved GPU stack in us-east-1")
-        operation = extension.extend if args.execute else extension.preview
-        print(json.dumps(operation(aws, args.stack, args.region,
-                                   args.additional_minutes), indent=2))
+        # Supplying --additional-minutes authorizes the guarded update.
+        print(json.dumps(extension.extend(
+            aws, args.stack, args.region, args.additional_minutes), indent=2))
         return
     # Issue #43: exact-scope EIP transfer/return requires --execute and the
     # existing strict RES/TLS/PR65 guard preflights. No GPU creation here.
@@ -628,12 +628,13 @@ def main(argv=None):
             s.add_argument("--gpu-instance-id", required=True,
                            help="Exact supervised GPU EC2 ID, no wildcard discovery")
         if action in ("hostname-handoff", "hostname-return", "hostname-acm-prepare",
-                      "hostname-acm-revoke", "extend-expiration"):
+                      "hostname-acm-revoke"):
             s.add_argument("--execute", action="store_true",
                            help="Explicitly authorize guarded hostname/ACM AWS writes")
         if action == "extend-expiration":
             s.add_argument("--additional-minutes", type=gpu_extension_minutes, required=True,
-                           metavar="MINUTES", help="Add 1–180 minutes, subject to 240m total remaining")
+                           metavar="MINUTES",
+                           help="Authorize extending both GPU deadlines by 1–180 minutes; 240m remaining maximum")
         if action == "create":
             s.add_argument("--dry-run", action="store_true",
                            help="Render and validate without launching AWS resources")
