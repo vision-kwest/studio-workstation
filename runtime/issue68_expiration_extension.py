@@ -1,7 +1,7 @@
 """Issue #68: exact-scope supervised GPU expiration extension.
 
 Uses the existing PR65 ownership/IAM and Issue43 schedule preflights.
-Never runs on import. Mutations require an explicit CLI --execute.
+Never runs on import. The --additional-minutes CLI option authorizes the guarded update.
 Extends retained-EBS cleanup first so it can never precede an extended
 termination deadline. On failure, reconciles/rolls back when verifiable.
 """
@@ -90,15 +90,8 @@ def _prepare(aws, stack, region, additional_minutes, now):
         "previous_ebs_cleanup_utc": cleanup.isoformat(),
         "proposed_termination_utc": new_term.isoformat(),
         "proposed_ebs_cleanup_utc": new_cleanup.isoformat(),
-        "requires_execute": True,
     }
     return (old_term, old_ebs), (next_term, next_ebs), summary
-
-
-def preview(aws, stack, region, additional_minutes, *, now=None):
-    now = now or dt.datetime.now(dt.timezone.utc)
-    _, _, summary = _prepare(aws, stack, region, additional_minutes, now)
-    return summary
 
 
 def extend(aws, stack, region, additional_minutes, *, now=None):
