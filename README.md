@@ -79,20 +79,30 @@ Connect when that CPU is running using:
 account. The revised no-op refresh and bounded-generation retention hook
 from PR #67 has now **also been installed and accepted on the CPU**: a
 real AWS agent refresh left DCV's PID and current certificate unchanged,
-and retained two validated generations. The optional
-`connect/status --hostname` CLI flag is still **unmerged**. An actual
-guest-side CLI command failed at CloudFormation discovery due to
-deliberately narrow instance-role permissions, although the real DNS/TLS
-verifier passed. Full CLI acceptance should be run from an authorized
-management environment. Do not infer that a GPU has this hostname yet.
+and retained two validated generations. The draft PR #67
+`status --hostname` and `connect` commands subsequently passed unmocked
+from an authorized CloudShell session. The restricted guest role intentionally
+cannot discover CloudFormation stacks; do not widen its rights for CLI access.
 
-**CPU/GPU sharing is now designed and offline-tested in the draft**, without
-any additional static IP, Route 53 record or ACM certificate. The guarded
-`hostname-plan`, `hostname-iam` and `hostname-return-plan` commands can
-review the exact GPU handoff. Live `hostname-handoff --execute` and `hostname-return --execute` are now guarded, privileged operations in the draft branch, alongside automatic approved CPU/GPU lifecycle integration. The complete CLI flow still requires Task 6 unmocked acceptance. [Shared CPU/GPU hostname runbook](docs/issue43-shared-cpu-gpu-handoff.md).
+**The supervised CPU/GPU shared-hostname acceptance passed on the draft branch.**
+The same EIP and ACM certificate were used for the CPU and a separately guarded
+GPU. User-confirmed warning-free GNOME login, trusted TLS, explicit guarded
+GPU handoff, stop/return and exact-resource destroy all passed. A stop/start
+persistence test preserved the GPU's test file. **One limitation remains:**
+with fewer than 60 minutes before its mandatory termination deadline,
+the GPU resumed EC2/RES successfully but correctly refused automatic ACM/EIP
+handoff *after* the instance had started. A pre-billing deadline check and
+configurable expiration are tracked in [Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68).
+This is not a general-purpose production GPU launcher. PR #67 remains
+**draft/unmerged** pending explicit review and merge authorization.
+
+The read-only `hostname-plan`, `hostname-iam`, and `hostname-return-plan`
+commands inspect the handoff. `hostname-handoff --execute` and
+`hostname-return --execute` are privileged, guarded AWS-writing operations.
+[Shared CPU/GPU hostname runbook](docs/issue43-shared-cpu-gpu-handoff.md).
 
 See [the Issue #43 acceptance, operations and rollback runbook](docs/issue43-acm-dcv.md)
-and [the Studio CLI instructions](docs/studio-cli.md#optional-trusted-hostname--issue-43).
+and [the Studio CLI instructions](docs/studio-cli.md#trusted-dcv-hostname--issue-43-draft-pr-67).
 [Draft PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
 is deliberately unmerged; the older custom Lambda/DDNS/Certbot architecture
 has been retired. Public TCP 8443 hardening remains separate Issue #62.
