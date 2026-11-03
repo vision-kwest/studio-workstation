@@ -232,9 +232,9 @@ class ExpirationExtensionTests(unittest.TestCase):
             ["extend-expiration", "--stack", handoff.GPU_STACK,
              "--additional-minutes", "30", "--region", "us-west-2", "--execute"],
         ):
-            with self.subTest(args=args), (
-                mock.patch.object(cli, "aws") as aws,
-                contextlib.redirect_stderr(io.StringIO())):
+            with (self.subTest(args=args),
+                  mock.patch.object(cli, "aws") as aws,
+                  contextlib.redirect_stderr(io.StringIO())):
                 with self.assertRaises(SystemExit):
                     cli.main(args)
                 aws.assert_not_called()
