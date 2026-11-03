@@ -5,6 +5,7 @@ No external Python dependencies. Uses existing render_workstation.py and AWS CLI
 Commands run when explicitly invoked; use --dry-run to preview create, and --delete-stack for teardown.
 """
 import argparse
+import datetime as dt
 import ipaddress
 import json
 import re
@@ -206,6 +207,37 @@ def shared_gpu_source_ready(*, manager=aws):
             != handoff.CPU_ENI):
         raise ValueError("CPU must be stopped and have its original ENI before GPU launch")
     trusted_owner(DEFAULT_STACK, handoff.CPU_ID, manager=manager)
+
+
+
+def gpu_restart_preflight(stack, instance, region, *, manager=aws, now=None):
+    """Verify PR65 guards and restart headroom BEFORE starting billable EC2."""
+    from runtime import issue43_hostname_handoff as handoff
+    from runtime import pr65_gpu_create
+
+    if (stack, region) != (GPU_ACCEPTANCE_STACK, DEFAULT_REGION):
+        raise ValueError("GPU restart is restricted to the approved stack and region")
+    if handoff._stack_iid(manager, stack) != instance:
+        raise ValueError("GPU CloudFormation instance identity changed")
+    gpu = handoff._items(manager, instance)[instance]
+    if gpu.get("State", {}).get("Name") != "stopped":
+        raise ValueError("GPU must be stopped before restart")
+    pr65_gpu_create.preflight(manager, region, stack, GPU_ACCEPTANCE_TOKEN)
+    now = now or dt.datetime.now(dt.timezone.utc)
+    if now.tzinfo is None or now.utcoffset() != dt.timedelta(0):
+        raise ValueError("GPU restart clock must be UTC")
+    try:
+        expiry = handoff._gpu_guard(manager, gpu, now)
+    except ValueError as exc:
+        raise ValueError("GPU restart refused before EC2 start: " + str(exc)) from exc
+    # Reserve bootstrap/startup time in addition to the existing 60-minute
+    # handoff safety margin. A late restart must not incur EC2 charges.
+    required = handoff.SAFETY_MARGIN + dt.timedelta(minutes=20)
+    terminate_at = dt.datetime.fromisoformat(expiry["terminate_at"])
+    if terminate_at - now < required:
+        raise ValueError("GPU restart refused before EC2 start: fewer than "
+                         "80 minutes remain before automatic termination")
+    return expiry
 
 
 def complete_gpu_setup(stack, region, instance, *, manager=aws,
@@ -456,7 +488,8 @@ def command(args):
         if args.action == "start" and args.stack == DEFAULT_STACK:
             trusted_owner(args.stack, iid)  # Never start CPU against GPU EIP.
         if args.action == "start" and args.stack == GPU_ACCEPTANCE_STACK:
-            shared_gpu_source_ready()  # Fail before billing if CPU/EIP ownership is wrong.
+            shared_gpu_source_ready()  # CPU/EIP must be safe before billing.
+            gpu_restart_preflight(args.stack, iid, args.region)  # Guard + deadline before EC2.
         if args.action == "stop" and args.stack == GPU_ACCEPTANCE_STACK:
             from runtime import issue43_hostname_handoff as handoff
             address = handoff._eip(aws)
