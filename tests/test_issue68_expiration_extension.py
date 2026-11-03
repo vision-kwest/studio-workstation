@@ -53,10 +53,6 @@ class ExpirationExtensionTests(unittest.TestCase):
         self.before_eip = copy.deepcopy(self.aws.eip)
         self.before_dns = copy.deepcopy(self.aws.records)
 
-    def preview(self, minutes=30, **kwargs):
-        return extension.preview(self.aws, handoff.GPU_STACK, handoff.REGION,
-                                 minutes, now=kwargs.get("now", NOW))
-
     def execute(self, minutes=30, **kwargs):
         return extension.extend(self.aws, handoff.GPU_STACK, handoff.REGION,
                                 minutes, now=kwargs.get("now", NOW))
@@ -67,16 +63,16 @@ class ExpirationExtensionTests(unittest.TestCase):
         self.assertEqual(self.aws.eip, self.before_eip)
         self.assertEqual(self.aws.records, self.before_dns)
 
-    def test_preview_read_only_exact_instance_and_deadlines(self):
-        p = self.preview()
+    def test_extension_reports_exact_original_and_new_deadlines(self):
+        p = self.execute()
         self.assertEqual(p["instance_id"], GPU)
         self.assertEqual(p["root_volume_id"], VOLUME)
         self.assertEqual(p["previous_termination_utc"], "2026-11-02T09:00:00+00:00")
         self.assertEqual(p["proposed_termination_utc"], "2026-11-02T09:30:00+00:00")
         self.assertEqual(p["proposed_ebs_cleanup_utc"], "2026-11-02T10:30:00+00:00")
-        self.assertTrue(p["requires_execute"])
-        self.assertFalse(self.aws.writes)
-        self.assert_unchanged()
+        self.assertTrue(p["extended"])
+        self.assertNotIn("requires_execute", p)
+        self.assertEqual(self.aws.update_names, [self.ebs_name, self.term_name])
 
     def test_execute_moves_ebs_first_then_ec2_and_preserves_exact_scope(self):
         p = self.execute(60)
@@ -202,35 +198,36 @@ class ExpirationExtensionTests(unittest.TestCase):
         self.assertEqual(status["ebs_cleanup_utc"], "2026-11-02T13:00:00+00:00")
         self.assertFalse(self.aws.writes)
 
-    def test_cli_preview_and_explicit_execute_are_distinct(self):
+    def test_cli_additional_minutes_directly_authorizes_extension(self):
         from unittest.mock import patch
         args = ["extend-expiration", "--stack", handoff.GPU_STACK,
                 "--additional-minutes", "30"]
-        with (patch.object(extension, "preview", return_value={"requires_execute": True}) as preview,
-              patch.object(extension, "extend", return_value={"extended": True}) as execute,
+        with (patch.object(extension, "extend", return_value={"extended": True}) as execute,
               contextlib.redirect_stdout(io.StringIO()) as output):
             cli.main(args)
-        self.assertIn('"requires_execute": true', output.getvalue())
-        preview.assert_called_once()
-        execute.assert_not_called()
-
-        with (patch.object(extension, "preview") as preview,
-              patch.object(extension, "extend", return_value={"extended": True}) as execute,
-              contextlib.redirect_stdout(io.StringIO()) as output):
-            cli.main(args + ["--execute"])
         self.assertIn('"extended": true', output.getvalue())
-        execute.assert_called_once()
-        preview.assert_not_called()
+        execute.assert_called_once_with(
+            cli.aws, handoff.GPU_STACK, handoff.REGION, 30)
+
+    def test_removed_execute_option_is_rejected(self):
+        from unittest.mock import patch
+        with (patch.object(extension, "extend") as execute,
+              contextlib.redirect_stderr(io.StringIO())):
+            with self.assertRaises(SystemExit):
+                cli.main(["extend-expiration", "--stack", handoff.GPU_STACK,
+                          "--additional-minutes", "30", "--execute"])
+        execute.assert_not_called()
 
     def test_cli_rejects_cpu_invalid_minutes_and_wrong_region_before_aws(self):
         for args in (
-            ["extend-expiration", "--additional-minutes", "30", "--execute"],
+            ["extend-expiration", "--additional-minutes", "30"],
+            ["extend-expiration", "--stack", handoff.GPU_STACK],
             ["extend-expiration", "--stack", handoff.GPU_STACK,
-             "--additional-minutes", "0", "--execute"],
+             "--additional-minutes", "0"],
             ["extend-expiration", "--stack", handoff.GPU_STACK,
-             "--additional-minutes", "181", "--execute"],
+             "--additional-minutes", "181"],
             ["extend-expiration", "--stack", handoff.GPU_STACK,
-             "--additional-minutes", "30", "--region", "us-west-2", "--execute"],
+             "--additional-minutes", "30", "--region", "us-west-2"],
         ):
             with (self.subTest(args=args),
                   mock.patch.object(cli, "aws") as aws,
