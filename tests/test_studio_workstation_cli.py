@@ -49,8 +49,67 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "run")
     @mock.patch.object(cli, "describe", return_value=STATE)
     def test_connect_prints_url_without_aws_mutation(self, describe, run):
-        self.invoke(["connect"])
+        with mock.patch.object(cli, "trusted_url",
+                               return_value="https://dcv.kwesidavis.com:8443") as tls:
+            self.invoke(["connect"])
+        tls.assert_called_once_with(STACK, INSTANCE)
         run.assert_not_called()
+
+    def test_trusted_hostname_connect_uses_verified_stack_identity(self):
+        vm = dict(STATE, public_ip="54.159.180.104", state="running")
+        with mock.patch.object(cli, "describe", return_value=vm), \
+             mock.patch.object(cli, "trusted_url",
+                               return_value="https://dcv.kwesidavis.com:8443") as tls, \
+             mock.patch.object(cli, "run") as run, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            cli.main(["connect", "--stack", STACK,
+                      "--hostname", "dcv.kwesidavis.com"])
+        tls.assert_called_once_with(STACK, INSTANCE)
+        self.assertIn("https://dcv.kwesidavis.com:8443", output.getvalue())
+        run.assert_not_called()
+
+    def test_trusted_hostname_rejected_when_stopped(self):
+        vm = dict(STATE, public_ip="54.159.180.104", state="stopped")
+        with mock.patch.object(cli, "describe", return_value=vm), \
+             mock.patch.object(cli, "verified_dcv_hostname") as tls, \
+             mock.patch.object(cli, "run") as run, \
+             contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main(["status", "--stack", STACK,
+                          "--hostname", "dcv.kwesidavis.com"])
+        tls.assert_not_called()
+        run.assert_not_called()
+
+    def test_trusted_hostname_is_not_allowed_with_ssm(self):
+        with mock.patch.object(cli, "describe") as describe, \
+             mock.patch.object(cli, "run") as run, \
+             contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main(["connect", "--stack", STACK, "--ssm",
+                          "--hostname", "dcv.kwesidavis.com"])
+        describe.assert_not_called()
+        run.assert_not_called()
+
+    def test_trusted_dns_mismatch_fails_before_network_connection(self):
+        fake = [(None, None, None, None, ("203.0.113.10", 8443))]
+        with mock.patch.object(cli.socket, "getaddrinfo", return_value=fake), \
+             mock.patch.object(cli.socket, "create_connection") as conn:
+            with self.assertRaisesRegex(ValueError, "DNS A record does not match"):
+                cli.verified_dcv_hostname("dcv.kwesidavis.com", "54.159.180.104")
+        conn.assert_not_called()
+
+    def test_trusted_connection_pins_verified_ip_and_preserves_hostname_sni(self):
+        fake = [(None, None, None, None, ("54.159.180.104", 8443))]
+        import ssl
+        with mock.patch.object(cli.socket, "getaddrinfo", return_value=fake), \
+             mock.patch.object(cli.socket, "create_connection") as conn, \
+             mock.patch.object(cli.ssl, "create_default_context") as context:
+            tlsctx = context.return_value
+            url = cli.verified_dcv_hostname("dcv.kwesidavis.com", "54.159.180.104")
+        self.assertEqual(url, "https://dcv.kwesidavis.com:8443")
+        conn.assert_called_once_with(("54.159.180.104", 8443), timeout=5)
+        tlsctx.wrap_socket.assert_called_once_with(conn.return_value.__enter__.return_value,
+                                                   server_hostname="dcv.kwesidavis.com")
 
     @mock.patch.object(cli, "run")
     def test_create_rejects_invalid_cidr_without_running(self, run):
@@ -130,13 +189,12 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "run")
     @mock.patch.object(cli, "aws")
     @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_scoped_destroy_accepts_launch_template(self, describe, aws, run):
-        aws.return_value = {"StackResourceSummaries": [
-            {"ResourceType": "AWS::EC2::Instance"},
-            {"ResourceType": "AWS::EC2::SecurityGroup"},
-            {"ResourceType": "AWS::EC2::LaunchTemplate"}]}
-        self.invoke(["destroy", "--stack", "studio-gpu-cli-test1", "--delete-stack"])
-        self.assertTrue(any("delete-stack" in c.args[0] for c in run.call_args_list))
+    def test_nonapproved_gpu_destroy_fails_before_aws(self, describe, aws, run):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.invoke(["destroy", "--stack", "studio-gpu-cli-test1", "--delete-stack"])
+        aws.assert_not_called()
+        run.assert_not_called()
 
     @mock.patch.object(cli.subprocess, "check_output", return_value="{}")
     def test_aws_json_requests_never_open_pager(self, check_output):
@@ -144,6 +202,20 @@ class StudioCliTests(unittest.TestCase):
         command = check_output.call_args.args[0]
         self.assertEqual(command[0], "aws")
         self.assertIn("--no-cli-pager", command)
+
+    @mock.patch.object(cli.subprocess, "check_output", return_value="")
+    def test_successful_empty_aws_write_response_is_not_json_error(self, check_output):
+        self.assertEqual(cli.aws("us-east-1", "ec2", "create-tags",
+                                 "--resources", "eipalloc-review", "--tags", "Key=Test,Value=Yes"), {})
+        self.assertEqual(check_output.call_count, 1)
+
+    @mock.patch.object(cli.subprocess, "check_output",
+                       side_effect=__import__("subprocess").CalledProcessError(
+                           254, "aws", stderr="AccessDenied"))
+    def test_failed_aws_write_is_not_misread_as_empty_success(self, check_output):
+        with self.assertRaises(__import__("subprocess").CalledProcessError):
+            cli.aws("us-east-1", "iam", "delete-role-policy",
+                    "--role-name", "example", "--policy-name", "example")
 
     @mock.patch.object(cli, "run")
     def test_create_dry_run_validates_without_launch(self, run):
