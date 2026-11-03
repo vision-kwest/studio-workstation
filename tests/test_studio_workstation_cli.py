@@ -360,18 +360,37 @@ class GpuExpirationCliParsingTests(unittest.TestCase):
         self.assertTrue(any("validate-template" in cmd for cmd in calls))
         self.assertFalse(any("create-stack" in cmd or "deploy" in cmd for cmd in calls))
 
-    def test_custom_live_options_fail_closed_until_scheduler_is_wired(self):
-        for flags in (("--expires-in", "180m"),
-                      ("--volume-cleanup-delay", "60m")):
+    def test_live_expiration_options_forward_to_guarded_creator(self):
+        from subprocess import CalledProcessError
+        from runtime import pr65_gpu_create as flow
+        scenarios = [
+            ((), (150, 45)),
+            (("--expires-in", "180m"), (180, 45)),
+            (("--volume-cleanup-delay", "60m"), (150, 60)),
+            (("--expires-in", "240m", "--volume-cleanup-delay", "120m"), (240, 120)),
+        ]
+        for flags, expected in scenarios:
             with self.subTest(flags=flags), \
-                 mock.patch.object(cli, "run") as run, \
-                 mock.patch.object(cli, "aws") as aws, \
-                 contextlib.redirect_stderr(io.StringIO()) as errors:
-                with self.assertRaises(SystemExit):
-                    self.invoke(*flags)
-                self.assertIn("Task 2 Scheduler wiring", errors.getvalue())
-                run.assert_not_called()
-                aws.assert_not_called()
+                 mock.patch.object(cli, "run") as render, \
+                 mock.patch.object(cli, "aws", side_effect=CalledProcessError(
+                     255, "aws", stderr="Stack with id does not exist")) as aws, \
+                 mock.patch.object(cli, "gpu_release_preflight"), \
+                 mock.patch.object(cli, "shared_gpu_source_ready"), \
+                 mock.patch.object(flow, "create_guarded",
+                                   return_value={"guard": {"guard_armed": True,
+                                                            "instance_id": "i-0123456789abcdef0"}}) as guarded, \
+                 mock.patch.object(cli, "complete_gpu_setup",
+                                   return_value="https://dcv.kwesidavis.com:8443") as setup:
+                self.invoke(*flags, "--client-cidr", "8.8.8.8/32",
+                            "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN)
+                guarded.assert_called_once()
+                self.assertEqual(guarded.call_args.kwargs,
+                                 {"minutes": expected[0],
+                                  "volume_delay_minutes": expected[1]})
+                setup.assert_called_once()
+                self.assertFalse(any("deploy" in str(c.args[0]) for c in
+                                     render.call_args_list))
+                aws.assert_called_once()
 
     def test_explicit_default_values_remain_backward_compatible(self):
         self.assertEqual(cli.gpu_expiration_options(
