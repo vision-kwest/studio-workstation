@@ -173,11 +173,13 @@ class LifecycleTests(unittest.TestCase):
               mock.patch.object(cli, "run", side_effect=run),
               mock.patch.object(cli, "shared_gpu_source_ready", side_effect=lambda:
                                 events.append("cpu-eip-preflight")),
+              mock.patch.object(cli, "gpu_restart_preflight", side_effect=lambda *a:
+                                events.append("gpu-expiry-preflight")),
               mock.patch.object(cli, "complete_gpu_setup", side_effect=lambda *a:
                                 (events.append("trusted-setup") or TRUSTED))):
             self.command(["start", "--stack", GPU_STACK])
-        self.assertEqual(events, ["cpu-eip-preflight", "ec2-start", "ec2-wait",
-                                  "trusted-setup"])
+        self.assertEqual(events, ["cpu-eip-preflight", "gpu-expiry-preflight",
+                                  "ec2-start", "ec2-wait", "trusted-setup"])
 
     def test_cpu_restart_verifies_owner_before_ec2_start(self):
         states = [
