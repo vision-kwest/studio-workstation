@@ -390,5 +390,119 @@ class GpuRestartDeadlineTests(unittest.TestCase):
 
 
 
+
+class GpuExpirationVisibilityTests(unittest.TestCase):
+    """Read-only expiry reporting never weakens GPU handoff/restart guards."""
+
+    def setUp(self):
+        from test_issue43_hostname_handoff import FakeAWS, NOW
+        self.fake = FakeAWS()
+        self.now = NOW
+
+    def inspect(self, *, now=None):
+        return cli.gpu_expiration_status(
+            GPU_STACK, GPU, "us-east-1", manager=self.fake,
+            now=self.now if now is None else now)
+
+    def test_exact_schedules_report_utc_and_remaining_time_without_writes(self):
+        result = self.inspect()
+        self.assertEqual(result["termination_utc"], "2026-11-02T09:00:00+00:00")
+        self.assertEqual(result["ebs_cleanup_utc"], "2026-11-02T10:00:00+00:00")
+        self.assertEqual(result["remaining_minutes"], 120)
+        self.assertEqual(result["remaining_seconds"], 7200)
+        self.assertEqual(result["status"], "scheduled")
+        self.assertNotIn("warning", result)
+        self.assertEqual(len([x for x in self.fake.calls
+                              if x[1:3] == ("scheduler", "get-schedule")]), 2)
+        self.assertEqual(self.fake.writes, [])
+
+    def test_status_works_with_gpu_stopped_and_cpu_holding_eip(self):
+        self.fake.gpu["State"]["Name"] = "stopped"
+        result = self.inspect()
+        self.assertEqual(result["status"], "scheduled")
+        self.assertEqual(self.fake.writes, [])
+
+    def test_near_expiry_reports_warning_instead_of_rejecting_status(self):
+        result = self.inspect(now=self.now + dt.timedelta(minutes=41))
+        self.assertEqual(result["remaining_minutes"], 79)
+        self.assertEqual(result["status"], "restart_unsafe")
+        self.assertIn("80 minutes", result["warning"])
+        self.assertEqual(self.fake.writes, [])
+
+    def test_deadline_passed_reports_expired_when_schedules_still_exist(self):
+        result = self.inspect(now=self.now + dt.timedelta(minutes=121))
+        self.assertEqual(result["remaining_minutes"], 0)
+        self.assertEqual(result["status"], "expired")
+        self.assertIn("passed", result["warning"])
+
+    def test_invalid_schedule_role_or_disabled_state_never_looks_verified(self):
+        from test_issue43_hostname_handoff import VOLUME
+        name = "studio-pr65-v-" + VOLUME
+        for changed in ("wrong_role", "disabled"):
+            with self.subTest(changed=changed):
+                original = self.fake.schedules[name]
+                self.fake.schedules[name] = __import__("copy").deepcopy(original)
+                if changed == "wrong_role":
+                    self.fake.schedules[name]["Target"]["RoleArn"] = "arn:aws:iam::foreign:role/wrong"
+                else:
+                    self.fake.schedules[name]["State"] = "DISABLED"
+                with self.assertRaisesRegex(ValueError, "guard mismatch"):
+                    self.inspect()
+                self.fake.schedules[name] = original
+        self.assertEqual(self.fake.writes, [])
+
+    def test_missing_schedule_never_reports_a_verified_deadline(self):
+        del self.fake.schedules["studio-pr65-i-" + GPU]
+        with self.assertRaises(KeyError):
+            self.inspect()
+        self.assertEqual(self.fake.writes, [])
+
+    def test_mismatched_instance_or_volume_scope_fails_closed(self):
+        with mock.patch.object(handoff, "_stack_iid", return_value="i-00000000000000000"):
+            with self.assertRaisesRegex(ValueError, "identity mismatch"):
+                self.inspect()
+        self.fake.volume["Tags"][1]["Value"] = "foreign"
+        with self.assertRaisesRegex(ValueError, "ownership"):
+            self.inspect()
+        self.assertEqual(self.fake.writes, [])
+
+    def test_status_cli_displays_expiration_only_for_approved_gpu(self):
+        gpu = {"stack": GPU_STACK, "instance": GPU, "state": "stopped",
+               "public_ip": None, "dcv_url": None}
+        expire = {"termination_utc": "2026-11-02T09:00:00+00:00",
+                  "ebs_cleanup_utc": "2026-11-02T10:00:00+00:00",
+                  "remaining_minutes": 79, "warning": "restart unsafe"}
+        with (mock.patch.object(cli, "describe", return_value=gpu),
+              mock.patch.object(cli, "gpu_expiration_status", return_value=expire) as verify,
+              mock.patch.object(cli, "run") as run,
+              contextlib.redirect_stdout(io.StringIO()) as output):
+            cli.main(["status", "--stack", GPU_STACK])
+        result = __import__("json").loads(output.getvalue())
+        self.assertEqual(result["expiration"], expire)
+        verify.assert_called_once_with(GPU_STACK, GPU, "us-east-1")
+        run.assert_not_called()
+
+        cpu = dict(gpu, stack=CPU_STACK, instance=CPU)
+        with (mock.patch.object(cli, "describe", return_value=cpu),
+              mock.patch.object(cli, "gpu_expiration_status") as verify,
+              contextlib.redirect_stdout(io.StringIO()) as output):
+            cli.main(["status", "--stack", CPU_STACK])
+        self.assertNotIn("expiration", __import__("json").loads(output.getvalue()))
+        verify.assert_not_called()
+
+    def test_status_does_not_suppress_invalid_schedule(self):
+        with (mock.patch.object(cli, "describe",
+                                return_value={"stack": GPU_STACK, "instance": GPU,
+                                              "state": "stopped"}),
+              mock.patch.object(cli, "gpu_expiration_status",
+                                side_effect=ValueError("invalid schedule")),
+              contextlib.redirect_stdout(io.StringIO()) as output,
+              contextlib.redirect_stderr(io.StringIO())):
+            with self.assertRaises(SystemExit):
+                cli.main(["status", "--stack", GPU_STACK])
+        self.assertEqual(output.getvalue(), "")
+
+
+
 if __name__ == "__main__":
     unittest.main()
