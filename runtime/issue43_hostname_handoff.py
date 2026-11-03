@@ -86,7 +86,8 @@ def _dns(aws):
         raise ValueError("Route 53 A record differs from dedicated stable EIP")
     return matching[0]
 
-def _guard_schedule(aws, name, iid, action, payload, now, *, require_headroom=True):
+def _guard_schedule(aws, name, iid, action, payload, now, *,
+                    require_headroom=True, max_remaining_minutes=240):
     sched = aws(REGION, "scheduler", "get-schedule", "--group-name", guard.GROUP, "--name", name)
     target = sched.get("Target", {})
     if (sched.get("Name") != name or sched.get("GroupName") != guard.GROUP or
@@ -103,7 +104,7 @@ def _guard_schedule(aws, name, iid, action, payload, now, *, require_headroom=Tr
     when = dt.datetime.strptime(expr[3:-1], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
     if require_headroom and when - now < SAFETY_MARGIN:
         raise ValueError("GPU expiration is too near for a safe handoff")
-    if when - now > dt.timedelta(minutes=240):
+    if when - now > dt.timedelta(minutes=max_remaining_minutes):
         raise ValueError("GPU expiration exceeds PR #65 supervised guard bound")
     return when
 
@@ -123,7 +124,8 @@ def _gpu_guard(aws, gpu, now, *, require_headroom=True):
                            require_headroom=require_headroom)
     cleanup = _guard_schedule(aws, "studio-pr65-v-" + vid, gpu["InstanceId"],
                               guard.DELETE_VOLUME, {"VolumeId": vid}, now,
-                              require_headroom=require_headroom)
+                              require_headroom=require_headroom,
+                              max_remaining_minutes=360)
     if cleanup <= term + dt.timedelta(minutes=29) or cleanup > term + dt.timedelta(minutes=120):
         raise ValueError("GPU volume-cleanup timing outside PR #65 guard bounds")
     return {"terminate_at": term.isoformat(), "volume_cleanup_at": cleanup.isoformat(),
