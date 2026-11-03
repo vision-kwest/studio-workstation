@@ -204,7 +204,8 @@ def check_gpu_tls(aws, instance_id, *, sleep=time.sleep):
         "dcv describe-session console --json | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s.get(\"id\")==\"console\" and s.get(\"owner\")==\"workstation\" and s.get(\"status\")==\"running\"'",
         "test \"$(stat -Lc '%U:%G %a' /etc/dcv/dcv.pem)\" = 'dcv:dcv 600'",
         "test \"$(stat -Lc '%U:%G %a' /etc/dcv/dcv.key)\" = 'dcv:dcv 600'",
-        "openssl x509 -in /etc/dcv/dcv.pem -noout -checkhost " + HOST + " -checkend 172800 | grep -q 'does match'",
+        "openssl x509 -in /etc/dcv/dcv.pem -noout -checkend 172800 >/dev/null",
+        "openssl x509 -in /etc/dcv/dcv.pem -noout -checkhost " + HOST + " | grep -q 'does match'",
         "test \"$(openssl x509 -in /etc/dcv/dcv.pem -pubkey -noout | sha256sum | cut -d' ' -f1)\" = \"$(openssl pkey -in /etc/dcv/dcv.key -pubout | sha256sum | cut -d' ' -f1)\"",
         "timeout 12 openssl s_client -connect 127.0.0.1:8443 -servername " + HOST +
         " -verify_hostname " + HOST + " -verify_return_error -brief </dev/null >/dev/null 2>&1",
