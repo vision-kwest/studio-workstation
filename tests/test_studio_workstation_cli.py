@@ -300,8 +300,9 @@ class GpuExpirationCliParsingTests(unittest.TestCase):
     def invoke(self, *options):
         args = ["create", "--profile", "gpu", "--stack",
                 "studio-gpu-cli-accept65", *options]
-        with contextlib.redirect_stdout(io.StringIO()):
+        with contextlib.redirect_stdout(io.StringIO()) as output:
             cli.main(args)
+        return output.getvalue()
 
     def test_defaults_match_original_pr65_guard(self):
         self.assertEqual(cli.gpu_expiration_options(self.options()), (150, 45))
@@ -383,8 +384,12 @@ class GpuExpirationCliParsingTests(unittest.TestCase):
                                                   "volume_cleanup_at": "2026-11-01T21:15:00+00:00"}) as guarded, \
                  mock.patch.object(cli, "complete_gpu_setup",
                                    return_value="https://dcv.kwesidavis.com:8443") as setup:
-                self.invoke(*flags, "--client-cidr", "8.8.8.8/32",
-                            "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN)
+                output = self.invoke(*flags, "--client-cidr", "8.8.8.8/32",
+                                     "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN)
+                self.assertIn('"expiration"', output)
+                self.assertIn('"termination_utc"', output)
+                self.assertIn('"ebs_cleanup_utc"', output)
+                self.assertIn('"remaining_minutes"', output)
                 guarded.assert_called_once()
                 self.assertEqual(guarded.call_args.kwargs,
                                  {"minutes": expected[0],
