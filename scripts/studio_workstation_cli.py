@@ -269,6 +269,52 @@ def gpu_restart_preflight(stack, instance, region, *, manager=aws, now=None):
     return expiry
 
 
+
+def gpu_expiration_summary(terminate_at, cleanup_at, *, now=None):
+    """Format already-verified UTC deadlines; do not call AWS or change schedules."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    termination = dt.datetime.fromisoformat(terminate_at)
+    cleanup = dt.datetime.fromisoformat(cleanup_at)
+    if any(t.tzinfo is None or t.utcoffset() != dt.timedelta(0)
+           for t in (now, termination, cleanup)):
+        raise ValueError("GPU expiration timestamps must be UTC-aware")
+    if not dt.timedelta(minutes=30) <= cleanup - termination <= dt.timedelta(minutes=120):
+        raise ValueError("Unexpected retained-EBS cleanup deadline")
+    remaining = int((termination - now).total_seconds())
+    status = "expired" if remaining <= 0 else (
+        "restart_unsafe" if remaining < 80 * 60 else "scheduled")
+    result = {
+        "termination_utc": termination.isoformat(),
+        "ebs_cleanup_utc": cleanup.isoformat(),
+        "remaining_seconds": max(0, remaining),
+        "remaining_minutes": max(0, remaining // 60),
+        "status": status,
+    }
+    if status == "expired":
+        result["warning"] = ("Termination deadline has passed; independently verify "
+                             "EC2 and retained-EBS cleanup.")
+    elif status == "restart_unsafe":
+        result["warning"] = ("Less than 80 minutes remain; the GPU cannot be safely "
+                             "restarted under the existing guard.")
+    return result
+
+
+def gpu_expiration_status(stack, instance, region, *, manager=aws, now=None):
+    """Read and verify the exact GPU's two active schedules even near expiration."""
+    from runtime import issue43_hostname_handoff as handoff
+    from runtime import pr65_gpu_create
+    if (stack, region) != (GPU_ACCEPTANCE_STACK, DEFAULT_REGION):
+        raise ValueError("Expiration status limited to approved GPU and region")
+    if handoff._stack_iid(manager, stack) != instance:
+        raise ValueError("GPU stack instance identity mismatch")
+    gpu = handoff._items(manager, instance)[instance]
+    pr65_gpu_create.preflight(manager, region, stack, GPU_ACCEPTANCE_TOKEN)
+    now = now or dt.datetime.now(dt.timezone.utc)
+    deadlines = handoff._gpu_guard(manager, gpu, now, require_headroom=False)
+    return gpu_expiration_summary(deadlines["terminate_at"],
+                                  deadlines["volume_cleanup_at"], now=now)
+
+
 def complete_gpu_setup(stack, region, instance, *, manager=aws,
                        wait=wait_gpu_bootstrap):
     """Run existing ACM + EIP components AFTER PR65 guarded launch/start."""
@@ -458,9 +504,11 @@ def command(args):
                 outcome = pr65_gpu_create.create_guarded(
                     aws, args.region, args.stack, args.cleanup_token, template, parameters,
                     minutes=expiration[0], volume_delay_minutes=expiration[1])
-                print(json.dumps(outcome, indent=2), flush=True)
                 if not outcome.get("guard", {}).get("guard_armed"):
                     raise RuntimeError("PR #65 expiration safeguard not confirmed; no trusted handoff")
+                outcome["expiration"] = gpu_expiration_summary(
+                    outcome["terminate_at"], outcome["volume_cleanup_at"])
+                print(json.dumps(outcome, indent=2), flush=True)
                 print("GPU guard armed; waiting for RES/DCV and trusted HTTPS...", flush=True)
                 url = complete_gpu_setup(args.stack, args.region, outcome["guard"]["instance_id"])
                 print("TRUSTED DCV:", url)
@@ -473,6 +521,9 @@ def command(args):
         return
     if args.action == "status":
         state = describe(args.stack, args.region)
+        if args.stack == GPU_ACCEPTANCE_STACK:
+            state["expiration"] = gpu_expiration_status(
+                args.stack, state["instance"], args.region)
         if args.hostname:
             if state["state"] != "running":
                 raise ValueError("Cannot verify trusted TLS while workstation is stopped")
