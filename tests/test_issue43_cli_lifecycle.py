@@ -3,6 +3,7 @@
 These tests mock every AWS and network write. Do not launch any resources.
 """
 import contextlib
+import datetime as dt
 import io
 import subprocess
 import unittest
@@ -268,6 +269,125 @@ class LifecycleTests(unittest.TestCase):
               mock.patch.object(handoff, "_eip", return_value=address)):
             with self.assertRaisesRegex(ValueError, "not owned"):
                 cli.trusted_owner(GPU_STACK, GPU)
+
+
+
+class GpuRestartDeadlineTests(unittest.TestCase):
+    """Exercise the real expiration preflight from CLI start with mocked AWS."""
+
+    def setUp(self):
+        from test_issue43_hostname_handoff import FakeAWS, NOW
+        self.aws = FakeAWS()
+        self.aws.gpu["State"]["Name"] = "stopped"
+        self.now = NOW
+
+    def restart(self, *, now=None, manager=None):
+        # Patching only the AWS adapter and downstream EC2 operations keeps
+        # actual preflight + CLI dispatch and ordering under test.
+        actual_preflight = cli.gpu_restart_preflight
+        backend = manager if manager is not None else self.aws
+        now = self.now if now is None else now
+        states = [
+            {"stack": GPU_STACK, "instance": GPU, "state": "stopped"},
+            {"stack": GPU_STACK, "instance": GPU, "state": "running"},
+        ]
+        invoked = []
+        def run(cmd, **kwargs):
+            invoked.append(cmd)
+            return ""
+        output, errors = io.StringIO(), io.StringIO()
+        with (mock.patch.object(cli, "describe", side_effect=states),
+              mock.patch.object(cli, "shared_gpu_source_ready"),
+              mock.patch.object(cli, "gpu_restart_preflight",
+                                side_effect=lambda stack, iid, region:
+                                actual_preflight(stack, iid, region, manager=backend, now=now)),
+              mock.patch.object(cli, "complete_gpu_setup", return_value=TRUSTED) as setup,
+              mock.patch.object(cli, "run", side_effect=run),
+              contextlib.redirect_stdout(output),
+              contextlib.redirect_stderr(errors)):
+            try:
+                cli.main(["start", "--stack", GPU_STACK])
+                success = True
+            except SystemExit as exc:
+                self.assertNotEqual(exc.code, 0)
+                success = False
+        return success, invoked, errors.getvalue(), setup
+
+    def assert_no_billing_start(self, *, now=None, manager=None, expected=None):
+        success, invoked, error, setup = self.restart(now=now, manager=manager)
+        self.assertFalse(success)
+        self.assertEqual(invoked, [], "StartInstances/wait must not run on unsafe restart")
+        self.assertEqual(self.aws.writes, [], "A failed preflight must not write to AWS")
+        setup.assert_not_called()
+        if expected:
+            self.assertIn(expected, error)
+
+    def test_valid_120_minute_window_starts_then_sets_up_tls(self):
+        success, invoked, error, setup = self.restart()
+        self.assertTrue(success, error)
+        self.assertEqual(len(invoked), 2)
+        self.assertIn("start-instances", invoked[0])
+        self.assertIn("instance-status-ok", invoked[1])
+        setup.assert_called_once_with(GPU_STACK, "us-east-1", GPU)
+
+    def test_exactly_80_minutes_is_allowed(self):
+        success, invoked, error, setup = self.restart(
+            now=self.now + dt.timedelta(minutes=40))
+        self.assertTrue(success, error)
+        self.assertIn("start-instances", invoked[0])
+        setup.assert_called_once()
+
+    def test_79_minutes_is_rejected_before_ec2_start(self):
+        self.assert_no_billing_start(
+            now=self.now + dt.timedelta(minutes=41),
+            expected="fewer than 80 minutes")
+
+    def test_expired_schedule_is_rejected_before_ec2_start(self):
+        self.assert_no_billing_start(
+            now=self.now + dt.timedelta(minutes=121),
+            expected="expiration is too near")
+
+    def test_missing_termination_schedule_is_rejected(self):
+        del self.aws.schedules["studio-pr65-i-" + GPU]
+        self.assert_no_billing_start()
+
+    def test_modified_termination_target_is_rejected(self):
+        self.aws.schedules["studio-pr65-i-" + GPU]["Target"]["Input"] = (
+            '{"InstanceIds":["i-00000000000000000"]}')
+        self.assert_no_billing_start(expected="guard mismatch")
+
+    def test_missing_ebs_cleanup_schedule_is_rejected(self):
+        from test_issue43_hostname_handoff import VOLUME
+        del self.aws.schedules["studio-pr65-v-" + VOLUME]
+        self.assert_no_billing_start()
+
+    def test_wrong_ebs_schedule_role_is_rejected(self):
+        from test_issue43_hostname_handoff import VOLUME
+        self.aws.schedules["studio-pr65-v-" + VOLUME]["Target"]["RoleArn"] = (
+            "arn:aws:iam::401233741942:role/foreign")
+        self.assert_no_billing_start(expected="guard mismatch")
+
+    def test_unexpected_resource_ownership_is_rejected(self):
+        self.aws.volume["Tags"][1]["Value"] = "foreign-token"
+        self.assert_no_billing_start()
+
+    def test_changing_cloudformation_instance_is_rejected(self):
+        with mock.patch.object(handoff, "_stack_iid", return_value="i-foreign"):
+            self.assert_no_billing_start(expected="instance identity changed")
+
+    def test_aws_instance_must_still_be_stopped(self):
+        self.aws.gpu["State"]["Name"] = "running"
+        self.assert_no_billing_start(expected="must be stopped")
+
+    def test_scheduler_iam_access_denied_fails_closed(self):
+        original = self.aws
+        def deny_iam(region, *args):
+            if args[:2] == ("iam", "get-role"):
+                raise subprocess.CalledProcessError(
+                    254, "aws", stderr="AccessDenied: scheduler execution role")
+            return original(region, *args)
+        self.assert_no_billing_start(manager=deny_iam, expected="AccessDenied")
+
 
 
 if __name__ == "__main__":
