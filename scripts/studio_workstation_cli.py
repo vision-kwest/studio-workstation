@@ -56,6 +56,13 @@ def gpu_duration_minutes(value):
     return int(value[:-1])
 
 
+def gpu_extension_minutes(value):
+    """Bound a single explicit extension; overall deadline is checked at runtime."""
+    if not re.fullmatch(r"[1-9][0-9]{0,2}", value) or int(value) > 180:
+        raise argparse.ArgumentTypeError("Expected integer additional minutes 1..180")
+    return int(value)
+
+
 def gpu_expiration_options(args):
     """Validate bounded, GPU-only expiry options without changing PR65 defaults."""
     explicit = args.expires_in is not None or args.volume_cleanup_delay is not None
@@ -379,6 +386,14 @@ def wait_cpu_https(stack, instance, *, attempts=30, sleep=time.sleep):
 
 
 def command(args):
+    if args.action == "extend-expiration":
+        from runtime import issue68_expiration_extension as extension
+        if args.stack != GPU_ACCEPTANCE_STACK or args.region != DEFAULT_REGION:
+            raise ValueError("Expiration extension restricted to approved GPU stack in us-east-1")
+        operation = extension.extend if args.execute else extension.preview
+        print(json.dumps(operation(aws, args.stack, args.region,
+                                   args.additional_minutes), indent=2))
+        return
     # Issue #43: exact-scope EIP transfer/return requires --execute and the
     # existing strict RES/TLS/PR65 guard preflights. No GPU creation here.
     if args.action in ("hostname-acm-prepare", "hostname-acm-revoke"):
@@ -603,7 +618,8 @@ def main(argv=None):
     for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready",
                    "hostname-plan", "hostname-iam", "hostname-handoff",
                    "hostname-return-plan", "hostname-return",
-                   "hostname-acm-prepare", "hostname-acm-revoke"):
+                   "hostname-acm-prepare", "hostname-acm-revoke",
+                   "extend-expiration"):
         s = sub.add_parser(action)
         s.add_argument("--stack", default=DEFAULT_STACK if action != "create" else None,
                        required=action == "create")
@@ -611,9 +627,13 @@ def main(argv=None):
         if action in ("hostname-iam", "hostname-return-plan", "hostname-return", "hostname-acm-revoke"):
             s.add_argument("--gpu-instance-id", required=True,
                            help="Exact supervised GPU EC2 ID, no wildcard discovery")
-        if action in ("hostname-handoff", "hostname-return", "hostname-acm-prepare", "hostname-acm-revoke"):
+        if action in ("hostname-handoff", "hostname-return", "hostname-acm-prepare",
+                      "hostname-acm-revoke", "extend-expiration"):
             s.add_argument("--execute", action="store_true",
                            help="Explicitly authorize guarded hostname/ACM AWS writes")
+        if action == "extend-expiration":
+            s.add_argument("--additional-minutes", type=gpu_extension_minutes, required=True,
+                           metavar="MINUTES", help="Add 1–180 minutes, subject to 240m total remaining")
         if action == "create":
             s.add_argument("--dry-run", action="store_true",
                            help="Render and validate without launching AWS resources")
