@@ -80,7 +80,7 @@ def _checkout(root, run):
 
 
 def _launcher(root, target):
-    return ('#!/bin/bash\nset -e\n'
+    return ('#!/bin/bash\nset -e\nexport STUDIO_REZ_QUIET=1\n'
             f'source "{root}/env/studio-prod.sh"\n'
             f'exec "{target}/bin/rez/rez-env" "$@"\n')
 
