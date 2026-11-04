@@ -1,4 +1,4 @@
-"""Opt-in standalone CPU EFS mount, patterned on RES 2026.06 Linux EFS flow.
+"""Opt-in CPU/GPU EFS package mount, patterned on RES 2026.06 Linux EFS flow.
 
 Unlike the full RES storage configure(), no DynamoDB, SSH keys, FSx, S3
 credential broker or global mount -a. Never invoked by workstation bootstrap.
@@ -16,11 +16,12 @@ MOUNTPOINT = Path("/opt/studio/packages")
 FSTAB = Path("/etc/fstab")
 MOUNTINFO = Path("/proc/self/mountinfo")
 RETRY_DELAYS = (2, 4)
+PROFILES = ("cpu", "gpu")
 
 
 def _entry(filesystem_id, access_point_id, profile):
-    if profile != "cpu":
-        raise ValueError("Only approved CPU profile may configure this mount")
+    if profile not in PROFILES:
+        raise ValueError("EFS package mount is limited to CPU/GPU workstation profiles")
     if not re.fullmatch(r"fs-[0-9a-f]{8,17}", filesystem_id):
         raise ValueError("Invalid EFS filesystem ID")
     if not re.fullmatch(r"fsap-[0-9a-f]{8,17}", access_point_id):
@@ -65,7 +66,7 @@ def _mount_state(mountinfo):
 
 def plan(filesystem_id, access_point_id, *, profile="cpu", fstab_text=""):
     entry = _entry(filesystem_id, access_point_id, profile)
-    return {"mountpoint": str(MOUNTPOINT), "fstab_entry": entry,
+    return {"profile": profile, "mountpoint": str(MOUNTPOINT), "fstab_entry": entry,
             "fstab_action": _fstab_action(fstab_text, entry),
             "filesystem_id": filesystem_id, "access_point_id": access_point_id,
             "transport": "EFS helper TLS + IAM", "read_only": True,
