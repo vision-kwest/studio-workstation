@@ -23,6 +23,7 @@ PYTHON = Path("/usr/bin/python3")
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures/openusd/hello.usda"
 PROBE_TAG = "STUDIO_OPENUSD_PROBE="
 TIMEOUT = 60
+PROFILES = ("cpu", "gpu")
 
 # Run in the resolved Rez environment. Importing pxr.Usd._usd actually loads
 # its compiled extension; an innocuous manifest or namespace import cannot
@@ -121,10 +122,12 @@ def _validate_probe(output, package, root):
             "native_module": str(native)}
 
 
-def smoke(*, root=PACKAGE_ROOT, launcher=REZ_LAUNCHER,
+def smoke(*, profile="cpu", root=PACKAGE_ROOT, launcher=REZ_LAUNCHER,
           python=PYTHON, fixture=FIXTURE, mountinfo=None,
           runner=subprocess.run):
-    """Read-only checks; success requires actual Rez commands on future host."""
+    """Same read-only USD/Rez validation on either approved workstation profile."""
+    if profile not in PROFILES:
+        raise ValueError("OpenUSD validation is limited to CPU/GPU workstation profiles")
     root, launcher, python, fixture = map(Path, (root, launcher, python, fixture))
     if not root.is_absolute() or not python.is_absolute():
         raise ValueError("Package repository and Python paths must be absolute")
@@ -149,7 +152,8 @@ def smoke(*, root=PACKAGE_ROOT, launcher=REZ_LAUNCHER,
     stdout = _command(runner, launcher,
                       [str(python), "-c", PYTHON_PROBE], "Python ABI/import probe")
     abi = _validate_probe(stdout, Path(metadata["package"]), root)
-    return {"status": "verified", "package": metadata["package"],
+    return {"status": "verified", "profile": profile,
+            "package": metadata["package"],
             "rez_request": PACKAGE_REQUEST, "usdcat": "passed",
             "usdchecker": "passed", "python_abi": abi,
             "efs_identity": metadata["efs_identity"]}
@@ -160,10 +164,11 @@ def main(argv=None):
     parser.add_argument("--root", type=Path, default=PACKAGE_ROOT)
     parser.add_argument("--launcher", type=Path, default=REZ_LAUNCHER)
     parser.add_argument("--python", type=Path, default=PYTHON)
+    parser.add_argument("--profile", choices=PROFILES, default="cpu")
     args = parser.parse_args(argv)
     try:
-        print(json.dumps(smoke(root=args.root, launcher=args.launcher,
-                               python=args.python), indent=2))
+        print(json.dumps(smoke(profile=args.profile, root=args.root,
+                               launcher=args.launcher, python=args.python), indent=2))
     except (ValueError, RuntimeError, OSError) as exc:
         parser.exit(1, f"OpenUSD validation FAILED: {exc}\n")
 
