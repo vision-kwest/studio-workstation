@@ -138,6 +138,12 @@ class WorkstationRezSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "production config"):
             self.config()
 
+    def test_launcher_quotes_paths_and_suppresses_chatter(self):
+        script = rez._launcher(Path("/tmp/studio rez"), self.target)
+        self.assertIn("source '/tmp/studio rez/env/studio-prod.sh'", script)
+        self.assertIn("export STUDIO_REZ_QUIET=1", script)
+        self.assertIn('"$@"', script)
+
     def test_upstream_install_is_offline_and_checks_production_marker(self):
         result = self.config(rez.install)
         self.assertTrue(result["changed"])
