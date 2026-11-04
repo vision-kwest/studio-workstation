@@ -84,3 +84,13 @@ regressions, without AWS credentials or live infrastructure.
 
 No `studio-rez`, `studio-openusd`, RES 2026.06, CLI lifecycle, DCV,
 SSH, IAM, EFS or Image Builder files are modified for this task.
+
+## GPU profile reuse (Task 5)
+
+The same read-only smoke checker now accepts `--profile gpu` (CPU remains
+the default). Both profiles run the **same** production `usd-26.05`
+resolution, `usdcat`, `usdchecker` and native CPython ABI probe against
+the **same** shared package path. The tool reports the selected profile;
+it does not claim GPU rendering, verify NVIDIA/OpenGL, or inspect EC2
+identity. All GPU parity tests are mocked/offline and the real GPU setup
+and OpenUSD binary remain untested. See [GPU parity](rez-openusd-gpu-parity.md).
