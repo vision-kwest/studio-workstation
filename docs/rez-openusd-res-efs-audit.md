@@ -232,3 +232,30 @@ Full prerequisites, example installation and verification commands:
 [CPU Rez setup](rez-workstation-setup.md). The direct installation is a
 **future separately authorized action**; no installation or EFS mount was run
 during Task 3.
+
+## Task 4 — OpenUSD functional smoke checker (offline implementation)
+
+The independently invocable `scripts/check_openusd_rez.py` uses the
+`studio-rez-env` launcher from Task 3 and extends the existing
+`studio-openusd/scripts/smoke_test_usd.py` pattern with fail-closed
+production-path and real native Python binding verification. The committed
+`fixtures/openusd/hello.usda` scene is passed through `usdcat` and
+`usdchecker`, followed by a compiled `pxr.Usd._usd` import and a
+`Usd.Stage.CreateInMemory()` functional probe. The probe verifies the
+running CPython version, SOABI and any native extension ABI filename,
+OpenUSD binary version 26.05, both native and Python module origins under
+the selected `prod/usd/26.05` package, and explicit production-only
+Rez configuration. Each subprocess runs without a shell, with a bounded
+timeout and explicit failure diagnostics. Nothing is installed or
+published, and no local or EFS package contents are modified.
+
+`tests/test_openusd_rez_smoke.py` exercises a synthetic package/ro NFS
+mountinfo and mocked Rez/utility/ABI probe responses. This is **not**
+evidence of actual OpenUSD binary or EFS access, Python ABI success on
+Ubuntu, or successful `usdview`/GPU rendering. That requires separately
+approved live CPU acceptance and later Task 5 GPU parity. The production
+`usd/26.05` promotion remains unverified and this script never falls back
+to the `dev` package stage.
+
+For usage, prerequisites and the complete error-contract description,
+see [Task 4 OpenUSD validation](rez-openusd-smoke.md).
