@@ -220,6 +220,12 @@ class OpenUsdRezSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside requested USD package"):
             self.run_smoke()
 
+    def test_native_extension_tag_must_match_running_python(self):
+        self.info["pxr_native_file"] = str(
+            self.usd / "_usd.cpython-311-x86_64-linux-gnu.so")
+        with self.assertRaisesRegex(ValueError, "native extension ABI"):
+            self.run_smoke()
+
     def test_shadowed_or_non_native_usd_extension_rejected(self):
         for native in ("/tmp/pxr/_usd.so",
                        str(self.usd / "_usd.py"), ""):
