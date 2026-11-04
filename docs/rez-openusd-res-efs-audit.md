@@ -197,3 +197,38 @@ GPU parity (Task 5), or normal Rez installation (Task 3).
 
 Related: #71 writable studio assets/models; #70 optional SSH; #62 remote
 access hardening. No broader storage or access policy is implemented here.
+
+
+## Task 3 implementation — pinned CPU Rez environment (offline only)
+
+The opt-in `scripts/install_workstation_rez.py` installer uses the official
+**Rez 3.4.0 `install.py` production method** instead of adding a pip-installed
+Rez CLI to the workstation's global PATH. The production method creates
+Rez-only CLI scripts under `bin/rez` using Python `-E`, isolating Rez from
+`PYTHONPATH` modifications made by resolved packages. It has **not been run**
+on either EC2 profile.
+
+The source archive is pinned by SHA-256, the local wheelhouse is independently
+SHA-256 verified, pip is forced offline, and the local `studio-rez` checkout
+must match a clean, pinned commit and existing production Rez configuration.
+The installer stages its result before publishing a version-specific directory
+on the workstation's **persistent local EBS**. It refuses ambiguous existing
+installations, unsafe archives or changed launchers.
+
+`/usr/local/bin/studio-rez-env` is a persistent, user-invocable wrapper that
+sources the original `studio-rez/env/studio-prod.sh` on **every invocation**,
+then runs the Rez production entry point. It does not alter the workstation
+user's `.bashrc`, pollute the system Python PATH, add a DCV startup dependency,
+or touch EFS/SSH/RES/CloudFormation.
+
+The separately staged source and wheelhouse artifacts and the pinned local
+`studio-rez` checkout are **not yet provisioned on the CPU workstation**.
+Task 3 testing used a synthetic source tar, fake upstream installer and fresh
+shell fixture; it cannot prove the actual Rez binary executes or that
+`usd/26.05` has been promoted to the production EFS repository. Both need
+the remaining supervised acceptance tasks.
+
+Full prerequisites, example installation and verification commands:
+[CPU Rez setup](rez-workstation-setup.md). The direct installation is a
+**future separately authorized action**; no installation or EFS mount was run
+during Task 3.
