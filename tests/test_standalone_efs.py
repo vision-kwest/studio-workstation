@@ -63,6 +63,32 @@ class StandaloneEfsTests(TestCase):
         self.assertEqual(self.fstab.read_text().count("fs-" + FS[3:]), 1)
         self.assertNotIn("mount -a", self.fstab.read_text())
 
+    def test_gpu_mount_plan_reuses_exact_cpu_efs_configuration(self):
+        cpu = efs.plan(FS, AP)
+        gpu = efs.plan(FS, AP, profile="gpu")
+        self.assertEqual(cpu.pop("profile"), "cpu")
+        self.assertEqual(gpu.pop("profile"), "gpu")
+        self.assertEqual(cpu, gpu)
+        self.assertIn("ro,tls,iam,accesspoint=", gpu["fstab_entry"])
+
+    def test_gpu_scoped_mount_readback_and_repeat_are_idempotent(self):
+        first = self.configure(profile="gpu")
+        self.assertEqual(first, {"mounted": True, "changed": True})
+        self.assertEqual(self.called, [("mount", str(self.mountpoint))])
+        self.called.clear()
+        second = self.configure(profile="gpu")
+        self.assertEqual(second, {"mounted": True, "changed": False})
+        self.assertEqual(self.called, [])
+        self.assertEqual(self.fstab.read_text().count("fs-" + FS[3:]), 1)
+
+    def test_gpu_failures_do_not_leave_new_fstab_entry(self):
+        original = self.fstab.read_text()
+        def fail(argv, **kwargs):
+            raise subprocess.CalledProcessError(32, argv)
+        with self.assertRaisesRegex(RuntimeError, "EFS mount failed"):
+            self.configure(profile="gpu", runner=fail)
+        self.assertEqual(self.fstab.read_text(), original)
+
     def test_read_only_mount_exposes_existing_rez_package_metadata(self):
         """The preflight reads package files only after a verified ro mount."""
         import json
@@ -125,8 +151,8 @@ class StandaloneEfsTests(TestCase):
                 self.assertEqual(self.called, [])
 
     def test_invalid_fs_accesspoint_and_gpu_are_refused(self):
-        for fs, ap, profile in ((FS, AP, "gpu"), ("fs-invalid", AP, "cpu"),
-                                (FS, "fsap-wrong", "cpu")):
+        for fs, ap, profile in ((FS, AP, "tpu"), ("fs-invalid", AP, "cpu"),
+                                (FS, "fsap-wrong", "gpu")):
             with self.subTest(fs=fs, ap=ap, profile=profile):
                 with self.assertRaises(ValueError):
                     efs.plan(fs, ap, profile=profile)
