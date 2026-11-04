@@ -1,6 +1,6 @@
 # Documentation index
 
-**Current operating instructions (updated after PR #65 was merged)** are separated here from historical research and one-time acceptance records. When an archived note says "NO-GO", "not merged", "not deployed", or "pending", read it as a **statement from the date of that checkpoint**, not a current project-wide prohibition.
+**Current operating instructions (after merged PRs #65 and #67; software integration in draft PR #72)** are separated here from historical research and one-time acceptance records. When an archived note says "NO-GO", "not merged", "not deployed", or "pending", read it as a **statement from the date of that checkpoint**, not a current project-wide prohibition.
 
 ## Start here — current information
 
@@ -14,19 +14,33 @@
 | [Architecture](visual-architecture.md) | Image creation versus running EC2 workstation |
 | [CPU lifecycle/TLS](cpu-acceptance-lifecycle-tls.md) | CPU live-acceptance record and security background |
 | [Release tooling](../scripts/README.md) | Release building/publication, historical paths and updated version-read caveat |
+| [Rez + OpenUSD EFS audit](rez-openusd-res-efs-audit.md) | Pinned RES 2026.06 storage call graph and opt-in adapter limitations |
+| [Rez workstation installation](rez-workstation-setup.md) | Pinned Rez 3.4.0 production-only installer (offline implementation) |
+| [OpenUSD 26.05 smoke](rez-openusd-smoke.md) | USD utilities, native Python ABI checks and diagnostics (offline implementation) |
+| [CPU/GPU software parity](rez-openusd-gpu-parity.md) | Shared EFS/Rez/OpenUSD profile contracts, no live deployment |
+| [Live acceptance + rollback gate](rez-openusd-live-acceptance-plan.md) | Separate approval stages, verified AWS IDs, costs and scoped rollback |
 
-## Trusted DCV hostname (CPU deployed; CLI changes in draft PR)
+## Trusted DCV hostname (PR #67 merged)
 
 - [Issue #43 — EIP, ACM and AWS Workload Credentials Provider](issue43-acm-dcv.md):
-  live CPU HTTPS, browser-login and post-Task-7 no-restart/retention
-  acceptance, pinned AWCP, scoped IAM, stopped state, verified rollback
-  backup and still-blocked privileged CLI/GPU-profile gates.
+  live CPU HTTPS, browser-login, pinned AWCP and scoped IAM; older
+  unmerged/pending gate language is historical and was resolved in PR #67.
 - [CPU/GPU shared hostname and EIP handoff](issue43-shared-cpu-gpu-handoff.md):
-  new offline-only, fail-closed IP handoff plan, per-instance certificate
-  access proposal, PR #65 GPU expiration safeguards and supervised return.
-  Live EIP reassociation and GPU certificate setup remain unapproved.
-- Original Lambda/EventBridge/DDNS proposal was retired in draft PR #67;
+  original EIP handoff design, now also documenting the supervised CPU/GPU
+  browser login, shared certificate handoff and scoped GPU cleanup acceptance.
+- Original Lambda/EventBridge/DDNS proposal was retired in merged PR #67;
   Issue #43 retains dated audit and historical context.
+
+## Draft software integration status
+
+[Draft PR #72](https://github.com/vision-kwest/studio-workstation/pull/72)
+contains offline-tested EFS mount, Rez installer and OpenUSD validators shared
+between CPU and GPU. **They are not integrated into `studio workstation
+create/start`, do not auto-mount EFS, and have not been deployed.** A separate
+live acceptance and rollback approval is required before EFS IAM/network,
+guest installation or USD promotion. GPU expiration enhancements in
+[draft PR #69](https://github.com/vision-kwest/studio-workstation/pull/69)
+are not part of PR #72 or `main`.
 
 ## Historical source audits and design gates
 
