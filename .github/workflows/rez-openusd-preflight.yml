@@ -13,6 +13,7 @@ on:
       - 'tests/test_workstation_rez_setup.py'
       - 'docs/rez-workstation-setup.md'
       - 'tests/test_standalone_efs.py'
+      - 'tests/test_rez_integration_isolation.py'
       - 'tests/test_rez_openusd_preflight.py'
       - 'docs/rez-openusd-res-efs-audit.md'
       - '.github/workflows/rez-openusd-preflight.yml'
@@ -34,3 +35,5 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_workstation_rez_setup.py' -v
       - name: Test production OpenUSD Rez tools and native ABI with mocked commands
         run: python3 -m unittest discover -s tests -p 'test_openusd_rez_smoke.py' -v
+      - name: Ensure Rez and EFS are not wired into RES/DCV/GPU lifecycle
+        run: python3 -m unittest discover -s tests -p 'test_rez_integration_isolation.py' -v
