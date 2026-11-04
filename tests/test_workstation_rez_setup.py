@@ -89,9 +89,10 @@ class WorkstationRezSetupTests(unittest.TestCase):
         digest = hashlib.sha256(self.wheel.read_bytes()).hexdigest()
         self.manifest.write_text(f"{digest}  {self.wheel.name}\n")
 
-    def config(self, action=rez.plan):
+    def config(self, action=rez.plan, *, profile="cpu"):
         return action(self.archive, self.wheels, self.manifest, self.source,
-                      target=self.target, wrapper=self.wrapper, run=self.run)
+                      profile=profile, target=self.target, wrapper=self.wrapper,
+                      run=self.run)
 
     def test_plan_checks_prod_config_and_pinned_version_without_writes(self):
         result = self.config()
@@ -102,6 +103,56 @@ class WorkstationRezSetupTests(unittest.TestCase):
         self.assertFalse(self.wrapper.exists())
         self.assertEqual(len(self.run.calls), 2)
         self.assertTrue(all(args[0][0] == "git" for args in self.run.calls))
+
+    def test_gpu_plan_reuses_cpu_source_version_and_prod_config(self):
+        cpu = self.config()
+        gpu = self.config(profile="gpu")
+        self.assertEqual(cpu.pop("profile"), "cpu")
+        self.assertEqual(gpu.pop("profile"), "gpu")
+        self.assertEqual(cpu, gpu)
+        self.assertFalse(self.target.exists())
+        self.assertEqual(len(self.run.calls), 4)
+
+    def test_gpu_install_and_reopen_shell_use_same_prod_only_launcher(self):
+        result = self.config(rez.install, profile="gpu")
+        self.assertTrue(result["installed"])
+        output = subprocess.run(
+            ["bash", str(self.wrapper), "usd-26.05"],
+            check=True, text=True, capture_output=True).stdout.splitlines()
+        self.assertEqual(output[0], "/opt/studio/packages/prod")
+        self.assertEqual(output[1], str(self.source / "config/rezconfig.prod.py"))
+        self.assertEqual(output[3], "usd-26.05")
+        self.run.calls.clear()
+        self.assertFalse(self.config(rez.install, profile="gpu")["changed"])
+        self.assertEqual(len(self.run.calls), 2)
+
+    def test_gpu_profile_is_rejected_when_unsupported_before_artifact_reads(self):
+        self.archive.unlink()
+        with self.assertRaisesRegex(ValueError, "limited to CPU/GPU"):
+            self.config(rez.install, profile="tpu")
+        self.assertFalse(self.run.calls)
+        self.assertFalse(self.wrapper.exists())
+
+    def test_gpu_install_failure_leaves_no_local_rez_installation(self):
+        self.run.fail_install = True
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.config(rez.install, profile="gpu")
+        self.assertFalse(self.target.exists())
+        self.assertFalse(self.wrapper.exists())
+
+    def test_cli_gpu_profile_is_explicit_and_does_not_install_during_parse(self):
+        args = [
+            "--rez-archive", str(self.archive),
+            "--wheelhouse", str(self.wheels),
+            "--wheel-manifest", str(self.manifest),
+            "--studio-rez-root", str(self.source),
+            "--profile", "gpu",
+        ]
+        with mock.patch.object(rez, "install") as installer:
+            rez.main(args)
+            installer.assert_called_once()
+            self.assertEqual(installer.call_args.kwargs["profile"], "gpu")
+        self.assertFalse(self.target.exists())
 
     def test_reject_wrong_rez_source_archive_checksum(self):
         self.archive.write_bytes(b"mutated")
