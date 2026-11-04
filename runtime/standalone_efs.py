@@ -117,6 +117,12 @@ def configure(filesystem_id, access_point_id, *, profile="cpu",
                         return {"mounted": True, "changed": appended}
                     raise RuntimeError("Mount succeeded but read-only NFS4 not verified")
                 except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                    # A timed-out mount helper can finish successfully after
+                    # reporting an error. Verify before retrying or rolling back
+                    # our managed fstab entry; never leave a mounted target
+                    # without its matching persistence configuration.
+                    if _mount_state(mountinfo.read_text(encoding="utf-8")):
+                        return {"mounted": True, "changed": appended}
                     if attempt == len(RETRY_DELAYS):
                         raise RuntimeError("EFS mount failed; verify mount helper, IAM and TCP/2049")
                     sleeper(RETRY_DELAYS[attempt])
