@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in CPU Rez 3.4.0 installation from pinned offline artifacts.
+"""Opt-in CPU/GPU Rez 3.4.0 installation from pinned offline artifacts.
 
 Uses Rez's upstream production install.py, not pip-installed CLI scripts.
 Not called by RES/bootstrap; never downloads, mounts EFS, or invokes AWS.
@@ -22,6 +22,7 @@ SOURCE_SHA256 = "57e03cd2a9dbab818290756de0fd1205fbd898b1e02205dbe2c90a7d0d0f515
 STUDIO_REZ_COMMIT = "434a3ffe4775d17234b6d0bb2460ab049ece2262"
 TARGET = Path("/opt/studio/rez/3.4.0")
 WRAPPER = Path("/usr/local/bin/studio-rez-env")
+PROFILES = ("cpu", "gpu")
 
 
 def _sha(path):
@@ -89,7 +90,9 @@ def _launcher(root, target):
 
 
 def plan(archive, wheelhouse, wheel_manifest, studio_rez, *,
-         target=TARGET, wrapper=WRAPPER, run=subprocess.run):
+         profile="cpu", target=TARGET, wrapper=WRAPPER, run=subprocess.run):
+    if profile not in PROFILES:
+        raise ValueError("Rez setup is limited to CPU/GPU workstation profiles")
     archive, wheelhouse, wheel_manifest = map(Path, (archive, wheelhouse, wheel_manifest))
     target, wrapper = Path(target), Path(wrapper)
     if not target.is_absolute() or not wrapper.is_absolute():
@@ -108,7 +111,7 @@ def plan(archive, wheelhouse, wheel_manifest, studio_rez, *,
         if not marker.is_file() or marker.read_text().strip() != VERSION or not (
                 target / "bin/rez/rez-env").is_file():
             raise ValueError("Existing Rez install is not approved version")
-    return {"target": target, "wrapper": wrapper, "launcher": launcher,
+    return {"profile": profile, "target": target, "wrapper": wrapper, "launcher": launcher,
             "wheelhouse": wheelhouse, "wheel_count": wheel_count,
             "already_installed": target.exists() and wrapper.exists()}
 
@@ -137,9 +140,9 @@ def _unpack(archive, destination):
 
 
 def install(archive, wheelhouse, wheel_manifest, studio_rez, *,
-            target=TARGET, wrapper=WRAPPER, run=subprocess.run):
+            profile="cpu", target=TARGET, wrapper=WRAPPER, run=subprocess.run):
     config = plan(archive, wheelhouse, wheel_manifest, studio_rez,
-                  target=target, wrapper=wrapper, run=run)
+                  profile=profile, target=target, wrapper=wrapper, run=run)
     if config["already_installed"]:
         return {"installed": True, "changed": False, "version": VERSION}
     target, wrapper = config["target"], config["wrapper"]
@@ -175,8 +178,10 @@ def main(argv=None):
     parser.add_argument("--wheelhouse", type=Path, required=True)
     parser.add_argument("--wheel-manifest", type=Path, required=True)
     parser.add_argument("--studio-rez-root", type=Path, required=True)
+    parser.add_argument("--profile", choices=PROFILES, default="cpu")
     args = parser.parse_args(argv)
-    install(args.rez_archive, args.wheelhouse, args.wheel_manifest, args.studio_rez_root)
+    install(args.rez_archive, args.wheelhouse, args.wheel_manifest, args.studio_rez_root,
+            profile=args.profile)
 
 
 if __name__ == "__main__":
