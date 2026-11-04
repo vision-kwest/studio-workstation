@@ -259,3 +259,18 @@ to the `dev` package stage.
 
 For usage, prerequisites and the complete error-contract description,
 see [Task 4 OpenUSD validation](rez-openusd-smoke.md).
+
+## Task 5 — GPU reuse of the same standalone software stack
+
+The original Task 2 adapter was CPU-only until Task 5. Its profile validation
+now permits **either `cpu` or `gpu`**, but uses exactly the same
+`/opt/studio/packages` EFS fstab contract, IAM/TLS read-only consumer
+configuration, mount idempotence, retries and failure handling. There is no
+GPU-specific filesystem or separate Rez package repository.
+
+The Task 3 pinned Rez installer and Task 4 OpenUSD smoke checker also accept
+`--profile gpu` while preserving CPU defaults, identical production-only
+Rez paths and OpenUSD 26.05 validation. The change is **offline-only**:
+nothing is wired into RES bootstrap or GPU create/start/stop/destroy, and no
+live EFS, Python ABI or NVIDIA check has been performed by these additions.
+A profile flag is not an EC2 identity check. See [GPU parity plan](rez-openusd-gpu-parity.md).
