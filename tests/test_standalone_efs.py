@@ -203,7 +203,7 @@ class StandaloneEfsTests(TestCase):
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         with self.assertRaisesRegex(ValueError, "Unexpected or writable"):
             self.configure(profile="gpu", runner=timeout_with_writable_mount)
-        self.assertEqual(self.fstab.read_text(), "# original entry\\n")
+        self.assertEqual(self.fstab.read_text(), "# original entry\n")
 
     def test_all_failed_retries_restore_only_new_fstab_line(self):
         def fail(argv, **kwargs):
