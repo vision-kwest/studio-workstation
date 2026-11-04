@@ -1,7 +1,11 @@
 # Task 1 audit: RES 2026.06 EFS reuse for Rez / OpenUSD
 
-**Status:** Design + offline preflight only. No EFS mount, EC2, AWS/IAM edit,
-RES runtime edit, AMI rebuild, SSH change or deployment. Task 2 needs approval.
+**Status after Task 6:** RES EFS audit, opt-in CPU/GPU adapter, Rez 3.4.0
+installer and OpenUSD validators are implemented and tested **offline in draft
+PR #72**, but never deployed. No EFS mount, EC2 launch, AWS/IAM change,
+RES/SSH/DCV/Image Builder edit, software promotion or merge. Original Task 1
+design findings below are retained as historical context. Live acceptance
+still needs separate approval and independent EFS identity verification.
 
 ## Audited source and exact call graph
 
@@ -130,14 +134,15 @@ Tests use only temporary fixture directories and synthetic mount tables.
 
 ## Task 2 implementation — opt-in CPU EFS adapter (offline only)
 
-`runtime/standalone_efs.py` now implements the **small CPU-only mount adapter**
-outside the RES bootstrap. It has no startup hook and does not run automatically.
+`runtime/standalone_efs.py` originally implemented a CPU-only adapter,
+and Task 5 enabled GPU parity using the **same implementation** outside the RES bootstrap. It has no startup hook and does not run automatically.
 The implementation retains the core RES EFS fstab/idempotence principles,
 but deliberately does not call its full `configure()` or legacy NFS4 helper:
 those depend on DynamoDB / SSH key handling or lack required TLS/IAM assurances.
 
 The adapter accepts only reviewed-format `fs-...` and `fsap-...` IDs,
-`profile="cpu"`, and the fixed mountpoint `/opt/studio/packages`.
+`profile="cpu"` or `profile="gpu"`, and the fixed mountpoint
+`/opt/studio/packages`. These profile flags do not attest actual EC2 identity.
 Its managed fstab entry uses the approved EFS helper style:
 
 ```text
@@ -274,3 +279,32 @@ Rez paths and OpenUSD 26.05 validation. The change is **offline-only**:
 nothing is wired into RES bootstrap or GPU create/start/stop/destroy, and no
 live EFS, Python ABI or NVIDIA check has been performed by these additions.
 A profile flag is not an EC2 identity check. See [GPU parity plan](rez-openusd-gpu-parity.md).
+
+## Task 6 safety audit and review gate
+
+The adapter now re-reads mount state after a timeout/error before retrying or
+removing its newly added fstab entry. This addresses the case where the EFS
+helper completes a read-only mount despite returning an error, preventing a
+mounted filesystem from being left without its intended persistence entry.
+Offline regression tests cover this race and reject an unexpected writable
+result; no live mount occurred.
+
+The upstream Rez installer creates a non-relocatable virtualenv with absolute
+paths. Task 6 corrected our wrapper to unpack Rez **sources** to a temporary
+directory, run upstream `install.py` directly into the final versioned
+`/opt/studio/rez/3.4.0` location, and clean up only an unsuccessful **new**
+installation. A preexisting valid install is never deleted. Offline tests
+cover partial install and launcher failures. This is **not** a real successful
+Rez installation claim; prerequisites and source/wheel hashes must still be
+validated on actual approved artifacts.
+
+The new offline isolation regressions confirm that RES still skips its full
+storage handler in standalone mode and that the Studio CLI, RES renderer,
+DCV, SSH and guarded GPU lifecycle have **no implicit EFS/Rez/OpenUSD
+startup hooks**. Actual EFS IAM access-point and mount target identity,
+`prod/usd/26.05` availability, Ubuntu Python ABI and GPU readiness are
+unverified by PR #72 and must be checked separately.
+
+See the [supervised live acceptance and rollback gate](rez-openusd-live-acceptance-plan.md),
+[Quick Start](../README.md#optional-studio-software--draft-pr-72-offline-only),
+and [Studio CLI software notes](studio-cli.md#optional-rez--openusd-software-integration--draft-pr-72).
