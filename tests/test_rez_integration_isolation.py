@@ -18,12 +18,19 @@ class StandaloneIntegrationIsolationTests(unittest.TestCase):
         self.assertIn("dcv.configure()", bootstrap)
         self.assertIn("x_server._x_server_validated()", bootstrap)
 
-    def test_ssh_policy_unchanged_by_rez_and_efs(self):
+    def test_ssh_policy_is_independent_of_rez_and_efs(self):
         bootstrap = self.read("runtime/overrides/ideavirtualdesktop/app/linux/bootstrap.py")
-        self.assertIn("restrict_ssh.configure(session_owner=True)", bootstrap)
-        self.assertIn("disable_ssh.configure()", bootstrap)
         self.assertNotIn("standalone_efs", bootstrap)
         self.assertNotIn("install_workstation_rez", bootstrap)
+        # Do not lock in a permanent SSH-disabled policy: Issue #70 may
+        # deliberately enable optional developer SSH later.
+        for path in ("runtime/standalone_efs.py",
+                     "scripts/install_workstation_rez.py",
+                     "scripts/check_openusd_rez.py"):
+            with self.subTest(path=path):
+                source = self.read(path)
+                self.assertNotIn("disable_ssh.configure(", source)
+                self.assertNotIn("authorized_keys", source)
 
     def test_main_lifecycle_does_not_implicitly_mount_or_install(self):
         management = self.read("scripts/studio_workstation_cli.py")
