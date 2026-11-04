@@ -9,6 +9,7 @@ on:
       - 'tests/test_openusd_rez_smoke.py'
       - 'fixtures/openusd/hello.usda'
       - 'docs/rez-openusd-smoke.md'
+      - 'docs/rez-openusd-gpu-parity.md'
       - 'tests/test_workstation_rez_setup.py'
       - 'docs/rez-workstation-setup.md'
       - 'tests/test_standalone_efs.py'
