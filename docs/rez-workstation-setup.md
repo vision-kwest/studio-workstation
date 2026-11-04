@@ -105,3 +105,14 @@ models/projects proposal remains tracked separately in #71; optional SSH in
 #70. No merge or live AWS mutation is authorized by this document.
 
 See [RES EFS audit and adapter](rez-openusd-res-efs-audit.md).
+
+## GPU profile reuse (Task 5)
+
+This original Task 3 installer was CPU-only before Task 5. The same pinned
+Rez 3.4.0 production installer can now be used by either the `cpu`
+(default) or `gpu` profile, selected with `--profile gpu`. Both use the
+identical `studio-rez` production config, root EBS installation location,
+launcher and read-only `/opt/studio/packages/prod` repository. No GPU
+driver, DCV or RES lifecycle configuration is changed. This has only been
+tested with offline mocks and a fresh-shell fixture; it has **not** been
+installed on a GPU workstation. See [GPU parity](rez-openusd-gpu-parity.md).
