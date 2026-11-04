@@ -201,9 +201,21 @@ class StandaloneEfsTests(TestCase):
         def timeout_with_writable_mount(argv, **kwargs):
             self.active_mount(flags="rw,nosuid")
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
-        with self.assertRaisesRegex(ValueError, "Unexpected or writable"):
+        with self.assertRaisesRegex(RuntimeError, "manual reconciliation"):
             self.configure(profile="gpu", runner=timeout_with_writable_mount)
-        self.assertEqual(self.fstab.read_text(), "# original entry\n")
+        # Unexpected active mount is not automatically detached. Preserve
+        # the exact managed fstab entry for an operator to reconcile safely.
+        self.assertIn("ro,tls,iam,accesspoint=", self.fstab.read_text())
+        self.assertTrue(efs._target_present(self.mountinfo.read_text()))
+
+    def test_failed_autofs_stub_keeps_fstab_for_manual_reconciliation(self):
+        def partial(argv, **kwargs):
+            self.active_mount(flags="ro,nosuid", fstype="autofs")
+            raise subprocess.CalledProcessError(32, argv)
+        with self.assertRaisesRegex(RuntimeError, "manual reconciliation"):
+            self.configure(runner=partial)
+        self.assertIn("ro,tls,iam,accesspoint=", self.fstab.read_text())
+        self.assertTrue(efs._target_present(self.mountinfo.read_text()))
 
     def test_all_failed_retries_restore_only_new_fstab_line(self):
         def fail(argv, **kwargs):
