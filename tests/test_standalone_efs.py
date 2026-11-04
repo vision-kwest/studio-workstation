@@ -63,6 +63,26 @@ class StandaloneEfsTests(TestCase):
         self.assertEqual(self.fstab.read_text().count("fs-" + FS[3:]), 1)
         self.assertNotIn("mount -a", self.fstab.read_text())
 
+    def test_read_only_mount_exposes_existing_rez_package_metadata(self):
+        """The preflight reads package files only after a verified ro mount."""
+        import json
+        from scripts import rez_openusd_preflight
+        self.configure()  # Synthetic mount only.
+        pkg = self.mountpoint / "dev" / "usd" / "26.05"
+        (pkg / "lib" / "python").mkdir(parents=True)
+        (pkg / "package.py").write_text(
+            'name="usd"\nversion="26.05"\n'
+            'requires=["platform-linux","arch-x86_64"]\n', encoding="utf-8")
+        (pkg / "manifest.json").write_text(
+            json.dumps({"package_name": "usd", "package_version": "26.05"}),
+            encoding="utf-8")
+        result = rez_openusd_preflight.inspect(
+            self.mountpoint, "dev",
+            mountinfo=self.mountinfo.read_text(encoding="utf-8"))
+        self.assertTrue(result["read_only"])
+        self.assertIn("UNVERIFIED", result["python_abi"])
+        self.assertEqual(result["package"], str(pkg))
+
     def test_second_run_is_idempotent_without_new_mount(self):
         self.configure()
         self.called.clear()
