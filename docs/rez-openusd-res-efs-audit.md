@@ -160,8 +160,11 @@ with `studio workstation create/start`. It checks that `mount.efs` exists,
 locks and validates /etc/fstab, rejects conflicting/duplicate targets,
 refuses a symlink or nonempty unmanaged mount path, mounts **only the exact
 mountpoint**, retries transient errors a bounded number of times and
-verifies the resulting mount is **NFS4 and read-only**. On a failed
-new mount it restores only its own appended fstab line. It never invokes
+verifies the resulting mount is **NFS4 and read-only**. On a
+**verified unmounted** failure it restores only its own appended fstab line;
+if an NFS or automount entry is still present in mountinfo, it preserves
+the managed line and fails closed for explicit operator reconciliation.
+It never invokes
 global `mount -a`, modifies SSH keys, changes RES runtime, or touches
 other mount entries.
 
@@ -284,10 +287,12 @@ A profile flag is not an EC2 identity check. See [GPU parity plan](rez-openusd-g
 
 The adapter now re-reads mount state after a timeout/error before retrying or
 removing its newly added fstab entry. This addresses the case where the EFS
-helper completes a read-only mount despite returning an error, preventing a
-mounted filesystem from being left without its intended persistence entry.
-Offline regression tests cover this race and reject an unexpected writable
-result; no live mount occurred.
+helper completes a read-only mount despite returning an error. If an unexpected
+writable mount or an incomplete automount stub remains active, the adapter
+**retains** its managed fstab line and raises a manual-reconciliation error;
+it never silently abandons an active mount. Verified unmounted failures still
+roll back the newly appended fstab line. Offline regression tests cover these
+cases; no live mount occurred.
 
 The upstream Rez installer creates a non-relocatable virtualenv with absolute
 paths. Task 6 corrected our wrapper to unpack Rez **sources** to a temporary
