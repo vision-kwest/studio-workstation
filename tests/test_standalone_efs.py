@@ -187,6 +187,24 @@ class StandaloneEfsTests(TestCase):
         self.assertEqual(len(attempts), 2)
         self.assertEqual(self.called, [("mount", str(self.mountpoint))])
 
+    def test_timeout_after_successful_mount_keeps_verified_fstab(self):
+        def timeout_after_mount(argv, **kwargs):
+            self.called.append(tuple(argv))
+            self.active_mount()
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        result = self.configure(profile="gpu", runner=timeout_after_mount)
+        self.assertEqual(result, {"mounted": True, "changed": True})
+        self.assertEqual(len(self.called), 1)
+        self.assertIn("ro,tls,iam,accesspoint=", self.fstab.read_text())
+
+    def test_timeout_after_unexpected_rw_mount_fails_closed(self):
+        def timeout_with_writable_mount(argv, **kwargs):
+            self.active_mount(flags="rw,nosuid")
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        with self.assertRaisesRegex(ValueError, "Unexpected or writable"):
+            self.configure(profile="gpu", runner=timeout_with_writable_mount)
+        self.assertEqual(self.fstab.read_text(), "# original entry\\n")
+
     def test_all_failed_retries_restore_only_new_fstab_line(self):
         def fail(argv, **kwargs):
             self.called.append(tuple(argv))
