@@ -1,5 +1,4 @@
 """Entirely offline, mocked OpenUSD tools and Python ABI contract tests."""
-import copy
 import json
 from pathlib import Path
 import shutil
@@ -174,9 +173,6 @@ class OpenUsdRezSmokeTests(unittest.TestCase):
         self.assertEqual(len(self.runner.calls), 3)
 
     def test_missing_or_duplicated_python_probe_output_rejected(self):
-        with mock.patch.object(smoke, "PROBE_TAG", "DIFFERENT="):
-            # The test runner uses the changed tag, so force malformed JSON instead.
-            pass
         for output in ("", "junk\n", smoke.PROBE_TAG + "{}\n" + smoke.PROBE_TAG + "{}\n",
                        smoke.PROBE_TAG + "{bad json\n"):
             with self.subTest(output=output):
@@ -250,12 +246,11 @@ class OpenUsdRezSmokeTests(unittest.TestCase):
         self.assertIn('def Xform "World"', content)
 
     def test_cli_error_returns_nonzero_without_commands(self):
-        with mock.patch.object(smoke, "smoke", side_effect=RuntimeError("unavailable")):
-            with mock.patch.object(smoke, "sys") as sys:
-                # Use parser.exit rather than actual process exit.
-                with self.assertRaises(SystemExit) as error:
-                    smoke.main([])
+        with mock.patch.object(smoke, "smoke", side_effect=RuntimeError("unavailable")) as execute:
+            with self.assertRaises(SystemExit) as error:
+                smoke.main([])
         self.assertEqual(error.exception.code, 1)
+        execute.assert_called_once()
 
 
 if __name__ == "__main__":
