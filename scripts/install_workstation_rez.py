@@ -11,6 +11,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -80,9 +81,11 @@ def _checkout(root, run):
 
 
 def _launcher(root, target):
+    source = shlex.quote(str(root / "env/studio-prod.sh"))
+    executable = shlex.quote(str(target / "bin/rez/rez-env"))
     return ('#!/bin/bash\nset -e\nexport STUDIO_REZ_QUIET=1\n'
-            f'source "{root}/env/studio-prod.sh"\n'
-            f'exec "{target}/bin/rez/rez-env" "$@"\n')
+            f'source {source}\n'
+            f'exec {executable} "$@"\n')
 
 
 def plan(archive, wheelhouse, wheel_manifest, studio_rez, *,
