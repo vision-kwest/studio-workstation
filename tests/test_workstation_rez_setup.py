@@ -181,6 +181,7 @@ class WorkstationRezSetupTests(unittest.TestCase):
 
     def test_unsafe_archive_symlink_is_rejected_without_install(self):
         self._archive(kind="symlink")
+        rez.SOURCE_SHA256 = hashlib.sha256(self.archive.read_bytes()).hexdigest()
         with self.assertRaisesRegex(ValueError, "Unsafe"):
             self.config(rez.install)
         self.assertFalse(self.target.exists())
@@ -188,6 +189,7 @@ class WorkstationRezSetupTests(unittest.TestCase):
 
     def test_tar_path_traversal_is_rejected(self):
         self._archive(member="rez-3.4.0/../../escape")
+        rez.SOURCE_SHA256 = hashlib.sha256(self.archive.read_bytes()).hexdigest()
         with self.assertRaisesRegex(ValueError, "Unsafe"):
             self.config(rez.install)
         self.assertFalse((self.root / "escape").exists())
