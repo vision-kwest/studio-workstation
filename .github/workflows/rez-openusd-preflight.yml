@@ -4,6 +4,8 @@ on:
     paths:
       - 'scripts/rez_openusd_preflight.py'
       - 'runtime/standalone_efs.py'
+      - 'scripts/install_workstation_rez.py'
+      - 'tests/test_workstation_rez_setup.py'
       - 'tests/test_standalone_efs.py'
       - 'tests/test_rez_openusd_preflight.py'
       - 'docs/rez-openusd-res-efs-audit.md'
@@ -17,8 +19,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Compile read-only preflight
-        run: python3 -m py_compile scripts/rez_openusd_preflight.py runtime/standalone_efs.py
+        run: python3 -m py_compile scripts/rez_openusd_preflight.py runtime/standalone_efs.py scripts/install_workstation_rez.py
       - name: Run synthetic EFS and Rez/OpenUSD contract tests (no AWS)
         run: python3 -m unittest discover -s tests -p 'test_rez_openusd_preflight.py' -v
       - name: Test standalone EFS mount adapter offline (no real mounts)
         run: python3 -m unittest discover -s tests -p 'test_standalone_efs.py' -v
+      - name: Verify CPU Rez environment installation and persistence contracts offline
+        run: python3 -m unittest discover -s tests -p 'test_workstation_rez_setup.py' -v
