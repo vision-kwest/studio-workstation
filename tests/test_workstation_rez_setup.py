@@ -203,10 +203,49 @@ class WorkstationRezSetupTests(unittest.TestCase):
         argv, opts = install_calls[0]
         self.assertEqual(argv[:2], [rez.sys.executable, "-E"])
         self.assertTrue(argv[2].endswith("/rez-3.4.0/install.py"))
+        # Virtualenv shebangs must point to final location, not a renamed stage.
+        self.assertEqual(argv[-1], str(self.target))
         self.assertEqual(opts["env"]["PIP_NO_INDEX"], "1")
         self.assertEqual(opts["env"]["PIP_FIND_LINKS"], str(self.wheels))
         self.assertTrue((self.target / "bin/rez/.rez_production_install").is_file())
         self.assertEqual(self.wrapper.stat().st_mode & 0o777, 0o755)
+
+    def test_failed_upstream_install_cleans_partially_created_new_target(self):
+        class PartialRunner(FakeRunner):
+            def __call__(self, argv, **kwargs):
+                if argv[0] != "git":
+                    target = Path(argv[-1])
+                    target.mkdir(parents=True)
+                    (target / "partial-install").write_text("unusable")
+                    raise subprocess.CalledProcessError(1, argv)
+                return super().__call__(argv, **kwargs)
+        self.run = PartialRunner()
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.config(rez.install, profile="gpu")
+        self.assertFalse(self.target.exists())
+        self.assertFalse(self.wrapper.exists())
+
+    def test_launcher_failure_cleans_new_install_not_unrelated_artifacts(self):
+        unrelated = self.root / "unrelated"
+        unrelated.write_text("keep")
+        with mock.patch.object(Path, "replace", side_effect=PermissionError("denied")):
+            with self.assertRaises(PermissionError):
+                self.config(rez.install)
+        self.assertFalse(self.target.exists())
+        self.assertFalse(self.wrapper.exists())
+        self.assertEqual(unrelated.read_text(), "keep")
+
+    def test_failed_launcher_retry_preserves_preexisting_valid_rez(self):
+        self.config(rez.install)
+        self.wrapper.unlink()
+        original = (self.target / "bin/rez/.rez_production_install").read_text()
+        with mock.patch.object(Path, "replace", side_effect=PermissionError("denied")):
+            with self.assertRaises(PermissionError):
+                self.config(rez.install)
+        self.assertTrue(self.target.exists())
+        self.assertEqual((self.target / "bin/rez/.rez_production_install").read_text(),
+                         original)
+        self.assertFalse(self.wrapper.exists())
 
     def test_second_run_is_idempotent_and_does_not_reinstall(self):
         self.config(rez.install)
