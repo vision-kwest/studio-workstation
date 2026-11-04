@@ -64,6 +64,15 @@ def _mount_state(mountinfo):
     return True
 
 
+def _target_present(mountinfo):
+    """Detect even an unsafe/partial mount before changing persistence."""
+    for line in mountinfo.splitlines():
+        fields = line.split(" - ", 1)[0].split()
+        if len(fields) >= 5 and fields[4] == str(MOUNTPOINT):
+            return True
+    return False
+
+
 def plan(filesystem_id, access_point_id, *, profile="cpu", fstab_text=""):
     entry = _entry(filesystem_id, access_point_id, profile)
     return {"profile": profile, "mountpoint": str(MOUNTPOINT), "fstab_entry": entry,
@@ -126,8 +135,21 @@ def configure(filesystem_id, access_point_id, *, profile="cpu",
                     if attempt == len(RETRY_DELAYS):
                         raise RuntimeError("EFS mount failed; verify mount helper, IAM and TCP/2049")
                     sleeper(RETRY_DELAYS[attempt])
-        except BaseException:
+        except BaseException as exc:
             if appended:
+                # A failed/unsafe mount may still be present (including as
+                # an autofs stub). Never orphan an active mount by removing
+                # its managed fstab entry. Escalate for supervised cleanup.
+                try:
+                    visible = _target_present(mountinfo.read_text(encoding="utf-8"))
+                except OSError as read_error:
+                    raise RuntimeError(
+                        "Cannot verify EFS mount after failure; manual reconciliation"
+                    ) from read_error
+                if visible:
+                    raise RuntimeError(
+                        "EFS mount state unsafe; fstab retained for manual reconciliation"
+                    ) from exc
                 file.seek(0)
                 current = file.read()
                 if current == original + suffix:
