@@ -114,6 +114,8 @@ def _validate_probe(output, package, root):
     native = _under_package(data.get("pxr_native_file"), package, "pxr.Usd._usd")
     if native.suffix != ".so":
         raise ValueError("pxr.Usd native binding is not a shared library")
+    if ".cpython-" in native.name and f".{soabi}.so" not in native.name:
+        raise ValueError("pxr.Usd native extension ABI differs from running CPython")
     return {"verified": True, "python_version": ".".join(map(str, version)),
             "python_soabi": soabi, "usd_version": usd_version,
             "native_module": str(native)}
