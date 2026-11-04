@@ -82,7 +82,10 @@ not survive root-volume destruction.
 healthy EFS package mount and a promoted `prod/usd/26.05` package; those
 are not established by this task. The package publisher defaults to
 `dev/usd/26.05`. The actual Python ABI, libstdc++/shared-library
-compatibility and `pxr` import still require Task 4 supervised smoke tests.
+compatibility and `pxr` import remain **unverified on EC2**.
+[Task 4's OpenUSD smoke checker](rez-openusd-smoke.md) is now available
+for a separately approved CPU validation; its offline tests do not import
+the real OpenUSD extension.
 
 ## Offline tests
 
