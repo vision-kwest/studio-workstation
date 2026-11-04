@@ -56,10 +56,14 @@ sudo python3 scripts/install_workstation_rez.py \
 ```
 
 This command **writes the root EBS filesystem** when actually run. It
-unpacks only vetted tar members into a staging directory, invokes upstream
-`install.py` offline, verifies the Rez production marker/version and
-launcher, and publishes the installation at
-`/opt/studio/rez/3.4.0` alongside the stable executable
+unpacks the vetted **source archive** into a temporary directory, then
+invokes upstream `install.py` offline **at the final path** 
+`/opt/studio/rez/3.4.0`. Rez's production virtualenv is not safely
+relocatable after creation because its executables contain absolute paths.
+The installer checks the production marker/version and publishes only the
+launcher after verification. If a *new* installation fails, it cleans up
+only the newly created versioned directory; it never removes a preexisting
+valid version. The stable executable is
 `/usr/local/bin/studio-rez-env`. An exact repeat is idempotent; existing
 foreign launchers/installations fail closed rather than being overwritten.
 
@@ -92,7 +96,7 @@ the real OpenUSD extension.
 `tests/test_workstation_rez_setup.py` uses temporary files and a mocked
 upstream installer; no actual Rez install, pip network, EFS mount, EC2 or
 AWS calls. It covers checksum and checkout pinning, dev/prod isolation,
-unapproved artifacts, unsafe archive members, staging rollback, idempotence,
+unapproved artifacts, unsafe archive members, new-install rollback, idempotence,
 production marker/version, launcher PATH, argument forwarding and a **fresh
 shell** invocation that restores the production configuration. The CI
 workflow `rez-openusd-preflight.yml` runs it alongside Tasks 1–2 tests.
