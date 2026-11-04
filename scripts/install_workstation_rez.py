@@ -150,25 +150,33 @@ def install(archive, wheelhouse, wheel_manifest, studio_rez, *,
     with tempfile.TemporaryDirectory(prefix=".rez-stage-", dir=target.parent) as tmp:
         temp = Path(tmp)
         installer = _unpack(Path(archive), temp)
-        if not target.exists():
-            staging = temp / "install"
-            env = dict(os.environ, PIP_NO_INDEX="1",
-                       PIP_FIND_LINKS=str(config["wheelhouse"].resolve(strict=True)),
-                       PIP_DISABLE_PIP_VERSION_CHECK="1")
-            run([sys.executable, "-E", str(installer), str(staging)],
-                check=True, env=env)
-            marker = staging / "bin/rez/.rez_production_install"
-            if not marker.is_file() or marker.read_text().strip() != VERSION or not (
-                    staging / "bin/rez/rez-env").is_file():
-                raise RuntimeError("Upstream Rez production install verification failed")
-            staging.rename(target)
-        wrapper.parent.mkdir(parents=True, exist_ok=True)
-        temporary = temp / "studio-rez-env"
-        temporary.write_text(config["launcher"], encoding="utf-8")
-        temporary.chmod(0o755)
-        if wrapper.exists() and wrapper.read_text() != config["launcher"]:
-            raise ValueError("Rez launcher changed during install")
-        temporary.replace(wrapper)
+        # Upstream install.py creates a virtualenv with absolute shebangs.
+        # Installing in a staging directory then renaming is NOT relocatable.
+        # Build directly at the final versioned path, and remove only a
+        # brand-new failed installation (never an existing valid version).
+        created_here = not target.exists()
+        try:
+            if created_here:
+                env = dict(os.environ, PIP_NO_INDEX="1",
+                           PIP_FIND_LINKS=str(config["wheelhouse"].resolve(strict=True)),
+                           PIP_DISABLE_PIP_VERSION_CHECK="1")
+                run([sys.executable, "-E", str(installer), str(target)],
+                    check=True, env=env)
+                marker = target / "bin/rez/.rez_production_install"
+                if not marker.is_file() or marker.read_text().strip() != VERSION or not (
+                        target / "bin/rez/rez-env").is_file():
+                    raise RuntimeError("Upstream Rez production install verification failed")
+            wrapper.parent.mkdir(parents=True, exist_ok=True)
+            temporary = temp / "studio-rez-env"
+            temporary.write_text(config["launcher"], encoding="utf-8")
+            temporary.chmod(0o755)
+            if wrapper.exists() and wrapper.read_text() != config["launcher"]:
+                raise ValueError("Rez launcher changed during install")
+            temporary.replace(wrapper)
+        except BaseException:
+            if created_here and target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            raise
     return {"installed": True, "changed": True, "version": VERSION}
 
 
