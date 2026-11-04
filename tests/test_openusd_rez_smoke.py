@@ -72,10 +72,10 @@ class OpenUsdRezSmokeTests(unittest.TestCase):
         }
         self.runner = ToolRunner(self.info)
 
-    def run_smoke(self):
-        return smoke.smoke(root=self.root, launcher=self.launcher,
-                           fixture=smoke.FIXTURE, mountinfo=self.mountinfo,
-                           runner=self.runner)
+    def run_smoke(self, *, profile="cpu"):
+        return smoke.smoke(profile=profile, root=self.root,
+                           launcher=self.launcher, fixture=smoke.FIXTURE,
+                           mountinfo=self.mountinfo, runner=self.runner)
 
     def test_success_calls_exact_rez_tools_and_import_probe_without_shell(self):
         result = self.run_smoke()
@@ -99,6 +99,41 @@ class OpenUsdRezSmokeTests(unittest.TestCase):
         self.assertIn('importlib.import_module("pxr.Usd._usd")',
                       self.runner.calls[2][0][-1])
         self.assertIn("Usd.Stage.CreateInMemory()", self.runner.calls[2][0][-1])
+
+    def test_gpu_profile_resolves_identical_prod_openusd_package(self):
+        cpu = self.run_smoke()
+        cpu_commands = [cmd for cmd, _ in self.runner.calls]
+        self.runner.calls.clear()
+        gpu = self.run_smoke(profile="gpu")
+        gpu_commands = [cmd for cmd, _ in self.runner.calls]
+        self.assertEqual(cpu_commands, gpu_commands)
+        self.assertEqual(cpu.pop("profile"), "cpu")
+        self.assertEqual(gpu.pop("profile"), "gpu")
+        self.assertEqual(cpu, gpu)
+        self.assertTrue(gpu["python_abi"]["verified"])
+
+    def test_gpu_python_abi_failure_is_not_suppressed(self):
+        self.info["soabi"] = "cpython-311-x86_64-linux-gnu"
+        with self.assertRaisesRegex(ValueError, "Python ABI tag"):
+            self.run_smoke(profile="gpu")
+        self.assertEqual(len(self.runner.calls), 3)
+
+    def test_gpu_rejects_dev_fallback_even_if_package_present(self):
+        self.info["rez_packages_path"] = str(self.root / "dev")
+        with self.assertRaisesRegex(ValueError, "outside the production"):
+            self.run_smoke(profile="gpu")
+
+    def test_unsupported_gpu_variant_fails_before_disk_access_or_commands(self):
+        self.launcher.unlink()
+        with self.assertRaisesRegex(ValueError, "limited to CPU/GPU"):
+            self.run_smoke(profile="g5")
+        self.assertFalse(self.runner.calls)
+
+    def test_cli_gpu_profile_is_forwarded_to_same_checker(self):
+        with mock.patch.object(smoke, "smoke", return_value={"status": "verified"}) as checker:
+            smoke.main(["--profile", "gpu"])
+        self.assertEqual(checker.call_args.kwargs["profile"], "gpu")
+        self.assertEqual(checker.call_args.kwargs["root"], smoke.PACKAGE_ROOT)
 
     def test_fails_closed_when_only_dev_package_exists(self):
         shutil.rmtree(self.pkg)
