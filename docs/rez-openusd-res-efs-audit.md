@@ -128,6 +128,60 @@ but **explicitly labels Python ABI and EFS identity as UNVERIFIED**.
 Those need a runtime smoke test and trusted AWS/EFS configuration checks.
 Tests use only temporary fixture directories and synthetic mount tables.
 
+## Task 2 implementation — opt-in CPU EFS adapter (offline only)
+
+`runtime/standalone_efs.py` now implements the **small CPU-only mount adapter**
+outside the RES bootstrap. It has no startup hook and does not run automatically.
+The implementation retains the core RES EFS fstab/idempotence principles,
+but deliberately does not call its full `configure()` or legacy NFS4 helper:
+those depend on DynamoDB / SSH key handling or lack required TLS/IAM assurances.
+
+The adapter accepts only reviewed-format `fs-...` and `fsap-...` IDs,
+`profile="cpu"`, and the fixed mountpoint `/opt/studio/packages`.
+Its managed fstab entry uses the approved EFS helper style:
+
+```text
+fs-REVIEWED_ID:/ /opt/studio/packages efs _netdev,nofail,x-systemd.automount,ro,tls,iam,accesspoint=fsap-REVIEWED_ID 0 0
+```
+
+The IDs above are **placeholders**, not discovered AWS resources. Final
+filesystem ID, access-point policy, EFS helper package version, TCP/2049
+network permission, encryption and actual EFS access are not verified.
+
+`plan(fs_id, access_point_id, fstab_text=...)` is pure and never changes
+the filesystem. `configure(...)` is an **explicit, privileged function
+for a separately authorized future invocation**, not a command integrated
+with `studio workstation create/start`. It checks that `mount.efs` exists,
+locks and validates /etc/fstab, rejects conflicting/duplicate targets,
+refuses a symlink or nonempty unmanaged mount path, mounts **only the exact
+mountpoint**, retries transient errors a bounded number of times and
+verifies the resulting mount is **NFS4 and read-only**. On a failed
+new mount it restores only its own appended fstab line. It never invokes
+global `mount -a`, modifies SSH keys, changes RES runtime, or touches
+other mount entries.
+
+The `_netdev,nofail,x-systemd.automount` options make storage an optional
+on-demand dependency rather than a boot-critical DCV prerequisite. No
+EFS unmount or delete is attempted by workstation lifecycle cleanup.
+For the moment the adapter is **not wired to CPU EC2 bootstrap**.
+Task 2 has no evidence of a real mount, permissions, or reboot survival.
+
+All mount/write tests use temporary fstab/mountinfo files and injected
+runner callbacks: no kernel mounts, EFS, AWS or IAM calls occurred.
+The separately existing `rez_openusd_preflight.inspect()` remains the
+read-only post-mount package verifier and intentionally cannot prove the
+specific EFS filesystem identity or OpenUSD binary/Python ABI.
+
+**Security and implementation follow-ups:** Confirm whether access-point
+IAM resource policy actually grants read-only `ClientMount` while denying
+`ClientWrite` to the workstation instance role; local `ro` alone
+is not a complete authorization boundary. The EFS TLS helper may report
+`127.0.0.1:/` as the kernel NFS source, so mountinfo alone does not
+cryptographically prove which EFS/access point was mounted. Review the
+approved EFS configuration and client identity before any live acceptance.
+The adapter doesn't yet support shared writable assets/models (#71),
+GPU parity (Task 5), or normal Rez installation (Task 3).
+
 ## Task 2 prerequisites / stop conditions
 
 - Identify the **actual** EFS file system and mount targets/SG, whether its
