@@ -4,7 +4,7 @@ A standalone AWS Ubuntu 24.04 workstation using **EC2**, **CloudFormation**, **A
 
 ![Studio Workstation architecture](docs/images/system-architecture.svg)
 
-## Status after merged PR #65
+## Current workstation and software-integration status
 
 | Capability | Verified outcome |
 |---|---|
@@ -16,6 +16,7 @@ A standalone AWS Ubuntu 24.04 workstation using **EC2**, **CloudFormation**, **A
 | PR #65 | **Merged into `main`** |
 | GPU Image Builder pipeline | Still disabled and pointing to older recipe 0.1.10; successful 0.1.11/1 image was built separately |
 | Production access/security | Trusted public TLS and secure access from changing networks remain separate hardening work ([Issue #62](https://github.com/vision-kwest/studio-workstation/issues/62)) |
+| Rez + OpenUSD (draft PR #72) | CPU/GPU EFS adapter, pinned Rez 3.4.0 installer and OpenUSD 26.05 smoke checks tested **offline only**; no live install, mount or package promotion |
 
 **Important distinction:** Successful one-off GPU CLI acceptance does **not** make this a general-purpose, unlimited GPU launcher. The current code restricts GPU creation to the previously approved `studio-gpu-cli-accept65` stack and its exact cleanup token, and a dedicated IAM role authorizes expiration for that same scope. The test resources were deleted afterward; the role remains. See [GPU-specific requirements and limitations](docs/studio-cli.md#gpu-workstation-tested-acceptance-scope).
 
@@ -59,11 +60,43 @@ python3 studio workstation stop --stack STACK_NAME
 python3 studio workstation start --stack STACK_NAME
 ```
 
-The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`. `create` performs the action unless `--dry-run` is specified. On the draft PR #67 branch, `destroy --stack STACK_NAME --delete-stack` performs guarded cleanup of approved GPU retained EBS and both expiration schedules after exact resource verification, and safely destroys non-anchor CPU stacks. The original shared-hostname CPU anchor is protected; any partial failure requires operator review. See [Studio CLI operations](docs/studio-cli.md#daily-operation-and-safe-cleanup-pr-67-draft).
+The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`. `create` performs the action unless `--dry-run` is specified. The merged PR #67 implementation of `destroy --stack STACK_NAME --delete-stack` performs guarded cleanup of approved GPU retained EBS and both expiration schedules after exact resource verification, and safely destroys non-anchor CPU stacks. The original shared-hostname CPU anchor is protected; any partial failure requires operator review. See [Studio CLI operations](docs/studio-cli.md#daily-operation-and-safe-cleanup).
 
 After provisioning, set a unique local `workstation` password interactively via SSM (`sudo passwd workstation`); DCV uses **Linux system credentials**, not AWS console credentials. Login through the DCV URL printed by `connect`.
 
-## Trusted DCV HTTPS — Issue #43 (CPU live; draft PR #67 unmerged)
+## Optional studio software — draft PR #72 (offline only)
+
+CPU and GPU profiles now share an **opt-in** EFS package mount adapter, pinned
+Rez 3.4.0 installer, and `usd-26.05` smoke checker. These are **not**
+`studio workstation create` options and are **not installed automatically**
+by the RES bootstrap, DCV login, or the CLI. They require separately approved
+EFS IAM/networking, read-only mounts and verified local installation artifacts.
+
+For an **already provisioned and approved workstation**, after the EFS and
+Rez setup has been separately authorized and completed, the read-only
+validation commands are:
+
+```bash
+python3 scripts/rez_openusd_preflight.py --stage prod
+python3 scripts/check_openusd_rez.py --profile cpu
+# On a separately validated GPU workstation:
+python3 scripts/check_openusd_rez.py --profile gpu
+```
+
+These commands refuse missing production packages or incompatible Python
+bindings; they do **not** install Rez, mount storage or promote OpenUSD.
+The published OpenUSD package defaults to the `dev` stage, so the existence
+of `prod/usd/26.05` must first be independently verified.
+
+Read [Rez setup](docs/rez-workstation-setup.md),
+[GPU parity](docs/rez-openusd-gpu-parity.md) and the
+[approval-gated live acceptance and rollback plan](docs/rez-openusd-live-acceptance-plan.md).
+Draft [PR #72](https://github.com/vision-kwest/studio-workstation/pull/72)
+remains **unmerged**. Shared writable project data and Ollama models are
+tracked separately in [Issue #71](https://github.com/vision-kwest/studio-workstation/issues/71);
+optional SSH in [Issue #70](https://github.com/vision-kwest/studio-workstation/issues/70).
+
+## Trusted DCV HTTPS — Issue #43 (PR #67 merged)
 
 The approved CPU workstation `studio-workstation-cpu-v013` has a dedicated
 Elastic IP `54.159.180.104` and permanent Route 53 hostname
@@ -79,7 +112,7 @@ Connect when that CPU is running using:
 account. The revised no-op refresh and bounded-generation retention hook
 from PR #67 has now **also been installed and accepted on the CPU**: a
 real AWS agent refresh left DCV's PID and current certificate unchanged,
-and retained two validated generations. The draft PR #67
+and retained two validated generations. PR #67's
 `status --hostname` and `connect` commands subsequently passed unmocked
 from an authorized CloudShell session. The restricted guest role intentionally
 cannot discover CloudFormation stacks; do not widen its rights for CLI access.
@@ -95,8 +128,8 @@ least 80 minutes remaining (60 minutes of handoff margin plus 20 minutes for
 startup). This pre-start fix passed offline tests; it has **not** been live
 retested. Configurable expiration is separately tracked in
 [Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68).
-This is not a general-purpose production GPU launcher. PR #67 remains
-**draft/unmerged** pending explicit review and merge authorization.
+This is not a general-purpose production GPU launcher. PR #67 is **merged**;
+configurable GPU expiration remains in **draft PR #69**.
 
 The read-only `hostname-plan`, `hostname-iam`, and `hostname-return-plan`
 commands inspect the handoff. `hostname-handoff --execute` and
@@ -104,9 +137,9 @@ commands inspect the handoff. `hostname-handoff --execute` and
 [Shared CPU/GPU hostname runbook](docs/issue43-shared-cpu-gpu-handoff.md).
 
 See [the Issue #43 acceptance, operations and rollback runbook](docs/issue43-acm-dcv.md)
-and [the Studio CLI instructions](docs/studio-cli.md#trusted-dcv-hostname--issue-43-draft-pr-67).
-[Draft PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
-is deliberately unmerged; the older custom Lambda/DDNS/Certbot architecture
+and [the Studio CLI instructions](docs/studio-cli.md#trusted-dcv-hostname--issue-43).
+[PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
+is merged; the older custom Lambda/DDNS/Certbot architecture
 has been retired. Public TCP 8443 hardening remains separate Issue #62.
 
 ## Security and operating costs
