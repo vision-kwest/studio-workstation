@@ -86,7 +86,6 @@ class SoftwareRetryCases(unittest.TestCase):
                                  entries or [expected])
 
     def test_interrupted_rez_is_retried_only_when_owned(self):
-        import re
         directory = self.root / "bundle"
         directory.mkdir()
         path = self.root / "rez" / "3.4.0"
@@ -95,7 +94,7 @@ class SoftwareRetryCases(unittest.TestCase):
             'test -f "$dir/studio-rez/env/studio-prod.sh"', 1)[0]
         block = "rez=/opt/studio/rez/3.4.0\n" + block
         block = block.replace("/opt/studio/rez", str(self.root / "rez"))
-        block = "\n".join("  :" if "sha256sum -c -" in line or "tar -xzf" in line
+        block = "\n".join("  :" if "sha256sum -c" in line or "tar -xzf" in line
                           else '  bash "$dir/fake-install" "$rez"' if "PIP_NO_INDEX=1" in line
                           else line for line in block.splitlines()) + "\n"
         installer = directory / "fake-install"
