@@ -370,12 +370,16 @@ def command(args):
             if (args.vpc_id != DEFAULT_VPC or args.subnet_id != DEFAULT_SUBNET or
                     args.instance_profile != DEFAULT_PROFILE or args.disk_size != 100):
                 raise ValueError("GPU acceptance must use the reviewed VPC, subnet, profile and 100 GiB disk")
+        if (args.rez_version_id or args.rez_sha256) and args.vpc_id != DEFAULT_VPC:
+            raise ValueError("Software EFS client SG requires the reviewed VPC")
         prefix = GPU_PREFIX if gpu else f"releases/{args.version}/res-2026.06"
         with tempfile.TemporaryDirectory(prefix="studio-cli-") as temp:
             template = Path(temp) / "workstation.json"
             render = [sys.executable, str(ROOT / "runtime/render_workstation.py"),
                       "--bucket", args.bucket, "--prefix", prefix, "--user", "workstation",
                       "--output", str(template)]
+            if args.rez_version_id or args.rez_sha256:
+                render.extend(["--rez-version-id", args.rez_version_id or "", "--rez-sha256", args.rez_sha256 or ""])
             if gpu:
                 render.extend(["--profile", "gpu", "--lifecycle", "persistent"])
                 if args.cleanup_token:
@@ -537,6 +541,8 @@ def main(argv=None):
                            help="Render and validate without launching AWS resources")
             s.add_argument("--profile", choices=["cpu", "gpu"], default="cpu")
             s.add_argument("--version", default="v0.1.3")
+            s.add_argument("--rez-version-id", help="Approved immutable S3 Rez bundle version")
+            s.add_argument("--rez-sha256", help="SHA-256 of approved Rez bundle")
             s.add_argument("--bucket", default=DEFAULT_BUCKET)
             s.add_argument("--image-id", default=None)
             s.add_argument("--vpc-id", default=DEFAULT_VPC)

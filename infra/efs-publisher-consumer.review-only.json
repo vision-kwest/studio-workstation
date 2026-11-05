@@ -1,0 +1,19 @@
+{
+  "PublisherRole": {
+    "RoleName": "StudioEfsCiPublisher",
+    "InstanceProfileName": "StudioEfsCiPublisher",
+    "AssumeRolePolicyDocument": {
+      "Version": "2012-10-17",
+      "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+    }
+  },
+  "FileSystemPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {"Sid": "RequireTLS", "Effect": "Deny", "Principal": "*", "Action": "elasticfilesystem:Client*", "Resource": "arn:aws:elasticfilesystem:us-east-1:401233741942:file-system/fs-054fd0b72429f4569", "Condition": {"Bool": {"aws:SecureTransport": "false"}}},
+      {"Sid": "PublisherWrite", "Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::401233741942:role/StudioEfsCiPublisher"}, "Action": ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"], "Resource": "arn:aws:elasticfilesystem:us-east-1:401233741942:file-system/fs-054fd0b72429f4569"},
+      {"Sid": "ConsumerMount", "Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::401233741942:role/StudioWorkstationSSMRole"}, "Action": "elasticfilesystem:ClientMount", "Resource": "arn:aws:elasticfilesystem:us-east-1:401233741942:file-system/fs-054fd0b72429f4569"},
+      {"Sid": "ConsumerNoWrite", "Effect": "Deny", "Principal": {"AWS": "arn:aws:iam::401233741942:role/StudioWorkstationSSMRole"}, "Action": ["elasticfilesystem:ClientWrite", "elasticfilesystem:ClientRootAccess"], "Resource": "arn:aws:elasticfilesystem:us-east-1:401233741942:file-system/fs-054fd0b72429f4569"}
+    ]
+  }
+}
