@@ -2,7 +2,9 @@
 import contextlib
 import datetime as dt
 import io
+import json
 import unittest
+from copy import deepcopy
 from unittest.mock import patch
 
 from runtime import pr65_gpu_create as flow
@@ -34,6 +36,7 @@ class FakeAWS:
         self.seen_instances = 0
         self.status = "CREATE_IN_PROGRESS"
         self.schedule_failure = False
+        self.wrong_ebs_readback_role = False
         self.group_state = "ACTIVE"
         self.role_policy_names = [flow.POLICY]
         self.bad_trust = False
@@ -111,7 +114,11 @@ class FakeAWS:
             self.schedules[spec["Name"]] = spec
             return {"ScheduleArn": "arn:aws:scheduler:us-east-1:401233741942:schedule/default/" + spec["Name"]}
         if service == "scheduler" and op == "get-schedule":
-            return self.schedules[rest[rest.index("--name") + 1]]
+            name = rest[rest.index("--name") + 1]
+            schedule = deepcopy(self.schedules[name])
+            if self.wrong_ebs_readback_role and name.startswith("studio-pr65-v-"):
+                schedule["Target"]["RoleArn"] = "arn:aws:iam::401233741942:role/foreign"
+            return schedule
         if service == "ec2" and op == "terminate-instances":
             self.terminated.extend(rest[rest.index("--instance-ids") + 1:])
             return {"TerminatingInstances": []}
@@ -147,6 +154,50 @@ class GuardedCreateTests(unittest.TestCase):
         self.assertEqual(f.terminated, [])
         self.assertTrue(any(c[1:3] == ("cloudformation", "create-stack") for c in f.calls))
         self.assertFalse(any(c[1:3] == ("cloudformation", "deploy") for c in f.calls))
+
+
+    def test_custom_durations_arm_exact_termination_and_retained_ebs_schedules(self):
+        f = FakeAWS()
+        result = self.launch(f, minutes=180, volume_delay_minutes=60)
+        self.assertTrue(result["guard"]["guard_armed"])
+        self.assertEqual(result["terminate_at"], (NOW + dt.timedelta(minutes=180)).isoformat())
+        self.assertEqual(result["volume_cleanup_at"], (NOW + dt.timedelta(minutes=240)).isoformat())
+        self.assertEqual(len(f.schedules), 2)
+        termination = f.schedules["studio-pr65-i-" + IID]
+        cleanup = f.schedules["studio-pr65-v-" + VID]
+        self.assertEqual(termination["ScheduleExpression"], "at(2026-11-01T21:00:00)")
+        self.assertEqual(cleanup["ScheduleExpression"], "at(2026-11-01T22:00:00)")
+        self.assertEqual(termination["Target"]["Arn"], guard.TERMINATE)
+        self.assertEqual(cleanup["Target"]["Arn"], guard.DELETE_VOLUME)
+        self.assertEqual(json.loads(termination["Target"]["Input"]), {"InstanceIds": [IID]})
+        self.assertEqual(json.loads(cleanup["Target"]["Input"]), {"VolumeId": VID})
+        for schedule in (termination, cleanup):
+            self.assertEqual(schedule["GroupName"], guard.GROUP)
+            self.assertEqual(schedule["State"], "ENABLED")
+            self.assertEqual(schedule["Target"]["RoleArn"], guard.ROLE)
+            self.assertEqual(schedule["ActionAfterCompletion"], "DELETE")
+        self.assertEqual(len([c for c in f.calls if c[1:3] ==
+                              ("scheduler", "get-schedule")]), 2)
+        self.assertEqual(f.terminated, [])
+        self.assertEqual(f.deleted, [])
+
+    def test_invalid_direct_duration_rejected_before_cloudformation(self):
+        for minutes, delay in ((59, 45), (241, 45), (150, 29), (150, 121),
+                               (True, 45), (150, "60")):
+            with self.subTest(minutes=minutes, delay=delay):
+                f = FakeAWS()
+                with self.assertRaisesRegex(ValueError, "bounds"):
+                    self.launch(f, minutes=minutes, volume_delay_minutes=delay)
+                self.assertEqual(f.calls, [])
+
+    def test_custom_ebs_schedule_readback_mismatch_requests_emergency_cleanup(self):
+        f = FakeAWS()
+        f.wrong_ebs_readback_role = True
+        with self.assertRaisesRegex(RuntimeError, "manual"):
+            self.launch(f, minutes=180, volume_delay_minutes=60)
+        self.assertIn(IID, f.terminated)
+        self.assertEqual(f.deleted, [ARN])
+        self.assertEqual(len(f.schedules), 2)  # Written, but never claimed verified.
 
     def test_role_trust_mismatch_prevents_stack_creation(self):
         f = FakeAWS()
@@ -244,7 +295,9 @@ class GuardedCreateTests(unittest.TestCase):
         with patch.object(cli, "run") as render, patch.object(
                 cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
                 cli, "gpu_release_preflight") as release, patch.object(
-                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID}}) as guarded, patch.object(
+                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID},
+                    "terminate_at": "2026-11-01T20:30:00+00:00",
+                    "volume_cleanup_at": "2026-11-01T21:15:00+00:00"}) as guarded, patch.object(
                 cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup, patch.object(
                 cli, "shared_gpu_source_ready") as source:
             with contextlib.redirect_stdout(io.StringIO()):
@@ -305,7 +358,9 @@ class GuardedCreateTests(unittest.TestCase):
         with patch.object(cli, "run") as render, patch.object(
                 cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
                 cli, "gpu_release_preflight") as release, patch.object(
-                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID}}) as guarded, patch.object(
+                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID},
+                    "terminate_at": "2026-11-01T20:30:00+00:00",
+                    "volume_cleanup_at": "2026-11-01T21:15:00+00:00"}) as guarded, patch.object(
                 cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup, patch.object(
                 cli, "shared_gpu_source_ready") as source:
             with contextlib.redirect_stdout(io.StringIO()):

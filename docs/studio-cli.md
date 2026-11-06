@@ -31,12 +31,13 @@ The command is **`python3 studio workstation`**. It is not an installed system-l
 | `create --stack NAME --profile cpu` | **Creates** a CPU CloudFormation stack and EC2 instance; incurs charges |
 | `create --stack NAME --profile gpu` | **Creates** only if the exact GPU acceptance stack/token and guard checks pass |
 | `create ... --dry-run` | Renders and calls CloudFormation ValidateTemplate; **no EC2 launch** |
-| `status --stack NAME` | Reads the current EC2 instance ID, status, public IP and DCV URL |
+| `status --stack NAME` | Reads EC2 state and DCV URL; for the exact GPU, verifies both Scheduler safeguards and displays termination/cleanup UTC, remaining minutes and expiry warnings |
 | `check-ready --stack NAME` | Uses SSM Run Command for guest-side RES/DCV/GPU diagnostic checks; doesn't prove a human login |
 | `connect --stack NAME` | For the approved CPU/GPU stack, verifies EIP ownership, DNS and system-trusted HTTPS and prints `https://dcv.kwesidavis.com:8443`; other stacks retain the raw-IP behavior |
 | `connect --stack NAME --ssm` | Opens an administrative SSM Session Manager session |
 | `stop --stack NAME` | Stops the resolved EC2 instance; waits for `stopped` |
 | `start --stack NAME` | Starts the same instance; approved GPU **first** checks its exact PR #65 Scheduler/IAM safeguards and requires at least 80 minutes remaining before EC2 start, then checks RES/ACM/EIP and trusted HTTPS; approved CPU waits for trusted HTTPS |
+| `extend-expiration --stack NAME --additional-minutes N` | Immediately extends the approved GPU's exact EC2 and EBS expiration schedules (no `--execute` or preview); validates IAM, ownership and bounded deadlines first |
 | `destroy --stack NAME --delete-stack` | Approved GPU scope: verified stack, retained EBS, exact IAM and two expiration schedules cleaned in guarded order; non-anchor CPU stacks use scoped cleanup. Original shared-hostname CPU anchor is protected. Failures require operator reconciliation |
 
 `--yes`, `--confirm-stack`, and `--confirm-instance` **were removed**. Running a command is authorization; you will not be asked to type the same stack or instance twice. `--delete-stack` remains mandatory for destructive teardown; `--dry-run` is how to preview creation. AWS subprocesses pass `--no-cli-pager`, so CloudShell should no longer stop at `(END)` after ValidateTemplate.
@@ -91,7 +92,7 @@ Use the **PR #67 feature branch** from an authorized management environment (Clo
 
 ### CPU/GPU shared hostname — guarded CLI behavior
 
-The exact accepted GPU scope is `studio-gpu-cli-accept65` with the pinned PR #65 cleanup token, immutable RES archives, and two independently verified expiry schedules. One at a time, the original stopped CPU or validated GPU may own the shared EIP. No automatic expiry extension is permitted.
+The exact accepted GPU scope is `studio-gpu-cli-accept65` with the pinned PR #65 cleanup token, immutable RES archives, and two independently verified expiry schedules. One at a time, the original stopped CPU or validated GPU may own the shared EIP. A GPU start does **not** reset expiration; an extension is available only through the separate, explicit `extend-expiration --additional-minutes` command on draft PR #69.
 
 ```bash
 # Read-only preflight/proposals
@@ -102,7 +103,7 @@ python3 studio workstation hostname-return-plan --gpu-instance-id i-REPLACE
 
 `hostname-acm-prepare --execute`, `hostname-handoff --execute`, `hostname-return --gpu-instance-id ... --execute`, and `hostname-acm-revoke --gpu-instance-id ... --execute` are **privileged AWS-writing operations**, not previews. Normal GPU create/start/stop paths integrate the exact-instance certificate enrollment, guarded EIP transfer/return and IAM revocation. The supervised Task 6 test completed all of those except successful *automatic* EIP reacquisition after a late GPU restart.
 
-**Task 6 acceptance and limitation:** CPU CLI start/status/connect/stop, GPU guarded create, manual guarded handoff, certificate setup, CPU/GPU browser logins, GPU stop/start, saved-file survival, and final scoped GPU destroy with an independent AWS absence audit all passed. During Task 6, a late GPU restart succeeded at EC2 and RES/T4 readiness, but the hostname handoff then refused because the expiration deadline was too near. **The draft CLI now checks the exact GPU identity, both PR #65 schedules, Scheduler IAM scope, tagged EBS, and at least 80 minutes of remaining time before `StartInstances`.** It fails without starting EC2 when the guard is missing, mismatched, expired, or too close (60-minute handoff safety margin plus 20-minute startup reserve). This fix passed offline tests but has **not** been live retested; configurable expiration remains a separate future item in [Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68). The acceptance guard cannot simply be disabled or extended by current CLI commands. Recovery from partial deletion, unexpected schedule expiry, or mid-setup interruption may still need a supervised operator. **PR #67 is draft/unmerged and is not a general-purpose production GPU launcher.**
+**Task 6 acceptance and limitation:** CPU CLI start/status/connect/stop, GPU guarded create, manual guarded handoff, certificate setup, CPU/GPU browser logins, GPU stop/start, saved-file survival, and final scoped GPU destroy with an independent AWS absence audit all passed. During Task 6, a late GPU restart succeeded at EC2 and RES/T4 readiness, but the hostname handoff then refused because the expiration deadline was too near. **The draft CLI now checks the exact GPU identity, both PR #65 schedules, Scheduler IAM scope, tagged EBS, and at least 80 minutes of remaining time before `StartInstances`.** It fails without starting EC2 when the guard is missing, mismatched, expired, or too close (60-minute handoff safety margin plus 20-minute startup reserve). This fix passed offline tests but has **not** been live retested; configurable expiration and bounded, explicit extension are implemented in [Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68) **draft PR #69**, pending merge and live acceptance. The independent guard cannot be disabled or silently reset; partial deletion, unexpected schedule expiry, or interrupted setup may still require operator reconciliation. **PR #67 is merged, but draft PR #69 is not a general-purpose production GPU launcher.**
 
 [Shared hostname safeguards and rollback](issue43-shared-cpu-gpu-handoff.md). Public TCP 8443 remains a separate security-hardening issue ([#62](https://github.com/vision-kwest/studio-workstation/issues/62)).
 
@@ -149,12 +150,19 @@ To reproduce the **billable, time-limited acceptance test** with this exact scop
 python3 studio workstation create \
   --profile gpu --stack studio-gpu-cli-accept65 \
   --cleanup-token pr65-b23c8e5fdf67b683cd35 \
-  --client-cidr 0.0.0.0/0 --allow-public-dcv
+  --client-cidr 0.0.0.0/0 --allow-public-dcv \
+  --expires-in 180m --volume-cleanup-delay 45m
 ```
+
+`--expires-in` accepts 60–240 whole minutes (`150m` default) and
+`--volume-cleanup-delay` accepts 30–120 whole minutes (`45m` default).
+The existing exact PR #65 stack/token/instance/role safeguards remain mandatory.
+Values are applied to both separately verified one-shot schedules, not to a
+persistent workstation service.
 
 **This example intentionally exposes TCP 8443 to any public IPv4 address.** `--allow-public-dcv` is the explicit opt-in; it is **not** a VPN, identity-aware gateway or a recommendation for permanent public access. Prefer a trusted public `/32` without `--allow-public-dcv` when feasible. The scoped GPU flow refuses broad public ingress unless the flag is supplied. SSH ingress remains closed.
 
-The GPU create flow verifies the actual restricted Scheduler IAM role and group, issues an asynchronous CloudFormation `CreateStack`, identifies the tagged instance and attached root EBS within a bounded discovery period, then arms and reads back **two one-time EventBridge schedules**: EC2 termination at approximately **150 minutes** after provisioning, and an EBS deletion attempt approximately **45 minutes later**. These are **fail-safe acceptance deadlines, not an always-on workstation service**. They remain active through stop/start. The EBS deletion attempt is **best-effort** and cannot be assumed to succeed if storage remains attached. A crash between `CreateStack` and schedule creation still requires manual supervision.
+The GPU create flow verifies the actual restricted Scheduler IAM role and group, issues an asynchronous CloudFormation `CreateStack`, identifies the tagged instance and attached root EBS within a bounded discovery period, then arms and reads back **two one-time EventBridge schedules**: EC2 termination after the configured duration (**150 minutes by default**) and an EBS deletion attempt after the configured delay (**45 minutes by default**). These are **fail-safe acceptance deadlines, not an always-on workstation service**. They remain active through stop/start. The EBS deletion attempt is **best-effort** and cannot be assumed to succeed if storage remains attached. A crash between `CreateStack` and schedule creation still requires manual supervision.
 
 After creating, check GPU readiness, enroll the password through SSM, and connect:
 
@@ -167,7 +175,7 @@ python3 studio workstation connect --stack studio-gpu-cli-accept65
 
 A newly launched GPU instance can take multiple minutes and reboot during RES startup. Readiness means `linux_vdi_config_host_ready.lock`, GDM, DCV, console ownership, Xorg and GPU OpenGL all pass; `check-ready` does not replace an actual interactive login. A TLS certificate can still be untrusted.
 
-## Daily operation and safe cleanup (PR #67 draft)
+## Daily operation and safe cleanup
 
 From the **authorized management checkout**:
 
@@ -180,7 +188,31 @@ python3 studio workstation connect --stack STACK_NAME
 python3 studio workstation destroy --stack STACK_NAME --delete-stack
 ```
 
-For the original CPU anchor and exact scoped GPU, connect verifies `dcv.kwesidavis.com` DNS, shared EIP owner and system CA TLS before printing the trusted URL. It does not open a browser; use the Linux `workstation` account. CPU start requires CPU EIP ownership and waits for trusted HTTPS. GPU start requires the original CPU stopped and owning the EIP, and reenrolls/reverifies RES, ACM, EIP and HTTPS after EC2 health; stop waits for EC2 stopped before returning EIP and revoking GPU-only ACM permission. **The GPU's PR #65 expiration deadlines continue while stopped.** If fewer than 80 minutes remain, or the original independent schedules/IAM/ownership checks fail, the CLI refuses a GPU restart **before** EC2 starts. Do not bypass or extend the schedules to restart this time-limited acceptance GPU; use the guarded cleanup path.
+### Explicit GPU expiration extension (draft PR #69)
+
+On an **existing** GPU in the approved exact PR #65 stack, this single command
+**writes both EventBridge schedules**; specifying `--additional-minutes` is the authorization:
+
+```bash
+python3 studio workstation status --stack studio-gpu-cli-accept65
+python3 studio workstation extend-expiration \
+  --stack studio-gpu-cli-accept65 \
+  --additional-minutes 60
+```
+
+There is **no `--execute` flag and no preview workflow** for extension. One
+request adds 1–180 minutes to both existing deadlines. The current termination
+must still be at least 15 minutes away; the resulting termination must be 80–240
+minutes from now. The existing 30–120-minute gap to retained-EBS cleanup is
+preserved. The CLI verifies exact CloudFormation/EC2/EBS identity, original PR #65
+IAM and both schedules before updating **EBS cleanup first**, then EC2 termination.
+It reads back both updates. A verified partial failure attempts safe EBS rollback;
+an ambiguous state fails closed and needs operator reconciliation. The operation
+does **not** restart a stopped instance, change CPU/EIP/DNS/ACM resources, or
+promise indefinite GPU operation. This functionality is offline-tested only and
+remains unmerged in PR #69.
+
+For the original CPU anchor and exact scoped GPU, connect verifies `dcv.kwesidavis.com` DNS, shared EIP owner and system CA TLS before printing the trusted URL. It does not open a browser; use the Linux `workstation` account. CPU start requires CPU EIP ownership and waits for trusted HTTPS. GPU start requires the original CPU stopped and owning the EIP, and reenrolls/reverifies RES, ACM, EIP and HTTPS after EC2 health; stop waits for EC2 stopped before returning EIP and revoking GPU-only ACM permission. **The GPU's PR #65 expiration deadlines continue while stopped.** If fewer than 80 minutes remain, or the original independent schedules/IAM/ownership checks fail, the CLI refuses a GPU restart **before** EC2 starts. The GPU deadline is never extended automatically by `start`; if allowed by the existing bounded policy, use the separate `extend-expiration --additional-minutes` command first. Otherwise use the guarded cleanup path.
 
 The `destroy --delete-stack` operation is irreversible. It **refuses the original shared-hostname CPU anchor**, which must be deliberately migrated before destruction. For the approved GPU, it independently verifies stack identity, EIP owner, expiration schedules and exact tagged resource inventory; returns EIP to the original stopped CPU; revokes GPU IAM; deletes the exact stack; verifies instance, launch template and security group removal; deletes only the independently verified detached retained EBS; and removes both schedules **only after cleanup**. Non-anchor CPU stacks use their own scoped stack and EBS cleanup. Unexpected resources, IAM denial, attached volumes or partially deleted stacks fail closed and may require operator reconciliation; do not treat CLI failure as cleanup success. Verify absence in AWS after any failed destroy.
 

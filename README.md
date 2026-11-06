@@ -48,7 +48,17 @@ python3 studio workstation create \
   --profile cpu --client-cidr YOUR_PUBLIC_IP/32
 ```
 
-**GPU acceptance example:** The validated GPU path is intentionally limited to the exact acceptance scope and time-bounded expiration policy. Do **not** reuse the old example as a general production launch recipe. See [Studio CLI — GPU workstation](docs/studio-cli.md#gpu-workstation-tested-acceptance-scope) for the approved parameters, account-specific assumptions, costs, and cleanup responsibilities.
+**GPU acceptance example:** The validated GPU path is limited to the exact PR #65 acceptance stack/token and time-bounded cleanup safeguards. On draft PR #69, `create --profile gpu` accepts `--expires-in 180m` (60–240m, default 150m) and `--volume-cleanup-delay 45m` (30–120m, default 45m). Do **not** treat this as a general production GPU launcher. See [Studio CLI — GPU workstation](docs/studio-cli.md#gpu-workstation-tested-acceptance-scope) for required parameters and cleanup limitations.
+
+For a **currently existing, exact scoped GPU workstation only**, draft PR #69 also supports direct extension of both independently verified expiration schedules:
+
+```bash
+python3 studio workstation extend-expiration \
+  --stack studio-gpu-cli-accept65 \
+  --additional-minutes 60
+```
+
+Supplying `--additional-minutes` is authorization; this command **modifies AWS schedules immediately**, with no `--execute` or preview step. The CLI requires at least 15 minutes before the existing termination deadline and limits the new termination to 80–240 minutes from the current time. [Full operating rules](docs/studio-cli.md#gpu-workstation-tested-acceptance-scope).
 
 To inspect, connect, or stop an existing stack:
 
@@ -59,11 +69,11 @@ python3 studio workstation stop --stack STACK_NAME
 python3 studio workstation start --stack STACK_NAME
 ```
 
-The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`. `create` performs the action unless `--dry-run` is specified. On the draft PR #67 branch, `destroy --stack STACK_NAME --delete-stack` performs guarded cleanup of approved GPU retained EBS and both expiration schedules after exact resource verification, and safely destroys non-anchor CPU stacks. The original shared-hostname CPU anchor is protected; any partial failure requires operator review. See [Studio CLI operations](docs/studio-cli.md#daily-operation-and-safe-cleanup-pr-67-draft).
+The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`. `create` performs the action unless `--dry-run` is specified. `destroy --stack STACK_NAME --delete-stack` performs guarded cleanup of the approved GPU and non-anchor CPU stacks; the original shared-hostname CPU is protected. Unexpected partial failures require operator review. See [Studio CLI daily operations](docs/studio-cli.md#daily-operation-and-safe-cleanup).
 
 After provisioning, set a unique local `workstation` password interactively via SSM (`sudo passwd workstation`); DCV uses **Linux system credentials**, not AWS console credentials. Login through the DCV URL printed by `connect`.
 
-## Trusted DCV HTTPS — Issue #43 (CPU live; draft PR #67 unmerged)
+## Trusted DCV HTTPS — Issue #43 (PR #67 merged)
 
 The approved CPU workstation `studio-workstation-cpu-v013` has a dedicated
 Elastic IP `54.159.180.104` and permanent Route 53 hostname
@@ -95,8 +105,8 @@ least 80 minutes remaining (60 minutes of handoff margin plus 20 minutes for
 startup). This pre-start fix passed offline tests; it has **not** been live
 retested. Configurable expiration is separately tracked in
 [Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68).
-This is not a general-purpose production GPU launcher. PR #67 remains
-**draft/unmerged** pending explicit review and merge authorization.
+This is not a general-purpose production GPU launcher. PR #67 was
+merged; Issue #68's configurable expiration changes remain in **draft PR #69**.
 
 The read-only `hostname-plan`, `hostname-iam`, and `hostname-return-plan`
 commands inspect the handoff. `hostname-handoff --execute` and

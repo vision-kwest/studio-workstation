@@ -86,7 +86,8 @@ def _dns(aws):
         raise ValueError("Route 53 A record differs from dedicated stable EIP")
     return matching[0]
 
-def _guard_schedule(aws, name, iid, action, payload, now):
+def _guard_schedule(aws, name, iid, action, payload, now, *,
+                    require_headroom=True, max_remaining_minutes=240):
     sched = aws(REGION, "scheduler", "get-schedule", "--group-name", guard.GROUP, "--name", name)
     target = sched.get("Target", {})
     if (sched.get("Name") != name or sched.get("GroupName") != guard.GROUP or
@@ -101,13 +102,13 @@ def _guard_schedule(aws, name, iid, action, payload, now):
     if not re.fullmatch(r"at\(20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d\)", expr):
         raise ValueError("Unexpected GPU termination schedule")
     when = dt.datetime.strptime(expr[3:-1], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
-    if when - now < SAFETY_MARGIN:
+    if require_headroom and when - now < SAFETY_MARGIN:
         raise ValueError("GPU expiration is too near for a safe handoff")
-    if when - now > dt.timedelta(minutes=240):
+    if when - now > dt.timedelta(minutes=max_remaining_minutes):
         raise ValueError("GPU expiration exceeds PR #65 supervised guard bound")
     return when
 
-def _gpu_guard(aws, gpu, now):
+def _gpu_guard(aws, gpu, now, *, require_headroom=True):
     if _tags(gpu).get("StudioStack") != GPU_STACK or _tags(gpu).get("StudioCleanupToken") != GPU_TOKEN:
         raise ValueError("GPU ownership tags or token mismatch")
     mappings = [m for m in gpu.get("BlockDeviceMappings", []) if m.get("DeviceName") == "/dev/sda1"]
@@ -119,9 +120,12 @@ def _gpu_guard(aws, gpu, now):
         raise ValueError("Unexpected GPU EBS inventory")
     guard.verify_ownership(gpu, volumes[0], GPU_STACK, GPU_TOKEN)
     term = _guard_schedule(aws, "studio-pr65-i-" + gpu["InstanceId"], gpu["InstanceId"],
-                           guard.TERMINATE, {"InstanceIds": [gpu["InstanceId"]]}, now)
+                           guard.TERMINATE, {"InstanceIds": [gpu["InstanceId"]]}, now,
+                           require_headroom=require_headroom)
     cleanup = _guard_schedule(aws, "studio-pr65-v-" + vid, gpu["InstanceId"],
-                              guard.DELETE_VOLUME, {"VolumeId": vid}, now)
+                              guard.DELETE_VOLUME, {"VolumeId": vid}, now,
+                              require_headroom=require_headroom,
+                              max_remaining_minutes=360)
     if cleanup <= term + dt.timedelta(minutes=29) or cleanup > term + dt.timedelta(minutes=120):
         raise ValueError("GPU volume-cleanup timing outside PR #65 guard bounds")
     return {"terminate_at": term.isoformat(), "volume_cleanup_at": cleanup.isoformat(),
