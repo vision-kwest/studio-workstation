@@ -27,7 +27,7 @@ class StudioSoftwareContract(unittest.TestCase):
             self.assertIn("x-systemd.automount,ro,tls,iam", text)
             self.assertIn("software/rez/3.4.0/studio-rez-ubuntu2404.tar.gz", text)
             self.assertLess(text.index("scripts/virtual-desktop-host/linux/install.sh -p false"),
-                            text.index("systemd-run --unit=studio-software-setup"))
+                            text.index("systemctl start --no-block studio-software-setup.service"))
             self.assertNotIn("mount -a", text)
 
     def test_release_pin_validation(self):
