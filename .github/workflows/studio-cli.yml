@@ -25,6 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 -m pip install 'jinja2>=3,<4'
       - run: python3 -m unittest discover -s tests -p test_studio_workstation_cli.py -v
+      - run: python3 -m unittest discover -s tests -p test_studio_software_offline.py -v
       - run: python3 -m unittest discover -s tests -p test_gpu_profile_contract.py -v
       - run: python3 -m unittest discover -s tests -p test_gpu_cli_test_cleanup.py -v
       - run: python3 -m unittest discover -s tests -p test_gpu_cli_guard_infra.py -v
