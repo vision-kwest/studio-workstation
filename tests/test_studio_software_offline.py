@@ -18,7 +18,10 @@ class StudioSoftwareContract(unittest.TestCase):
         for profile in ("cpu", "gpu"):
             text = render_workstation.render(BUCKET, "releases/v0.1.3/res-2026.06", "workstation", profile,
                                               "Version_Id.1", "a" * 64)
-            self.assertIn("systemd-run --unit=studio-software-setup --collect --no-block", text)
+            self.assertIn("systemctl enable studio-software-setup.service", text)
+            self.assertIn("systemctl start --no-block studio-software-setup.service", text)
+            self.assertIn("RemainAfterExit=yes", text)
+            self.assertIn("Restart=on-failure", text)
             self.assertIn("app_installed.lock", text)
             self.assertIn("linux_vdi_config_host_ready.lock", text)
             self.assertIn("x-systemd.automount,ro,tls,iam", text)
