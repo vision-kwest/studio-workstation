@@ -64,8 +64,26 @@ cat > /usr/local/sbin/studio-software-setup <<'STUDIO_SETUP'
 {script}
 STUDIO_SETUP
 chmod 700 /usr/local/sbin/studio-software-setup
+cat > /etc/systemd/system/studio-software-setup.service <<'STUDIO_UNIT'
+[Unit]
+Description=Studio post-DCV Rez and EFS setup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/studio-software-setup
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
+STUDIO_UNIT
+systemctl daemon-reload
+systemctl enable studio-software-setup.service
 if test -f /root/bootstrap/semaphore/app_installed.lock; then
-  systemd-run --unit=studio-software-setup --collect --no-block /usr/local/sbin/studio-software-setup || true
+  systemctl start --no-block studio-software-setup.service || true
 fi
 """
     env=Environment(loader=FileSystemLoader(str(ROOT/"upstream")),undefined=StrictUndefined,keep_trailing_newline=True)
