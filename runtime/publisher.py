@@ -63,6 +63,13 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
         return {"instance_id": args.instance_id, "action": operation}
     if state != "running":
         raise ValueError("Publisher must be running")
+    if args.action == "publisher-result":
+        if not re.fullmatch(r"[0-9a-f-]{36}", args.command_id):
+            raise ValueError("Exact SSM command ID required")
+        result = aws(REGION, "ssm", "get-command-invocation", "--command-id", args.command_id,
+                     "--instance-id", args.instance_id)
+        return {"status": result["Status"], "output": result.get("StandardOutputContent", "")[-2000:],
+                "error": result.get("StandardErrorContent", "")[-1200:]}
     if args.operation == "check":
         commands = ["set -eu", "id", "test -d /opt/studio/packages",
                     "mountpoint /opt/studio/packages", "test -w /opt/studio/packages/dev"]
@@ -89,7 +96,9 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
     result = aws(REGION, "ssm", "send-command", "--instance-ids", args.instance_id,
                  "--document-name", "AWS-RunShellScript",
                  "--parameters", json.dumps({"commands": commands}),
-                 "--timeout-seconds", "120")
+                 "--timeout-seconds", "3600" if args.operation == "build" else "120")
+    if args.operation == "build":
+        return {"command_id": result["Command"]["CommandId"], "status": "submitted"}
     cid = result["Command"]["CommandId"]
     for _ in range(30):
         time.sleep(2)
