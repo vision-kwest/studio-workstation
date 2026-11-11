@@ -17,9 +17,18 @@ def command(args, aws):
             raise ValueError("Publisher instance type must be m7i.large")
         script = """#!/bin/bash
 set -eux
+export DEBIAN_FRONTEND=noninteractive
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y git python3-pip nfs-common
+apt-get install -y git python3-pip nfs-common binutils make rustc cargo pkg-config libssl-dev gettext
+git clone --depth 1 --branch v2.3.1 https://github.com/aws/efs-utils.git /tmp/studio-efs-utils
+(cd /tmp/studio-efs-utils && ./build-deb.sh)
+apt-get install -y stunnel4
+dpkg -i /tmp/studio-efs-utils/build/amazon-efs-utils*.deb
 mkdir -p /opt/studio/packages
+printf 'fs-054fd0b72429f4569:/ /opt/studio/packages efs _netdev,tls,iam,nofail,x-systemd.automount 0 0\\n' >> /etc/fstab
+systemctl daemon-reload
+mount /opt/studio/packages
+test -f /opt/studio/packages/prod/usd/26.05/package.py
 echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
 """
         result = aws(REGION, "ec2", "run-instances",
@@ -58,7 +67,7 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
             raise ValueError("Invalid package name/version")
         src, dst = ("dev", "test") if args.operation == "promote-test" else ("test", "prod")
         commands = ["set -eu", "test -x /opt/studio/rez/scripts/studio-rez-promote-package",
-                    "STUDIO_PACKAGE_ROOT=/opt/studio/packages /opt/studio/rez/scripts/studio-rez-promote-package "
+                    "PYTHONPATH=/opt/studio/rez/python STUDIO_PACKAGE_ROOT=/opt/studio/packages /opt/studio/rez/scripts/studio-rez-promote-package "
                     + args.name + " " + args.version + " " + src + " " + dst]
     result = aws(REGION, "ssm", "send-command", "--instance-ids", args.instance_id,
                  "--document-name", "AWS-RunShellScript",
