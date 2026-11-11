@@ -41,7 +41,7 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
                      "--iam-instance-profile", "Name=" + PROFILE,
                      "--metadata-options", "HttpTokens=required",
                      "--block-device-mappings", json.dumps([{"DeviceName":"/dev/sda1",
-                         "Ebs":{"VolumeSize":100,"VolumeType":"gp3","Encrypted":True}}]),
+                         "Ebs":{"VolumeSize":30,"VolumeType":"gp3","Encrypted":True,"DeleteOnTermination":True}}]),
                      "--user-data", script,
                      "--tag-specifications", 'ResourceType=instance,Tags=[{Key=StudioRole,Value=Publisher},{Key=Name,Value=studio-publisher}]')
         return {"instance_id": result["Instances"][0]["InstanceId"]}
@@ -66,6 +66,19 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
     if args.operation == "check":
         commands = ["set -eu", "id", "test -d /opt/studio/packages",
                     "mountpoint /opt/studio/packages", "test -w /opt/studio/packages/dev"]
+    elif args.operation == "build":
+        if not re.fullmatch(r"vision-kwest/[a-z0-9-]+", args.recipe_repo) or not re.fullmatch(r"[0-9a-f]{40}", args.recipe_ref):
+            raise ValueError("Build requires a pinned commit in a vision-kwest repository")
+        if not re.fullmatch(r"[a-zA-Z0-9_/-]+\\.sh", args.recipe_path) or ".." in args.recipe_path.split("/"):
+            raise ValueError("Invalid recipe path")
+        commands = ["set -eu", "mountpoint -q /opt/studio/packages",
+                    "test -w /opt/studio/packages/dev",
+                    "rm -rf /tmp/studio-publisher-recipe",
+                    "git clone --no-checkout https://github.com/" + args.recipe_repo + ".git /tmp/studio-publisher-recipe",
+                    "cd /tmp/studio-publisher-recipe",
+                    "git checkout --detach " + args.recipe_ref,
+                    "test -f " + args.recipe_path,
+                    "STUDIO_PACKAGE_ROOT=/opt/studio/packages bash " + args.recipe_path]
     else:
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", args.name) or not re.fullmatch(r"[0-9]+\.[0-9]+", args.version):
             raise ValueError("Invalid package name/version")
