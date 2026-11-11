@@ -19,6 +19,26 @@ class IndependentEipTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not unassociated"):
                 independent_eip.assign(lambda *a: self.fail("unexpected AWS write"), "studio-test", lambda *a: None)
 
+    def test_release_refuses_running_owner(self):
+        address = {"InstanceId": "i-old", "AssociationId": "eipassoc-old",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": "i-old"}]}
+        vm = {"VpcId": "vpc-01bbe5d01838f70b2",
+              "IamInstanceProfile": {"Arn": independent_eip.legacy.BASE_PROFILE},
+              "State": {"Name": "running"}}
+        with patch.object(independent_eip.legacy, "_items", return_value={"i-old": vm}), patch.object(
+            independent_eip, "_address", return_value=address
+        ):
+            with self.assertRaisesRegex(ValueError, "Stop the current"):
+                independent_eip.release(lambda *a: self.fail("unexpected AWS write"))
+
+    def test_guest_tls_fails_closed(self):
+        def aws(region, service, operation, *args):
+            if operation == "send-command":
+                return {"Command": {"CommandId": "test"}}
+            return {"Status": "Failed"}
+        with self.assertRaisesRegex(RuntimeError, "readiness failed"):
+            independent_eip._guest_tls(aws, "i-test", sleep=lambda _: None)
+
     def test_release_refuses_stale_unassociated_tag(self):
         with patch.object(independent_eip, "_address", return_value={
             "Tags": [{"Key": "StudioDcvInstanceId", "Value": "i-stale"}]
