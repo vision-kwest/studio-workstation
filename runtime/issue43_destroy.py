@@ -212,16 +212,12 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
                  "--region", region], capture=False)
         run(["aws", "ec2", "wait", "instance-stopped", "--instance-ids", iid,
              "--region", region], capture=False)
-    if ids["eip_owner"] != h.CPU_ID:
-        response = h.restore_cpu(aws, iid, allow_live=True)
-        if response["owner"] != h.CPU_ID:
-            raise RuntimeError("CPU EIP return not confirmed")
-    eip = h._eip(aws)
-    if (eip.get("InstanceId") != h.CPU_ID or
-            h._tags(eip).get("StudioDcvInstanceId") != h.CPU_ID):
-        raise RuntimeError("Shared EIP not back on original CPU")
+    from runtime import independent_eip
+    if ids["eip_owner"] == iid or ids["eip_owner"] is None:
+        independent_eip.restore_cpu(aws, iid)
+    independent_eip._cpu_owner(aws, h._eip(aws))
     h._dns(aws)
-    acm.revoke_gpu(aws, iid)  # Exact GPU session only, original CPU grant preserved.
+    acm.revoke_gpu(aws, iid, independent=True)
     run(["aws", "cloudformation", "delete-stack", "--stack-name", ids["arn"],
          "--region", region], capture=False)
     run(["aws", "cloudformation", "wait", "stack-delete-complete",
