@@ -69,13 +69,19 @@ def _schedule(name, action, payload, when, role):
     }
 
 
+def validate_durations(minutes, volume_delay_minutes):
+    """Reject invalid or unbounded values before a billable GPU CreateStack."""
+    if (type(minutes) is not int or type(volume_delay_minutes) is not int or
+            not 60 <= minutes <= 240 or not 30 <= volume_delay_minutes <= 120):
+        raise ValueError("Expiration deadline outside supervised test bounds")
+
+
 def plan(instance, volume, stack, token, now, *, minutes=150, volume_delay_minutes=45, role=ROLE):
     """Plan two independent one-time schedules; do not invoke AWS."""
     iid, vid = verify_ownership(instance, volume, stack, token)
     if now.tzinfo is None or now.utcoffset() != dt.timedelta(0):
         raise ValueError("Expected timezone-aware UTC time")
-    if not 60 <= minutes <= 240 or not 30 <= volume_delay_minutes <= 120:
-        raise ValueError("Expiration deadline outside supervised test bounds")
+    validate_durations(minutes, volume_delay_minutes)
     if role != ROLE:
         raise ValueError("Unexpected scheduler execution role")
     stop_at = now + dt.timedelta(minutes=minutes)

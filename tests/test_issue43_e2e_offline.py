@@ -151,7 +151,9 @@ class OfflineLifecycleJourney(unittest.TestCase):
 
     def test_gpu_create_requires_armed_guard_before_trusted_handoff(self):
         from runtime import pr65_gpu_create
-        outcome = {"guard": {"guard_armed": True, "instance_id": GPU_ID}}
+        outcome = {"guard": {"guard_armed": True, "instance_id": GPU_ID},
+                   "terminate_at": "2026-11-02T09:00:00+00:00",
+                   "volume_cleanup_at": "2026-11-02T09:45:00+00:00"}
         with (mock.patch.object(cli, "run", return_value=""),
               mock.patch.object(cli, "aws", side_effect=subprocess.CalledProcessError(
                   254, "aws", stderr="Stack with id studio-gpu-cli-accept65 does not exist")),

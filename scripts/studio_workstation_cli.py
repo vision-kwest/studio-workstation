@@ -44,6 +44,42 @@ GPU_ACCEPTANCE_STACK = "studio-gpu-cli-accept65"
 GPU_ACCEPTANCE_TOKEN = "pr65-b23c8e5fdf67b683cd35"
 TRUSTED_DCV_HOSTNAME = "dcv.kwesidavis.com"  # Issue #43: opt-in, never an IP alias
 
+# Original PR65 supervised defaults; custom values use the same guarded Scheduler path.
+GPU_EXPIRATION_DEFAULT_MINUTES = 150
+GPU_VOLUME_CLEANUP_DEFAULT_MINUTES = 45
+
+
+def gpu_duration_minutes(value):
+    """Parse an explicit whole-minute duration such as 180m (no implicit units)."""
+    if not re.fullmatch(r"[1-9][0-9]{0,3}m", value):
+        raise argparse.ArgumentTypeError("Expected whole minutes such as 180m")
+    return int(value[:-1])
+
+
+def gpu_extension_minutes(value):
+    """Bound a single explicit extension; overall deadline is checked at runtime."""
+    if not re.fullmatch(r"[1-9][0-9]{0,2}", value) or int(value) > 180:
+        raise argparse.ArgumentTypeError("Expected integer additional minutes 1..180")
+    return int(value)
+
+
+def gpu_expiration_options(args):
+    """Validate bounded, GPU-only expiry options without changing PR65 defaults."""
+    explicit = args.expires_in is not None or args.volume_cleanup_delay is not None
+    if args.profile != "gpu":
+        if explicit:
+            raise ValueError("GPU expiration options require --profile gpu")
+        return None
+    minutes = (GPU_EXPIRATION_DEFAULT_MINUTES if args.expires_in is None
+               else args.expires_in)
+    delay = (GPU_VOLUME_CLEANUP_DEFAULT_MINUTES if args.volume_cleanup_delay is None
+             else args.volume_cleanup_delay)
+    if not 60 <= minutes <= 240:
+        raise ValueError("--expires-in must be between 60m and 240m")
+    if not 30 <= delay <= 120:
+        raise ValueError("--volume-cleanup-delay must be between 30m and 120m")
+    return (minutes, delay)
+
 
 
 def run(args, *, capture=True):
@@ -240,6 +276,52 @@ def gpu_restart_preflight(stack, instance, region, *, manager=aws, now=None):
     return expiry
 
 
+
+def gpu_expiration_summary(terminate_at, cleanup_at, *, now=None):
+    """Format already-verified UTC deadlines; do not call AWS or change schedules."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    termination = dt.datetime.fromisoformat(terminate_at)
+    cleanup = dt.datetime.fromisoformat(cleanup_at)
+    if any(t.tzinfo is None or t.utcoffset() != dt.timedelta(0)
+           for t in (now, termination, cleanup)):
+        raise ValueError("GPU expiration timestamps must be UTC-aware")
+    if not dt.timedelta(minutes=30) <= cleanup - termination <= dt.timedelta(minutes=120):
+        raise ValueError("Unexpected retained-EBS cleanup deadline")
+    remaining = int((termination - now).total_seconds())
+    status = "expired" if remaining <= 0 else (
+        "restart_unsafe" if remaining < 80 * 60 else "scheduled")
+    result = {
+        "termination_utc": termination.isoformat(),
+        "ebs_cleanup_utc": cleanup.isoformat(),
+        "remaining_seconds": max(0, remaining),
+        "remaining_minutes": max(0, remaining // 60),
+        "status": status,
+    }
+    if status == "expired":
+        result["warning"] = ("Termination deadline has passed; independently verify "
+                             "EC2 and retained-EBS cleanup.")
+    elif status == "restart_unsafe":
+        result["warning"] = ("Less than 80 minutes remain; the GPU cannot be safely "
+                             "restarted under the existing guard.")
+    return result
+
+
+def gpu_expiration_status(stack, instance, region, *, manager=aws, now=None):
+    """Read and verify the exact GPU's two active schedules even near expiration."""
+    from runtime import issue43_hostname_handoff as handoff
+    from runtime import pr65_gpu_create
+    if (stack, region) != (GPU_ACCEPTANCE_STACK, DEFAULT_REGION):
+        raise ValueError("Expiration status limited to approved GPU and region")
+    if handoff._stack_iid(manager, stack) != instance:
+        raise ValueError("GPU stack instance identity mismatch")
+    gpu = handoff._items(manager, instance)[instance]
+    pr65_gpu_create.preflight(manager, region, stack, GPU_ACCEPTANCE_TOKEN)
+    now = now or dt.datetime.now(dt.timezone.utc)
+    deadlines = handoff._gpu_guard(manager, gpu, now, require_headroom=False)
+    return gpu_expiration_summary(deadlines["terminate_at"],
+                                  deadlines["volume_cleanup_at"], now=now)
+
+
 def complete_gpu_setup(stack, region, instance, *, manager=aws,
                        wait=wait_gpu_bootstrap):
     """Run existing ACM + EIP components AFTER PR65 guarded launch/start."""
@@ -304,6 +386,14 @@ def wait_cpu_https(stack, instance, *, attempts=30, sleep=time.sleep):
 
 
 def command(args):
+    if args.action == "extend-expiration":
+        from runtime import issue68_expiration_extension as extension
+        if args.stack != GPU_ACCEPTANCE_STACK or args.region != DEFAULT_REGION:
+            raise ValueError("Expiration extension restricted to approved GPU stack in us-east-1")
+        # Supplying --additional-minutes authorizes the guarded update.
+        print(json.dumps(extension.extend(
+            aws, args.stack, args.region, args.additional_minutes), indent=2))
+        return
     # Issue #43: exact-scope EIP transfer/return requires --execute and the
     # existing strict RES/TLS/PR65 guard preflights. No GPU creation here.
     if args.action in ("hostname-acm-prepare", "hostname-acm-revoke"):
@@ -347,6 +437,7 @@ def command(args):
             raise ValueError("Release must be a version such as v0.1.3")
         ipaddress.IPv4Network(args.client_cidr, strict=False)
         gpu = args.profile == "gpu"
+        expiration = gpu_expiration_options(args)
         if gpu:
             if args.region != "us-east-1" or args.image_id != GPU_AMI or args.instance_type != "g4dn.xlarge":
                 raise ValueError("GPU profile requires us-east-1, validated AMI and g4dn.xlarge")
@@ -374,16 +465,12 @@ def command(args):
             if (args.vpc_id != DEFAULT_VPC or args.subnet_id != DEFAULT_SUBNET or
                     args.instance_profile != DEFAULT_PROFILE or args.disk_size != 100):
                 raise ValueError("GPU acceptance must use the reviewed VPC, subnet, profile and 100 GiB disk")
-        if (args.rez_version_id or args.rez_sha256) and args.vpc_id != DEFAULT_VPC:
-            raise ValueError("Software EFS client SG requires the reviewed VPC")
         prefix = GPU_PREFIX if gpu else f"releases/{args.version}/res-2026.06"
         with tempfile.TemporaryDirectory(prefix="studio-cli-") as temp:
             template = Path(temp) / "workstation.json"
             render = [sys.executable, str(ROOT / "runtime/render_workstation.py"),
                       "--bucket", args.bucket, "--prefix", prefix, "--user", "workstation",
                       "--output", str(template)]
-            if args.rez_version_id or args.rez_sha256:
-                render.extend(["--rez-version-id", args.rez_version_id or "", "--rez-sha256", args.rez_sha256 or ""])
             if gpu:
                 render.extend(["--profile", "gpu", "--lifecycle", "persistent"])
                 if args.cleanup_token:
@@ -434,10 +521,13 @@ def command(args):
                 # schedule; use asynchronous CreateStack with bounded discovery.
                 # Runtime IAM and schedule-group verification still fail closed.
                 outcome = pr65_gpu_create.create_guarded(
-                    aws, args.region, args.stack, args.cleanup_token, template, parameters)
-                print(json.dumps(outcome, indent=2), flush=True)
+                    aws, args.region, args.stack, args.cleanup_token, template, parameters,
+                    minutes=expiration[0], volume_delay_minutes=expiration[1])
                 if not outcome.get("guard", {}).get("guard_armed"):
                     raise RuntimeError("PR #65 expiration safeguard not confirmed; no trusted handoff")
+                outcome["expiration"] = gpu_expiration_summary(
+                    outcome["terminate_at"], outcome["volume_cleanup_at"])
+                print(json.dumps(outcome, indent=2), flush=True)
                 print("GPU guard armed; waiting for RES/DCV and trusted HTTPS...", flush=True)
                 url = complete_gpu_setup(args.stack, args.region, outcome["guard"]["instance_id"])
                 print("TRUSTED DCV:", url)
@@ -450,6 +540,9 @@ def command(args):
         return
     if args.action == "status":
         state = describe(args.stack, args.region)
+        if args.stack == GPU_ACCEPTANCE_STACK:
+            state["expiration"] = gpu_expiration_status(
+                args.stack, state["instance"], args.region)
         if args.hostname:
             if state["state"] != "running":
                 raise ValueError("Cannot verify trusted TLS while workstation is stopped")
@@ -529,7 +622,8 @@ def main(argv=None):
     for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready",
                    "hostname-plan", "hostname-iam", "hostname-handoff",
                    "hostname-return-plan", "hostname-return",
-                   "hostname-acm-prepare", "hostname-acm-revoke"):
+                   "hostname-acm-prepare", "hostname-acm-revoke",
+                   "extend-expiration"):
         s = sub.add_parser(action)
         s.add_argument("--stack", default=DEFAULT_STACK if action != "create" else None,
                        required=action == "create")
@@ -537,16 +631,19 @@ def main(argv=None):
         if action in ("hostname-iam", "hostname-return-plan", "hostname-return", "hostname-acm-revoke"):
             s.add_argument("--gpu-instance-id", required=True,
                            help="Exact supervised GPU EC2 ID, no wildcard discovery")
-        if action in ("hostname-handoff", "hostname-return", "hostname-acm-prepare", "hostname-acm-revoke"):
+        if action in ("hostname-handoff", "hostname-return", "hostname-acm-prepare",
+                      "hostname-acm-revoke"):
             s.add_argument("--execute", action="store_true",
                            help="Explicitly authorize guarded hostname/ACM AWS writes")
+        if action == "extend-expiration":
+            s.add_argument("--additional-minutes", type=gpu_extension_minutes, required=True,
+                           metavar="MINUTES",
+                           help="Authorize extending both GPU deadlines by 1–180 minutes; 240m remaining maximum")
         if action == "create":
             s.add_argument("--dry-run", action="store_true",
                            help="Render and validate without launching AWS resources")
             s.add_argument("--profile", choices=["cpu", "gpu"], default="cpu")
             s.add_argument("--version", default="v0.1.3")
-            s.add_argument("--rez-version-id", help="Approved immutable S3 Rez bundle version")
-            s.add_argument("--rez-sha256", help="SHA-256 of approved Rez bundle")
             s.add_argument("--bucket", default=DEFAULT_BUCKET)
             s.add_argument("--image-id", default=None)
             s.add_argument("--vpc-id", default=DEFAULT_VPC)
@@ -558,6 +655,11 @@ def main(argv=None):
             s.add_argument("--allow-public-dcv", action="store_true",
                            help="Explicit supervised GPU acceptance: permit TCP 8443 from any IPv4 address")
             s.add_argument("--cleanup-token", default=None, help="Unique scope for independently guarded GPU acceptance test")
+            s.add_argument("--expires-in", type=gpu_duration_minutes, metavar="MINUTESm",
+                           help="GPU-only termination deadline: 60m–240m (default 150m)")
+            s.add_argument("--volume-cleanup-delay", type=gpu_duration_minutes,
+                           metavar="MINUTESm",
+                           help="GPU-only EBS cleanup delay: 30m–120m (default 45m)")
         if action in ("connect", "status"):
             s.add_argument("--hostname", choices=[TRUSTED_DCV_HOSTNAME],
                            help="Opt-in trusted hostname; verify DNS, TLS trust, and instance IPv4")
