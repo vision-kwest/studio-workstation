@@ -575,7 +575,10 @@ def main(argv=None):
             s.add_argument("--image-id", default=DEFAULT_AMI)
             s.add_argument("--instance-type", default="m7i.large")
         if action == "publisher-run":
-            s.add_argument("--operation", choices=["check", "promote-test", "promote-prod"], required=True)
+            s.add_argument("--operation", choices=["check", "build", "promote-test", "promote-prod"], required=True)
+            s.add_argument("--recipe-repo", help="Approved vision-kwest GitHub recipe repository")
+            s.add_argument("--recipe-ref", help="Pinned 40-character recipe commit SHA")
+            s.add_argument("--recipe-path", help="Relative build script path")
             s.add_argument("--name", default="usd")
             s.add_argument("--version", default="26.05")
     a = p.parse_args(argv)
