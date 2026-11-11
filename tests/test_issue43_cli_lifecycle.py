@@ -31,14 +31,14 @@ class LifecycleTests(unittest.TestCase):
         calls = []
         def wait(*args):
             calls.append("ready")
-        def prepare(*args):
+        def prepare(*args, **kwargs):
             calls.append("acm")
             return {"instance_id": GPU}
         def handoff_gpu(*args, **kwargs):
             calls.append("handoff")
             return {"owner": GPU, "hostname": handoff.HOST}
         with (mock.patch.object(acm, "prepare_gpu", side_effect=prepare),
-              mock.patch.object(handoff, "handoff_gpu", side_effect=handoff_gpu),
+              mock.patch.object(independent_eip, "handoff_gpu", side_effect=handoff_gpu),
               mock.patch.object(cli, "trusted_url") as unnecessary):
             url = cli.complete_gpu_setup(GPU_STACK, "us-east-1", GPU,
                                          manager=mock.Mock(), wait=wait)
@@ -113,10 +113,10 @@ class LifecycleTests(unittest.TestCase):
         timeline = []
         eip = {"InstanceId": GPU, "Tags": [
             {"Key": "StudioDcvInstanceId", "Value": GPU}]}
-        with (mock.patch.object(handoff, "_eip", return_value=eip),
-              mock.patch.object(handoff, "restore_cpu", side_effect=lambda *a, **kw:
+        with (mock.patch.object(independent_eip, "_address", return_value=eip),
+              mock.patch.object(independent_eip, "restore_cpu", side_effect=lambda *a, **kw:
                                 (timeline.append("return") or {"owner": CPU})),
-              mock.patch.object(acm, "revoke_gpu", side_effect=lambda *a:
+              mock.patch.object(acm, "revoke_gpu", side_effect=lambda *a, **kw:
                                 (timeline.append("revoke") or {"revoked": True}))):
             result = cli.complete_gpu_stop(GPU_STACK, GPU, manager=mock.Mock())
         self.assertEqual(timeline, ["return", "revoke"])
@@ -125,8 +125,9 @@ class LifecycleTests(unittest.TestCase):
     def test_complete_gpu_stop_when_cpu_already_owns_ip_only_revokes(self):
         eip = {"InstanceId": CPU, "Tags": [
             {"Key": "StudioDcvInstanceId", "Value": CPU}]}
-        with (mock.patch.object(handoff, "_eip", return_value=eip),
-              mock.patch.object(handoff, "restore_cpu") as restore,
+        with (mock.patch.object(independent_eip, "_address", return_value=eip),
+              mock.patch.object(independent_eip, "_cpu_owner", return_value={"instance": CPU}),
+              mock.patch.object(independent_eip, "restore_cpu") as restore,
               mock.patch.object(acm, "revoke_gpu", return_value={"revoked": False}) as revoke):
             cli.complete_gpu_stop(GPU_STACK, GPU, manager=mock.Mock())
         restore.assert_not_called()
