@@ -285,8 +285,8 @@ def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
     """
     if region != h.REGION or not re.fullmatch(r"studio-[a-z0-9-]{3,100}", stack or ""):
         raise ValueError("Unapproved CPU stack or region")
-    if stack == h.CPU_STACK or stack.startswith("studio-gpu-cli-"):
-        raise ValueError("Cannot destroy shared CPU anchor or GPU through CPU teardown")
+    if stack.startswith("studio-gpu-cli-"):
+        raise ValueError("Cannot destroy GPU through CPU teardown")
     stacks = aws(region, "cloudformation", "describe-stacks", "--stack-name", stack)["Stacks"]
     if len(stacks) != 1:
         raise ValueError("Ambiguous CPU CloudFormation stack")
@@ -338,10 +338,17 @@ def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
                 x.get("Device") == ROOT for x in volume.get("Attachments", []))):
         raise ValueError("CPU encrypted root EBS attachment/identity mismatch")
     eip = h._eip(aws)
-    if (eip.get("InstanceId") != h.CPU_ID or
-            h._tags(eip).get("StudioDcvInstanceId") != h.CPU_ID or
-            iid == h.CPU_ID):
-        raise ValueError("Shared CPU EIP is not safely owned by original anchor")
+    # The shared allocation is independent: never delete a CPU that still holds it.
+    # Other ownership must be explicit and internally consistent.
+    if eip.get("InstanceId") == iid or eip.get("NetworkInterfaceId") in {
+        nic.get("NetworkInterfaceId") for nic in vm.get("NetworkInterfaces", [])
+    }:
+        raise ValueError("Release shared EIP before destroying this CPU")
+    from runtime import independent_eip
+    if eip.get("InstanceId"):
+        independent_eip._owner(aws, eip)
+    elif eip.get("AssociationId") or h._tags(eip).get("StudioDcvInstanceId"):
+        raise ValueError("Unassociated EIP has inconsistent ownership")
     h._dns(aws)
     run(["aws", "cloudformation", "delete-stack", "--stack-name", arn,
          "--region", region], capture=False)
