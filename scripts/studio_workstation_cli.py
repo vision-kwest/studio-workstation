@@ -258,6 +258,48 @@ def gpu_restart_preflight(stack, instance, region, *, manager=aws, now=None):
     return expiry
 
 
+def install_efs_client(instance, region, *, manager=aws, sleep=time.sleep):
+    """Provision official EFS mount helper via AWS SSM Distributor.
+
+    The pinned Rez bundle contains no amazon-efs-utils .deb. Installation is
+    performed by the Studio CLI, never by unverified guest downloads.
+    """
+    command = None
+    for attempt in range(24):
+        try:
+            response = manager(region, "ssm", "send-command",
+                               "--instance-ids", instance,
+                               "--document-name", "AWS-ConfigureAWSPackage",
+                               "--parameters", json.dumps({
+                                   "action": ["Install"], "name": ["AmazonEFSUtils"],
+                                   "installationType": ["Uninstall and reinstall"]}),
+                               "--timeout-seconds", "180")
+            command = response["Command"]["CommandId"]
+            break
+        except subprocess.CalledProcessError as exc:
+            message = (exc.stderr or "") + str(exc)
+            if not any(x in message for x in ("InvalidInstanceId", "TargetNotConnected")):
+                raise
+            if attempt == 23:
+                raise RuntimeError("SSM EFS helper installation unavailable") from exc
+            sleep(10)
+    for attempt in range(60):
+        try:
+            result = manager(region, "ssm", "get-command-invocation",
+                             "--command-id", command, "--instance-id", instance)
+        except subprocess.CalledProcessError as exc:
+            if "InvocationDoesNotExist" not in ((exc.stderr or "") + str(exc)):
+                raise
+            result = {}
+        if result.get("Status") == "Success":
+            return
+        if result.get("Status") in ("Failed", "TimedOut", "Cancelled"):
+            raise RuntimeError("Official EFS helper installation failed: " +
+                               result.get("Status", "unknown"))
+        sleep(5)
+    raise RuntimeError("Timed out waiting for official EFS helper installation")
+
+
 def complete_gpu_setup(stack, region, instance, *, manager=aws,
                        wait=wait_gpu_bootstrap):
     """Guarded GPU ACM enrollment and replacement-CPU EIP handoff."""
@@ -462,6 +504,8 @@ def command(args):
                 print(json.dumps(outcome, indent=2), flush=True)
                 if not outcome.get("guard", {}).get("guard_armed"):
                     raise RuntimeError("PR #65 expiration safeguard not confirmed; no trusted handoff")
+                if args.rez_version_id:
+                    install_efs_client(outcome["guard"]["instance_id"], args.region)
                 print("GPU guard armed; waiting for RES/DCV and trusted HTTPS...", flush=True)
                 url = complete_gpu_setup(args.stack, args.region, outcome["guard"]["instance_id"])
                 print("TRUSTED DCV:", url)
