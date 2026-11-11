@@ -25,5 +25,31 @@ class HostnamePlanTests(unittest.TestCase):
         preview.assert_not_called()
 
 
+    def test_acm_prepare_uses_independent_owner(self):
+        with patch("runtime.issue43_gpu_acm_setup.prepare_gpu",
+                   return_value={"acm": "verified"}) as prepare:
+            with redirect_stdout(io.StringIO()):
+                cli.main(["hostname-acm-prepare", "--execute"])
+        prepare.assert_called_once()
+        self.assertTrue(prepare.call_args.kwargs["independent"])
+
+    def test_handoff_uses_independent_implementation(self):
+        with patch("runtime.independent_eip.handoff_gpu",
+                   return_value={"owner": "i-gpu"}) as handoff:
+            with patch("runtime.issue43_hostname_handoff.handoff_gpu",
+                       side_effect=AssertionError("legacy handoff called")):
+                with redirect_stdout(io.StringIO()):
+                    cli.main(["hostname-handoff", "--execute"])
+        handoff.assert_called_once()
+
+    def test_return_uses_independent_implementation(self):
+        with patch("runtime.independent_eip.restore_cpu",
+                   return_value={"owner": "i-cpu"}) as restore:
+            with redirect_stdout(io.StringIO()):
+                cli.main(["hostname-return", "--gpu-instance-id",
+                          "i-0baaf4feb21862d94", "--execute"])
+        restore.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
