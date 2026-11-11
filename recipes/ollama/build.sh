@@ -12,7 +12,10 @@ mountpoint -q "${STUDIO_PACKAGE_ROOT}"
 test -w "${STUDIO_PACKAGE_ROOT}/dev"
 test ! -e "${target}"
 command -v curl >/dev/null
-command -v zstd >/dev/null || { echo "zstd is required; refusing to modify the publisher host" >&2; exit 1; }
+if ! command -v zstd >/dev/null; then
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y zstd
+fi
 work="$(mktemp -d /tmp/studio-ollama.XXXXXXXX)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/payload"
