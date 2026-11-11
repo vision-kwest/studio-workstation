@@ -565,7 +565,7 @@ def main(argv=None):
             s.add_argument("--ssm", action="store_true", help="Open administrative SSM session instead of printing DCV URL")
         if action == "destroy":
             s.add_argument("--delete-stack", action="store_true")
-    for action in ("publisher-create", "publisher-status", "publisher-start", "publisher-stop", "publisher-run"):
+    for action in ("publisher-create", "publisher-status", "publisher-start", "publisher-stop", "publisher-run", "publisher-result"):
         s = sub.add_parser(action)
         s.add_argument("--region", default=DEFAULT_REGION)
         s.add_argument("--instance-id", help="Exact publisher EC2 instance ID")
