@@ -659,7 +659,9 @@ def command(args):
         return
     if args.action in ("start", "stop"):
         desired = "stopped" if args.action == "start" else "running"
-        if state["state"] != desired:
+        recovery_stop = (args.action == "stop" and args.stack == GPU_ACCEPTANCE_STACK
+                         and state["state"] == "stopped")
+        if state["state"] != desired and not recovery_stop:
             raise ValueError(f"Expected {desired} before {args.action}, got {state['state']}")
         if args.action == "start" and args.stack == DEFAULT_STACK:
             from runtime import independent_eip
@@ -687,10 +689,20 @@ def command(args):
                 independent_eip._cpu_owner(aws, address)
             else:
                 raise ValueError("Unexpected EIP ownership; refusing GPU stop orchestration")
-        run(["aws", "ec2", f"{args.action}-instances", "--instance-ids", iid,
-             "--region", args.region], capture=False)
-        waiter = "instance-status-ok" if args.action == "start" else "instance-stopped"
-        run(["aws", "ec2", "wait", waiter, "--instance-ids", iid, "--region", args.region], capture=False)
+        if not recovery_stop:
+            run(["aws", "ec2", f"{args.action}-instances", "--instance-ids", iid,
+                 "--region", args.region], capture=False)
+            waiter = "instance-status-ok" if args.action == "start" else "instance-stopped"
+            try:
+                run(["aws", "ec2", "wait", waiter, "--instance-ids", iid,
+                     "--region", args.region], capture=False)
+            except subprocess.CalledProcessError:
+                # A slow EC2 stop can complete after the AWS waiter times out.
+                # Only continue cleanup after independent stopped-state readback.
+                if args.action != "stop" or describe(args.stack, args.region)["state"] != "stopped":
+                    raise
+        elif describe(args.stack, args.region)["state"] != "stopped":
+            raise ValueError("GPU stop recovery requires a stopped instance")
         if args.stack == GPU_ACCEPTANCE_STACK:
             if args.action == "start":
                 print("GPU restarted; checking RES/ACM/EIP before advertising HTTPS...", flush=True)
