@@ -470,9 +470,6 @@ def command(args):
     if args.action == "destroy":
         if not args.delete_stack:
             raise ValueError("Refusing destruction: add --delete-stack")
-        if args.stack == DEFAULT_STACK:
-            raise ValueError("Refusing to destroy the original CPU anchor for the shared EIP; "
-                             "migrate the shared hostname first")
         from runtime import issue43_destroy
         if args.stack == GPU_ACCEPTANCE_STACK:
             result = issue43_destroy.destroy_gpu(aws, run, args.stack, args.region)
@@ -502,7 +499,10 @@ def command(args):
         if state["state"] != desired:
             raise ValueError(f"Expected {desired} before {args.action}, got {state['state']}")
         if args.action == "start" and args.stack == DEFAULT_STACK:
-            trusted_owner(args.stack, iid)  # Never start CPU against GPU EIP.
+            from runtime import independent_eip
+            address = independent_eip._address(aws)
+            if address.get("InstanceId") not in (None, iid):
+                raise ValueError("Shared EIP belongs to another workstation")
         if args.action == "start" and args.stack == GPU_ACCEPTANCE_STACK:
             shared_gpu_source_ready()  # CPU/EIP must be safe before billing.
             gpu_restart_preflight(args.stack, iid, args.region)  # Guard + deadline before EC2.
@@ -526,7 +526,9 @@ def command(args):
             else:
                 print(json.dumps(complete_gpu_stop(args.stack, iid), indent=2))
         elif args.stack == DEFAULT_STACK and args.action == "start":
-            print("TRUSTED DCV:", wait_cpu_https(args.stack, iid))
+            from runtime import independent_eip
+            if independent_eip._address(aws).get("InstanceId") == iid:
+                print("TRUSTED DCV:", wait_cpu_https(args.stack, iid))
         print(json.dumps(describe(args.stack, args.region), indent=2))
         return
 
