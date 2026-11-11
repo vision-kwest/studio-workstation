@@ -128,8 +128,12 @@ class ScopedDestroyTests(unittest.TestCase):
         # Existing legacy fixture has no CloudFormation CPU instance tags.
         # Keep it focused on GPU teardown; independent CPU ownership has
         # dedicated tests in test_independent_eip.py.
+        def checked_cpu(aws, address):
+            if self.fake.cpu["State"]["Name"] != "stopped":
+                raise ValueError("CPU must remain stopped")
+            return {"instance": h.CPU_ID}
         with (mock.patch.object(independent_eip, "_cpu_owner",
-                                return_value={"instance": h.CPU_ID}),
+                                side_effect=checked_cpu),
               mock.patch.object(independent_eip, "restore_cpu",
                                 side_effect=self._restore_legacy_cpu),
               mock.patch.object(acm, "revoke_gpu",
