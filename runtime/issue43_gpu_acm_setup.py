@@ -229,9 +229,11 @@ def _ssm(aws, gpu_id, commands, *, sleep=time.sleep):
     raise RuntimeError("GPU ACM enrollment timed out")
 
 
-def prepare_gpu(aws, *, sleep=time.sleep):
+def prepare_gpu(aws, *, sleep=time.sleep, independent=False):
     """Exact guarded instance; install narrowly-scoped export permission and ACM guest agent."""
-    preview = handoff.gpu_preview(aws)
+    from runtime import independent_eip
+    preview_fn = independent_eip.gpu_preview if independent else handoff.gpu_preview
+    preview = preview_fn(aws)
     gpu_id = preview["to"]
     created = _install_grant(aws, gpu_id)
     try:
@@ -242,13 +244,13 @@ def prepare_gpu(aws, *, sleep=time.sleep):
             _ssm(aws, gpu_id, _guest_script(), sleep=sleep)
         # A final end-to-end independent guest trust check.
         handoff.check_gpu_tls(aws, gpu_id, sleep=sleep)
-        handoff.gpu_preview(aws)  # Guard may have expired during installation.
+        preview_fn(aws)  # Guard and source may have changed during installation.
         return {"instance_id": gpu_id, "acm": "verified", "hostname": handoff.HOST}
     except BaseException:
         if created:
             try:
                 # EIP has NOT been handed off, so undo any newly-granted access.
-                if handoff._eip(aws).get("InstanceId") != handoff.CPU_ID:
+                if handoff._eip(aws).get("InstanceId") != preview.get("from", handoff.CPU_ID):
                     raise RuntimeError("EIP owner changed; cannot safely revoke")
                 _revoke_grant(aws, gpu_id)
             except BaseException as e:
@@ -256,10 +258,13 @@ def prepare_gpu(aws, *, sleep=time.sleep):
         raise
 
 
-def revoke_gpu(aws, gpu_id):
+def revoke_gpu(aws, gpu_id, *, independent=False):
     """Revoke only the matching GPU session, after EIP has returned to CPU."""
     eip = handoff._eip(aws)
-    if (eip.get("InstanceId") != handoff.CPU_ID or
+    if independent:
+        from runtime import independent_eip
+        independent_eip._cpu_owner(aws, eip)
+    elif (eip.get("InstanceId") != handoff.CPU_ID or
             handoff._tags(eip).get("StudioDcvInstanceId") != handoff.CPU_ID):
         raise ValueError("Return EIP and ownership tag to CPU before revoking GPU ACM")
     # An active GPU must not lose its certificate-renewal permission.
