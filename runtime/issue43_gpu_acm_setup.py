@@ -250,7 +250,7 @@ def prepare_gpu(aws, *, sleep=time.sleep, independent=False):
         if created:
             try:
                 # EIP has NOT been handed off, so undo any newly-granted access.
-                if handoff._eip(aws).get("InstanceId") != preview["from"]:
+                if handoff._eip(aws).get("InstanceId") != preview.get("from", handoff.CPU_ID):
                     raise RuntimeError("EIP owner changed; cannot safely revoke")
                 _revoke_grant(aws, gpu_id)
             except BaseException as e:
