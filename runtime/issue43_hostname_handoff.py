@@ -72,7 +72,7 @@ def _eip(aws):
         raise ValueError("Unexpected EIP allocation or public IPv4")
     tags = _tags(item)
     if (tags.get("StudioIssue") != "43" or tags.get("StudioDcvHostname") != HOST
-            or tags.get("StudioOwnerStack") != CPU_STACK):
+            or tags.get("StudioOwnerStack") not in (CPU_STACK, "studio-independent-dcv")):
         raise ValueError("Dedicated EIP ownership tags changed")
     return item
 
