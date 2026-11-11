@@ -277,11 +277,10 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
 
 
 def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
-    """Destroy a non-anchor CPU CloudFormation workstation and its retained EBS.
+    """Destroy a verified CPU stack only when its shared EIP is elsewhere or free.
 
-    The original CPU is the shared EIP owner and must first be migrated.
-    A volume is deleted only if observed as the exact EC2 root before stack
-    deletion, encrypted, and subsequently detached with no attachments.
+    The EIP allocation and DNS remain independent of CPU lifespan. A volume
+    is deleted only after exact root-volume ownership and detachment checks.
     """
     if region != h.REGION or not re.fullmatch(r"studio-[a-z0-9-]{3,100}", stack or ""):
         raise ValueError("Unapproved CPU stack or region")
@@ -346,9 +345,12 @@ def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
         raise ValueError("Release shared EIP before destroying this CPU")
     from runtime import independent_eip
     if eip.get("InstanceId"):
-        independent_eip._owner(aws, eip)
+        independent_eip._owner(aws, eip, require_stopped=False)
     elif eip.get("AssociationId") or h._tags(eip).get("StudioDcvInstanceId"):
         raise ValueError("Unassociated EIP has inconsistent ownership")
+    original_owner = (eip.get("InstanceId"), eip.get("AssociationId"),
+                      eip.get("NetworkInterfaceId"),
+                      h._tags(eip).get("StudioDcvInstanceId"))
     h._dns(aws)
     run(["aws", "cloudformation", "delete-stack", "--stack-name", arn,
          "--region", region], capture=False)
@@ -376,8 +378,11 @@ def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
             raise RuntimeError("CPU retained volume deletion not verified")
         sleep(3)
     final = h._eip(aws)
-    if final.get("InstanceId") != h.CPU_ID or h._tags(final).get("StudioDcvInstanceId") != h.CPU_ID:
-        raise RuntimeError("Shared CPU EIP changed during CPU teardown")
+    final_owner = (final.get("InstanceId"), final.get("AssociationId"),
+                   final.get("NetworkInterfaceId"),
+                   h._tags(final).get("StudioDcvInstanceId"))
+    if final_owner != original_owner:
+        raise RuntimeError("Shared EIP ownership changed during CPU teardown")
     h._dns(aws)
     return {"stack": stack, "state": "DELETE_COMPLETE", "instance": iid,
             "volume_removed": vid, "shared_eip_preserved": h.EIP_IP}
