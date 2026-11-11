@@ -214,16 +214,25 @@ class ScopedDestroyTests(unittest.TestCase):
             destroy.destroy_gpu(f, f, h.GPU_STACK, "us-west-2")
         f.assert_not_called()
 
-    def test_cpu_anchor_destroy_refused_by_cli(self):
+    def test_cpu_anchor_destroy_routes_through_guarded_cleanup(self):
+        # The original CPU is replaceable once the independent EIP is released.
+        # The real destroy_cpu verifies ownership and refuses attached EIPs.
         with (mock.patch.object(cli, "describe") as desc,
+              mock.patch.object(destroy, "destroy_cpu",
+                                return_value={"state": "DELETE_COMPLETE"}) as cleanup,
+              contextlib.redirect_stdout(io.StringIO())):
+            cli.main(["destroy", "--stack", cli.DEFAULT_STACK, "--delete-stack"])
+        desc.assert_not_called()
+        cleanup.assert_called_once_with(cli.aws, cli.run, cli.DEFAULT_STACK, cli.DEFAULT_REGION)
+
+    def test_cpu_anchor_destroy_still_requires_explicit_flag(self):
+        with (mock.patch.object(destroy, "destroy_cpu") as cleanup,
               mock.patch.object(cli, "aws") as aws,
-              mock.patch.object(cli, "run") as run,
               contextlib.redirect_stderr(io.StringIO())):
             with self.assertRaises(SystemExit):
-                cli.main(["destroy", "--stack", cli.DEFAULT_STACK, "--delete-stack"])
-        desc.assert_not_called()
+                cli.main(["destroy", "--stack", cli.DEFAULT_STACK])
+        cleanup.assert_not_called()
         aws.assert_not_called()
-        run.assert_not_called()
 
     def test_gpu_destroy_cli_dispatches_exact_scope(self):
         with (mock.patch.object(cli, "describe") as desc,
