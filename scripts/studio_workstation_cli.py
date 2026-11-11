@@ -315,6 +315,14 @@ def command(args):
         else:
             print(json.dumps(acm.revoke_gpu(aws, args.gpu_instance_id), indent=2))
         return
+    if args.action in ("hostname-assign", "hostname-release"):
+        from runtime import independent_eip
+        if args.region != DEFAULT_REGION or not args.execute:
+            raise ValueError("Independent EIP operation requires us-east-1 and --execute")
+        result = (independent_eip.release(aws) if args.action == "hostname-release"
+                  else independent_eip.assign(aws, args.stack, verified_dcv_hostname))
+        print(json.dumps(result, indent=2))
+        return
     if args.action in ("hostname-plan", "hostname-iam", "hostname-handoff",
                        "hostname-return-plan", "hostname-return"):
         from runtime import issue43_hostname_handoff as handoff
@@ -527,6 +535,7 @@ def main(argv=None):
                                 description="Validated CPU RES workstation lifecycle wrapper")
     sub = p.add_subparsers(dest="action", required=True)
     for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready",
+                   "hostname-assign", "hostname-release",
                    "hostname-plan", "hostname-iam", "hostname-handoff",
                    "hostname-return-plan", "hostname-return",
                    "hostname-acm-prepare", "hostname-acm-revoke"):
@@ -537,7 +546,7 @@ def main(argv=None):
         if action in ("hostname-iam", "hostname-return-plan", "hostname-return", "hostname-acm-revoke"):
             s.add_argument("--gpu-instance-id", required=True,
                            help="Exact supervised GPU EC2 ID, no wildcard discovery")
-        if action in ("hostname-handoff", "hostname-return", "hostname-acm-prepare", "hostname-acm-revoke"):
+        if action in ("hostname-assign", "hostname-release", "hostname-handoff", "hostname-return", "hostname-acm-prepare", "hostname-acm-revoke"):
             s.add_argument("--execute", action="store_true",
                            help="Explicitly authorize guarded hostname/ACM AWS writes")
         if action == "create":
