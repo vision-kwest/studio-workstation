@@ -426,9 +426,10 @@ class HandoffTests(unittest.TestCase):
         aws.assert_not_called()
 
     def test_cli_execute_dispatches_guarded_handoff_and_return(self):
+        from runtime import independent_eip
         with (mock.patch.object(cli, "aws") as aws,
-              mock.patch.object(h, "handoff_gpu", return_value={"owner": GPU}) as handoff,
-              mock.patch.object(h, "restore_cpu", return_value={"owner": h.CPU_ID}) as restore,
+              mock.patch.object(independent_eip, "handoff_gpu", return_value={"owner": GPU}) as handoff,
+              mock.patch.object(independent_eip, "restore_cpu", return_value={"owner": h.CPU_ID}) as restore,
               redirect_stdout(io.StringIO()) as output):
             cli.main(["hostname-handoff", "--execute"])
             self.assertEqual(json.loads(output.getvalue())["owner"], GPU)
@@ -436,8 +437,8 @@ class HandoffTests(unittest.TestCase):
             output.truncate(0)
             cli.main(["hostname-return", "--execute", "--gpu-instance-id", GPU])
             self.assertEqual(json.loads(output.getvalue())["owner"], h.CPU_ID)
-        handoff.assert_called_once_with(aws, cli.verified_dcv_hostname, allow_live=True)
-        restore.assert_called_once_with(aws, GPU, allow_live=True)
+        handoff.assert_called_once_with(aws, cli.verified_dcv_hostname)
+        restore.assert_called_once_with(aws, GPU)
         aws.assert_not_called()
 
     def test_cli_iam_dry_run_has_no_aws_calls(self):
@@ -447,15 +448,15 @@ class HandoffTests(unittest.TestCase):
         aws.assert_not_called()
 
     def test_cli_plan_read_only_calls_only_approved_aws_queries(self):
-        # The fake PR65 expiration is anchored at NOW; never depend on wall time.
-        original = h.gpu_preview
-        with (mock.patch.object(cli, "aws", side_effect=self.aws),
-              mock.patch.object(h, "gpu_preview", wraps=lambda aws: original(aws, now=NOW)),
+        from runtime import independent_eip
+        with (mock.patch.object(cli, "aws", side_effect=self.aws) as aws,
+              mock.patch.object(independent_eip, "gpu_preview",
+                                return_value={"to": GPU}) as preview,
               redirect_stdout(io.StringIO()) as out):
-            cli.main(["hostname-plan"])
+            cli.main(["hostname-plan", "--stack", cli.GPU_ACCEPTANCE_STACK])
         self.assertEqual(json.loads(out.getvalue())["to"], GPU)
+        preview.assert_called_once_with(aws)
         self.assertEqual(self.aws.writes, [])
-
 
     def test_gpu_tls_probe_checks_expiry_and_hostname_separately(self):
         fake = FakeAWS()
