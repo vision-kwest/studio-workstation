@@ -480,7 +480,10 @@ def command(args):
             print(json.dumps(handoff.review_gpu_iam(args.gpu_instance_id), indent=2))
             return
         if args.action == "hostname-plan":
-            print(json.dumps(handoff.gpu_preview(aws), indent=2))
+            from runtime import independent_eip
+            if args.stack != GPU_ACCEPTANCE_STACK:
+                raise ValueError("GPU hostname plan requires the guarded acceptance stack")
+            print(json.dumps(independent_eip.gpu_preview(aws), indent=2))
             return
         if args.action == "hostname-return-plan":
             print(json.dumps(handoff.cpu_return_preview(aws, args.gpu_instance_id), indent=2))
