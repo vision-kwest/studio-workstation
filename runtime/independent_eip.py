@@ -14,6 +14,17 @@ def _target(aws, stack):
         raise ValueError("Unexpected workstation instance profile")
     if vm.get("VpcId") != "vpc-01bbe5d01838f70b2":
         raise ValueError("Unexpected workstation VPC")
+    if vm.get("InstanceType") not in ("m7i.large", "m7i.xlarge", "g4dn.xlarge"):
+        raise ValueError("Unsupported workstation type")
+    if vm.get("InstanceType") == "g4dn.xlarge":
+        if stack != legacy.GPU_STACK or vm.get("ImageId") != legacy.GPU_AMI:
+            raise ValueError("GPU target outside guarded acceptance scope")
+        import datetime as dt
+        from runtime import pr65_gpu_create
+        pr65_gpu_create.preflight(aws, legacy.REGION, legacy.GPU_STACK, legacy.GPU_TOKEN)
+        legacy._gpu_guard(aws, vm, dt.datetime.now(dt.timezone.utc))
+    elif stack == legacy.GPU_STACK:
+        raise ValueError("GPU stack cannot contain a CPU target")
     if len(vm.get("NetworkInterfaces", [])) != 1:
         raise ValueError("Expected one primary ENI")
     eni = vm["NetworkInterfaces"][0]
@@ -83,10 +94,11 @@ def assign(aws, stack, check_tls):
     return {"allocation": legacy.EIP_ID, "instance": iid, "hostname": legacy.HOST}
 
 
-def _guest_tls(aws, iid):
+def _guest_tls(aws, iid, *, sleep=None):
     """Require DCV, trusted ACM certificate and matching private key locally."""
     import json
     import time
+    sleep = sleep or time.sleep
     commands = [
         "set -eu",
         "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
@@ -103,9 +115,14 @@ def _guest_tls(aws, iid):
                  "--timeout-seconds", "90")
     cid = result["Command"]["CommandId"]
     for _ in range(20):
-        time.sleep(3)
-        reply = aws(legacy.REGION, "ssm", "get-command-invocation", "--command-id", cid,
-                    "--instance-id", iid)
+        sleep(3)
+        try:
+            reply = aws(legacy.REGION, "ssm", "get-command-invocation", "--command-id", cid,
+                        "--instance-id", iid)
+        except Exception as exc:
+            if "InvocationDoesNotExist" in str(exc):
+                continue
+            raise
         if reply.get("Status") == "Success":
             if reply.get("ResponseCode") != 0 or "STUDIO_EIP_TLS_READY" not in reply.get("StandardOutputContent", "").splitlines():
                 raise RuntimeError("Guest DCV certificate readiness missing")
