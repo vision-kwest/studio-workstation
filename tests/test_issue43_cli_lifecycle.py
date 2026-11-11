@@ -12,6 +12,7 @@ from unittest import mock
 from scripts import studio_workstation_cli as cli
 from runtime import issue43_hostname_handoff as handoff
 from runtime import issue43_gpu_acm_setup as acm
+from runtime import independent_eip
 
 GPU = "i-0123456789abcdef0"
 CPU = handoff.CPU_ID
@@ -187,21 +188,62 @@ class LifecycleTests(unittest.TestCase):
             {"stack": CPU_STACK, "instance": CPU, "state": "stopped"},
             {"stack": CPU_STACK, "instance": CPU, "state": "running"}]
         events = []
+        address = {"InstanceId": CPU, "AssociationId": "eipassoc-cpu",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU}]}
         with (mock.patch.object(cli, "describe", side_effect=states),
-              mock.patch.object(cli, "trusted_owner", side_effect=lambda *a:
-                                (events.append("owner-check") or (handoff.HOST, handoff.EIP_IP))),
+              mock.patch.object(independent_eip, "_address", side_effect=lambda *a:
+                                (events.append("owner-check") or address)),
               mock.patch.object(cli, "run", side_effect=lambda *a, **kw:
                                 events.append("ec2")),
               mock.patch.object(cli, "wait_cpu_https", side_effect=lambda *a:
                                 (events.append("tls") or TRUSTED))):
             self.command(["start", "--stack", CPU_STACK])
-        self.assertEqual(events, ["owner-check", "ec2", "ec2", "tls"])
+        self.assertEqual(events, ["owner-check", "ec2", "ec2", "owner-check", "tls"])
+
+    def test_cpu_restart_without_eip_does_not_attempt_trusted_url(self):
+        states = [
+            {"stack": CPU_STACK, "instance": CPU, "state": "stopped"},
+            {"stack": CPU_STACK, "instance": CPU, "state": "running"}]
+        events = []
+        with (mock.patch.object(cli, "describe", side_effect=states),
+              mock.patch.object(independent_eip, "_address", side_effect=lambda *a:
+                                (events.append("owner-check") or {"Tags": []})),
+              mock.patch.object(cli, "run", side_effect=lambda *a, **kw:
+                                events.append("ec2")),
+              mock.patch.object(cli, "wait_cpu_https") as tls):
+            self.command(["start", "--stack", CPU_STACK])
+        self.assertEqual(events, ["owner-check", "ec2", "ec2", "owner-check"])
+        tls.assert_not_called()
 
     def test_cpu_owner_mismatch_fails_before_ec2_start(self):
         vm = {"stack": CPU_STACK, "instance": CPU, "state": "stopped"}
+        foreign = {"InstanceId": GPU, "AssociationId": "eipassoc-foreign",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": GPU}]}
         with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(cli, "trusted_owner",
-                                side_effect=ValueError("foreign EIP")),
+              mock.patch.object(independent_eip, "_address", return_value=foreign),
+              mock.patch.object(cli, "run") as run,
+              contextlib.redirect_stderr(io.StringIO())):
+            with self.assertRaises(SystemExit):
+                cli.main(["start", "--stack", CPU_STACK])
+        run.assert_not_called()
+
+    def test_cpu_start_rejects_stale_unassociated_eip_tag(self):
+        vm = {"stack": CPU_STACK, "instance": CPU, "state": "stopped"}
+        stale = {"Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU}]}
+        with (mock.patch.object(cli, "describe", return_value=vm),
+              mock.patch.object(independent_eip, "_address", return_value=stale),
+              mock.patch.object(cli, "run") as run,
+              contextlib.redirect_stderr(io.StringIO())):
+            with self.assertRaises(SystemExit):
+                cli.main(["start", "--stack", CPU_STACK])
+        run.assert_not_called()
+
+    def test_cpu_start_rejects_missing_owner_tag_on_association(self):
+        vm = {"stack": CPU_STACK, "instance": CPU, "state": "stopped"}
+        malformed = {"InstanceId": CPU, "AssociationId": "eipassoc-cpu",
+                     "Tags": []}
+        with (mock.patch.object(cli, "describe", return_value=vm),
+              mock.patch.object(independent_eip, "_address", return_value=malformed),
               mock.patch.object(cli, "run") as run,
               contextlib.redirect_stderr(io.StringIO())):
             with self.assertRaises(SystemExit):
