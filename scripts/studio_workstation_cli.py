@@ -336,6 +336,10 @@ def command(args):
         else:
             print(json.dumps(handoff.restore_cpu(aws, args.gpu_instance_id, allow_live=True), indent=2))
         return
+    if args.action in ("publisher-create", "publisher-status", "publisher-start", "publisher-stop", "publisher-run"):
+        from runtime import publisher
+        print(json.dumps(publisher.command(args, aws), indent=2))
+        return
     if args.action == "create":
         if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9-]{0,127}", args.stack):
             raise ValueError("Invalid CloudFormation stack name")
@@ -561,6 +565,19 @@ def main(argv=None):
             s.add_argument("--ssm", action="store_true", help="Open administrative SSM session instead of printing DCV URL")
         if action == "destroy":
             s.add_argument("--delete-stack", action="store_true")
+    for action in ("publisher-create", "publisher-status", "publisher-start", "publisher-stop", "publisher-run"):
+        s = sub.add_parser(action)
+        s.add_argument("--region", default=DEFAULT_REGION)
+        s.add_argument("--instance-id", help="Exact publisher EC2 instance ID")
+        if action == "publisher-create":
+            s.add_argument("--subnet-id", default=DEFAULT_SUBNET)
+            s.add_argument("--security-group-id", required=True)
+            s.add_argument("--image-id", default=DEFAULT_AMI)
+            s.add_argument("--instance-type", default="m7i.large")
+        if action == "publisher-run":
+            s.add_argument("--operation", choices=["check", "promote-test", "promote-prod"], required=True)
+            s.add_argument("--name", default="usd")
+            s.add_argument("--version", default="26.05")
     a = p.parse_args(argv)
     if a.action == "create":
         if a.image_id is None:
