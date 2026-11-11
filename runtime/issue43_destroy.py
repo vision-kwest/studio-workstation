@@ -262,15 +262,13 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
     if any(x.get("Name") in ids["schedules"] for x in remaining):
         raise RuntimeError("GPU expiration schedule remains")
     eip = h._eip(aws)
-    if (eip.get("InstanceId") != h.CPU_ID or
-            h._tags(eip).get("StudioDcvInstanceId") != h.CPU_ID):
-        raise RuntimeError("Original CPU EIP owner changed after cleanup")
+    verified_cpu = independent_eip._cpu_owner(aws, eip)
     h._dns(aws)
     if acm._get_role_state(aws, iid):
         raise RuntimeError("GPU ACM permission remained after cleanup")
     return {"stack": stack, "state": "DELETE_COMPLETE", "instance": iid,
             "volume_removed": ids["vid"], "schedules_removed": ids["schedules"],
-            "eip_owner": h.CPU_ID, "cpu_certificate_access": "preserved"}
+            "eip_owner": verified_cpu["instance"], "cpu_certificate_access": "preserved"}
 
 
 def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
