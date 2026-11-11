@@ -25,7 +25,7 @@ git clone --depth 1 --branch v2.3.1 https://github.com/aws/efs-utils.git /tmp/st
 apt-get install -y stunnel4
 dpkg -i /tmp/studio-efs-utils/build/amazon-efs-utils*.deb
 mkdir -p /opt/studio/packages
-printf 'fs-054fd0b72429f4569:/ /opt/studio/packages efs _netdev,tls,iam,nofail,x-systemd.automount 0 0\\n' >> /etc/fstab
+printf 'fs-054fd0b72429f4569:/ /opt/studio/packages efs _netdev,tls,iam,nofail,x-systemd.automount 0 0\n' >> /etc/fstab
 systemctl daemon-reload
 mount /opt/studio/packages
 test -f /opt/studio/packages/prod/usd/26.05/package.py
