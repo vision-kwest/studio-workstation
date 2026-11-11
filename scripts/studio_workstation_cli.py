@@ -531,9 +531,14 @@ def command(args):
             address = handoff._eip(aws)
             owner = address.get("InstanceId")
             tagged = handoff._tags(address).get("StudioDcvInstanceId")
-            if not ((owner == iid and tagged == iid) or
-                    (owner == handoff.CPU_ID and tagged == handoff.CPU_ID) or
-                    (owner is None and tagged == iid)):
+            from runtime import independent_eip
+            if owner == iid and tagged == iid:
+                pass
+            elif owner is None and tagged == iid:
+                pass
+            elif owner and tagged == owner:
+                independent_eip._cpu_owner(aws, address)
+            else:
                 raise ValueError("Unexpected EIP ownership; refusing GPU stop orchestration")
         run(["aws", "ec2", f"{args.action}-instances", "--instance-ids", iid,
              "--region", args.region], capture=False)
