@@ -336,7 +336,7 @@ def command(args):
         else:
             print(json.dumps(handoff.restore_cpu(aws, args.gpu_instance_id, allow_live=True), indent=2))
         return
-    if args.action in ("publisher-create", "publisher-status", "publisher-start", "publisher-stop", "publisher-run"):
+    if args.action in ("publisher-create", "publisher-status", "publisher-start", "publisher-stop", "publisher-run", "publisher-result"):
         from runtime import publisher
         print(json.dumps(publisher.command(args, aws), indent=2))
         return
@@ -574,6 +574,8 @@ def main(argv=None):
             s.add_argument("--security-group-id", required=True)
             s.add_argument("--image-id", default=DEFAULT_AMI)
             s.add_argument("--instance-type", default="m7i.large")
+        if action == "publisher-result":
+            s.add_argument("--command-id", required=True)
         if action == "publisher-run":
             s.add_argument("--operation", choices=["check", "build", "promote-test", "promote-prod"], required=True)
             s.add_argument("--recipe-repo", help="Approved vision-kwest GitHub recipe repository")
