@@ -145,19 +145,20 @@ def _preflight(aws):
         _schedule(aws, "studio-pr65-v-" + vid, guard.DELETE_VOLUME,
                   {"VolumeId": vid}),
     ]
-    cpu = h._items(aws, h.CPU_ID)[h.CPU_ID]
-    if (cpu.get("State", {}).get("Name") != "stopped" or
-            cpu.get("NetworkInterfaces", [{}])[0].get("NetworkInterfaceId") != h.CPU_ENI):
-        raise ValueError("Shared original CPU must remain stopped during GPU deletion")
-    if h._stack_iid(aws, h.CPU_STACK) != h.CPU_ID:
-        raise ValueError("Original CPU stack changed")
+    from runtime import independent_eip
     eip = h._eip(aws)
     owner = eip.get("InstanceId")
     tagged = h._tags(eip).get("StudioDcvInstanceId")
-    if not ((owner == iid and tagged == iid) or
-            (owner is None and tagged == iid) or
-            (owner == h.CPU_ID and tagged == h.CPU_ID)):
-        raise ValueError("Unexpected shared EIP owner; no GPU resources modified")
+    if owner == iid and tagged == iid:
+        if not eip.get("AssociationId") or not h._tags(eip).get("StudioDcvReturnStack"):
+            raise ValueError("GPU EIP return stack not verified")
+    elif owner is None and tagged == iid:
+        if not h._tags(eip).get("StudioDcvReturnStack"):
+            raise ValueError("GPU EIP return stack missing")
+    elif owner and tagged == owner:
+        independent_eip._cpu_owner(aws, eip)
+    else:
+        raise ValueError("Unexpected EIP owner")
     h._dns(aws)
     return {"arn": arn, "iid": iid, "vid": vid, "sg": ids["WorkstationSG"],
             "lt": ids["CleanupVolumeTagLaunchTemplate"],
