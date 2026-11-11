@@ -501,8 +501,12 @@ def command(args):
         if args.action == "start" and args.stack == DEFAULT_STACK:
             from runtime import independent_eip
             address = independent_eip._address(aws)
-            if address.get("InstanceId") not in (None, iid):
-                raise ValueError("Shared EIP belongs to another workstation")
+            owner = address.get("InstanceId")
+            tagged = independent_eip.legacy._tags(address).get("StudioDcvInstanceId")
+            if (owner not in (None, iid) or
+                    (owner is None and (address.get("AssociationId") or tagged)) or
+                    (owner == iid and (not address.get("AssociationId") or tagged != iid))):
+                raise ValueError("Shared EIP has unexpected ownership; refusing CPU start")
         if args.action == "start" and args.stack == GPU_ACCEPTANCE_STACK:
             shared_gpu_source_ready()  # CPU/EIP must be safe before billing.
             gpu_restart_preflight(args.stack, iid, args.region)  # Guard + deadline before EC2.
