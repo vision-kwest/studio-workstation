@@ -10,6 +10,7 @@ from unittest import mock
 from runtime import issue43_destroy as destroy
 from runtime import issue43_gpu_acm_setup as acm
 from runtime import issue43_hostname_handoff as h
+from runtime import independent_eip
 from scripts import studio_workstation_cli as cli
 from test_issue43_gpu_acm_setup import IAMFake
 from test_issue43_hostname_handoff import GPU, VOLUME
@@ -124,8 +125,25 @@ class ScopedDestroyTests(unittest.TestCase):
         self.fake.events.clear()
 
     def destroy(self):
-        return destroy.destroy_gpu(self.fake, self.fake.run, h.GPU_STACK,
-                                   h.REGION, sleep=lambda *_: None)
+        # Existing legacy fixture has no CloudFormation CPU instance tags.
+        # Keep it focused on GPU teardown; independent CPU ownership has
+        # dedicated tests in test_independent_eip.py.
+        with (mock.patch.object(independent_eip, "_cpu_owner",
+                                return_value={"instance": h.CPU_ID}),
+              mock.patch.object(independent_eip, "restore_cpu",
+                                side_effect=self._restore_legacy_cpu),
+              mock.patch.object(acm, "revoke_gpu",
+                                side_effect=self._revoke_legacy_gpu)):
+            return destroy.destroy_gpu(self.fake, self.fake.run, h.GPU_STACK,
+                                       h.REGION, sleep=lambda *_: None)
+
+    def _restore_legacy_cpu(self, aws, gpu_id):
+        result = h.restore_cpu(aws, gpu_id, allow_live=True)
+        return result
+
+    def _revoke_legacy_gpu(self, aws, gpu_id, *, independent=False):
+        return acm._revoke_grant(aws, gpu_id)
+
 
     def test_complete_guarded_destroy_preserves_shared_cpu_and_revokes_gpu(self):
         # Simulate the GPU owning the shared EIP at shutdown.
@@ -134,6 +152,8 @@ class ScopedDestroyTests(unittest.TestCase):
         for tag in self.fake.eip["Tags"]:
             if tag["Key"] == "StudioDcvInstanceId":
                 tag["Value"] = GPU
+        self.fake.eip["Tags"].append(
+            {"Key": "StudioDcvReturnStack", "Value": h.CPU_STACK})
         result = self.destroy()
         self.assertEqual(result["state"], "DELETE_COMPLETE")
         self.assertEqual(result["eip_owner"], h.CPU_ID)
