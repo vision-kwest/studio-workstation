@@ -29,6 +29,10 @@ printf 'fs-054fd0b72429f4569:/ /opt/studio/packages efs _netdev,tls,iam,nofail,x
 systemctl daemon-reload
 mount /opt/studio/packages
 test -f /opt/studio/packages/prod/usd/26.05/package.py
+# Pin the tested public Rez publishing tools; never consume a moving branch.
+git clone https://github.com/vision-kwest/studio-rez.git /opt/studio/rez
+(cd /opt/studio/rez && git checkout --detach 2fee37e32a09c337d9486e00bcc2a16c3ff4b0fb)
+PYTHONPATH=/opt/studio/rez/python /opt/studio/rez/scripts/studio-rez-promote-package --help >/dev/null
 echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
 """
         result = aws(REGION, "ec2", "run-instances",
