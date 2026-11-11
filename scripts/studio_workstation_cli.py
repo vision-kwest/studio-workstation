@@ -511,6 +511,8 @@ def command(args):
                 print("TRUSTED DCV:", url)
                 return
             run(deploy, capture=False)
+            if args.rez_version_id:
+                install_efs_client(instance_id(args.stack, args.region), args.region)
             print(json.dumps(describe(args.stack, args.region), indent=2))
         return
     if args.action == "check-ready":
