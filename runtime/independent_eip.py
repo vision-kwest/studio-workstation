@@ -154,6 +154,57 @@ def handoff_gpu(aws, check_public_tls, *, check_guest=None):
         raise RuntimeError("GPU handoff failed; EIP restored to replacement CPU") from error
 
 
+
+def restore_cpu(aws, gpu_id, *, cpu_stack="studio-workstation-cpu-rez77"):
+    """Return EIP from stopped GPU to exact stopped replacement CPU."""
+    if not re.fullmatch(r"i-[0-9a-f]{8,17}", gpu_id or ""):
+        raise ValueError("Invalid GPU instance ID")
+    if not re.fullmatch(r"studio-[a-z0-9-]{3,100}", cpu_stack):
+        raise ValueError("Invalid CPU stack")
+    cpu_id = legacy._stack_iid(aws, cpu_stack)
+    cpu = legacy._items(aws, cpu_id)[cpu_id]
+    if (cpu.get("State", {}).get("Name") != "stopped"
+            or cpu.get("InstanceType") not in ("m7i.large", "m7i.xlarge")
+            or cpu.get("IamInstanceProfile", {}).get("Arn") != legacy.BASE_PROFILE
+            or cpu.get("VpcId") != "vpc-01bbe5d01838f70b2"
+            or len(cpu.get("NetworkInterfaces", [])) != 1
+            or cpu["NetworkInterfaces"][0].get("Attachment", {}).get("DeviceIndex") != 0):
+        raise ValueError("Replacement CPU is not a verified stopped workstation")
+    eni = cpu["NetworkInterfaces"][0]["NetworkInterfaceId"]
+    address = _address(aws)
+    owner = address.get("InstanceId")
+    tagged = legacy._tags(address).get("StudioDcvInstanceId")
+    if owner == cpu_id and tagged == cpu_id:
+        if address.get("NetworkInterfaceId") != eni or not address.get("AssociationId"):
+            raise ValueError("CPU EIP association mismatch")
+        return {"owner": cpu_id, "state": "already-restored"}
+    if owner not in (gpu_id, None) or tagged != gpu_id:
+        raise ValueError("EIP is not owned by the expected GPU")
+    if owner:
+        gpu = legacy._items(aws, gpu_id)[gpu_id]
+        if (gpu.get("State", {}).get("Name") not in ("stopped", "terminated")
+                or legacy._tags(gpu).get("StudioStack") != legacy.GPU_STACK
+                or legacy._tags(gpu).get("StudioCleanupToken") != legacy.GPU_TOKEN):
+            raise ValueError("GPU must be stopped and match its cleanup scope")
+        if not address.get("AssociationId"):
+            raise ValueError("GPU association ID missing")
+        aws(legacy.REGION, "ec2", "disassociate-address",
+            "--association-id", address["AssociationId"])
+    current = _address(aws)
+    if current.get("AssociationId") or current.get("InstanceId"):
+        raise RuntimeError("EIP disassociation not verified")
+    result = aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
+                 "--network-interface-id", eni, "--no-allow-reassociation")
+    aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,
+        "--tags", "Key=StudioDcvInstanceId,Value=" + cpu_id)
+    current = _address(aws)
+    if (not result.get("AssociationId") or current.get("InstanceId") != cpu_id
+            or current.get("NetworkInterfaceId") != eni
+            or legacy._tags(current).get("StudioDcvInstanceId") != cpu_id):
+        raise RuntimeError("Replacement CPU EIP restoration unverified")
+    return {"owner": cpu_id, "state": "restored"}
+
+
 def release(aws):
     a = _address(aws)
     owner = _owner(aws, a)
