@@ -225,8 +225,8 @@ class ACMSetupTests(unittest.TestCase):
               redirect_stdout(io.StringIO())):
             cli.main(["hostname-acm-prepare", "--execute"])
             cli.main(["hostname-acm-revoke", "--execute", "--gpu-instance-id", GPU])
-        prep.assert_called_once_with(aws)
-        revoke.assert_called_once_with(aws, GPU)
+        prep.assert_called_once_with(aws, independent=True)
+        revoke.assert_called_once_with(aws, GPU, independent=True)
 
 
 if __name__ == "__main__":
