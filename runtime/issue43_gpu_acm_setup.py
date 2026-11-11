@@ -258,10 +258,13 @@ def prepare_gpu(aws, *, sleep=time.sleep, independent=False):
         raise
 
 
-def revoke_gpu(aws, gpu_id):
+def revoke_gpu(aws, gpu_id, *, independent=False):
     """Revoke only the matching GPU session, after EIP has returned to CPU."""
     eip = handoff._eip(aws)
-    if (eip.get("InstanceId") != handoff.CPU_ID or
+    if independent:
+        from runtime import independent_eip
+        independent_eip._cpu_owner(aws, eip)
+    elif (eip.get("InstanceId") != handoff.CPU_ID or
             handoff._tags(eip).get("StudioDcvInstanceId") != handoff.CPU_ID):
         raise ValueError("Return EIP and ownership tag to CPU before revoking GPU ACM")
     # An active GPU must not lose its certificate-renewal permission.
