@@ -10,6 +10,7 @@ from unittest import mock
 from runtime import issue43_destroy as destroy
 from runtime import issue43_gpu_acm_setup as acm
 from runtime import issue43_hostname_handoff as h
+from runtime import independent_eip
 from scripts import studio_workstation_cli as cli
 from test_issue43_gpu_acm_setup import IAMFake
 from test_issue43_hostname_handoff import GPU, VOLUME
@@ -124,8 +125,29 @@ class ScopedDestroyTests(unittest.TestCase):
         self.fake.events.clear()
 
     def destroy(self):
-        return destroy.destroy_gpu(self.fake, self.fake.run, h.GPU_STACK,
-                                   h.REGION, sleep=lambda *_: None)
+        # Existing legacy fixture has no CloudFormation CPU instance tags.
+        # Keep it focused on GPU teardown; independent CPU ownership has
+        # dedicated tests in test_independent_eip.py.
+        def checked_cpu(aws, address):
+            if self.fake.cpu["State"]["Name"] != "stopped":
+                raise ValueError("CPU must remain stopped")
+            return {"instance": h.CPU_ID}
+        with (mock.patch.object(independent_eip, "_cpu_owner",
+                                side_effect=checked_cpu),
+              mock.patch.object(independent_eip, "restore_cpu",
+                                side_effect=self._restore_legacy_cpu),
+              mock.patch.object(acm, "revoke_gpu",
+                                side_effect=self._revoke_legacy_gpu)):
+            return destroy.destroy_gpu(self.fake, self.fake.run, h.GPU_STACK,
+                                       h.REGION, sleep=lambda *_: None)
+
+    def _restore_legacy_cpu(self, aws, gpu_id):
+        result = h.restore_cpu(aws, gpu_id, allow_live=True)
+        return result
+
+    def _revoke_legacy_gpu(self, aws, gpu_id, *, independent=False):
+        return acm._revoke_grant(aws, gpu_id)
+
 
     def test_complete_guarded_destroy_preserves_shared_cpu_and_revokes_gpu(self):
         # Simulate the GPU owning the shared EIP at shutdown.
@@ -134,6 +156,8 @@ class ScopedDestroyTests(unittest.TestCase):
         for tag in self.fake.eip["Tags"]:
             if tag["Key"] == "StudioDcvInstanceId":
                 tag["Value"] = GPU
+        self.fake.eip["Tags"].append(
+            {"Key": "StudioDcvReturnStack", "Value": h.CPU_STACK})
         result = self.destroy()
         self.assertEqual(result["state"], "DELETE_COMPLETE")
         self.assertEqual(result["eip_owner"], h.CPU_ID)
@@ -214,16 +238,25 @@ class ScopedDestroyTests(unittest.TestCase):
             destroy.destroy_gpu(f, f, h.GPU_STACK, "us-west-2")
         f.assert_not_called()
 
-    def test_cpu_anchor_destroy_refused_by_cli(self):
+    def test_cpu_anchor_destroy_routes_through_guarded_cleanup(self):
+        # The original CPU is replaceable once the independent EIP is released.
+        # The real destroy_cpu verifies ownership and refuses attached EIPs.
         with (mock.patch.object(cli, "describe") as desc,
+              mock.patch.object(destroy, "destroy_cpu",
+                                return_value={"state": "DELETE_COMPLETE"}) as cleanup,
+              contextlib.redirect_stdout(io.StringIO())):
+            cli.main(["destroy", "--stack", cli.DEFAULT_STACK, "--delete-stack"])
+        desc.assert_not_called()
+        cleanup.assert_called_once_with(cli.aws, cli.run, cli.DEFAULT_STACK, cli.DEFAULT_REGION)
+
+    def test_cpu_anchor_destroy_still_requires_explicit_flag(self):
+        with (mock.patch.object(destroy, "destroy_cpu") as cleanup,
               mock.patch.object(cli, "aws") as aws,
-              mock.patch.object(cli, "run") as run,
               contextlib.redirect_stderr(io.StringIO())):
             with self.assertRaises(SystemExit):
-                cli.main(["destroy", "--stack", cli.DEFAULT_STACK, "--delete-stack"])
-        desc.assert_not_called()
+                cli.main(["destroy", "--stack", cli.DEFAULT_STACK])
+        cleanup.assert_not_called()
         aws.assert_not_called()
-        run.assert_not_called()
 
     def test_gpu_destroy_cli_dispatches_exact_scope(self):
         with (mock.patch.object(cli, "describe") as desc,

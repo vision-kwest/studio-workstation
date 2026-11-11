@@ -10,6 +10,7 @@ from unittest import mock
 
 from scripts import studio_workstation_cli as cli
 from runtime import issue43_destroy
+from runtime import independent_eip
 
 
 CPU = cli.DEFAULT_STACK
@@ -29,6 +30,20 @@ class OfflineLifecycleJourney(unittest.TestCase):
     def test_cpu_create_preview_and_daily_lifecycle(self):
         state = {"value": "stopped"}
         writes = []
+        eip = {"owner": CPU_ID}
+
+        def address(*args):
+            if eip["owner"] is None:
+                return {"AllocationId": independent_eip.legacy.EIP_ID, "Tags": []}
+            return {"AllocationId": independent_eip.legacy.EIP_ID,
+                    "InstanceId": CPU_ID, "AssociationId": "eipassoc-test",
+                    "Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU_ID}]}
+
+        def release(*args):
+            self.assertEqual(state["value"], "stopped")
+            eip["owner"] = None
+            return {"allocation": independent_eip.legacy.EIP_ID,
+                    "state": "unassociated", "previous_owner": CPU_ID}
 
         def describe(stack, region):
             self.assertEqual(stack, CPU)
@@ -48,7 +63,8 @@ class OfflineLifecycleJourney(unittest.TestCase):
 
         with (mock.patch.object(cli, "describe", side_effect=describe),
               mock.patch.object(cli, "run", side_effect=run),
-              mock.patch.object(cli, "trusted_owner", return_value=("dcv.kwesidavis.com", "54.159.180.104")),
+              mock.patch.object(independent_eip, "_address", side_effect=address),
+              mock.patch.object(independent_eip, "release", side_effect=release) as released,
               mock.patch.object(cli, "wait_cpu_https", return_value=TLS),
               mock.patch.object(cli, "trusted_url", return_value=TLS),
               mock.patch.object(issue43_destroy, "destroy_cpu",
@@ -65,10 +81,12 @@ class OfflineLifecycleJourney(unittest.TestCase):
             self.assertEqual(state["value"], "stopped")
             self.assertIn(TLS, self.invoke("start", "--stack", CPU))
             self.invoke("stop", "--stack", CPU)
-            with self.assertRaises(SystemExit):
-                with contextlib.redirect_stderr(io.StringIO()):
-                    self.invoke("destroy", "--stack", CPU, "--delete-stack")
-            destroy.assert_not_called()
+            self.assertIn("unassociated", self.invoke("hostname-release", "--execute"))
+            self.assertIsNone(eip["owner"])
+            self.assertIn("DELETE_COMPLETE", self.invoke("destroy", "--stack", CPU,
+                                                          "--delete-stack"))
+            released.assert_called_once_with(cli.aws)
+            destroy.assert_called_once_with(cli.aws, cli.run, CPU, cli.DEFAULT_REGION)
 
     def test_gpu_start_connect_stop_resume_destroy(self):
         state = {"value": "stopped"}

@@ -12,6 +12,7 @@ from unittest import mock
 from scripts import studio_workstation_cli as cli
 from runtime import issue43_hostname_handoff as handoff
 from runtime import issue43_gpu_acm_setup as acm
+from runtime import independent_eip
 
 GPU = "i-0123456789abcdef0"
 CPU = handoff.CPU_ID
@@ -30,14 +31,14 @@ class LifecycleTests(unittest.TestCase):
         calls = []
         def wait(*args):
             calls.append("ready")
-        def prepare(*args):
+        def prepare(*args, **kwargs):
             calls.append("acm")
             return {"instance_id": GPU}
         def handoff_gpu(*args, **kwargs):
             calls.append("handoff")
             return {"owner": GPU, "hostname": handoff.HOST}
         with (mock.patch.object(acm, "prepare_gpu", side_effect=prepare),
-              mock.patch.object(handoff, "handoff_gpu", side_effect=handoff_gpu),
+              mock.patch.object(independent_eip, "handoff_gpu", side_effect=handoff_gpu),
               mock.patch.object(cli, "trusted_url") as unnecessary):
             url = cli.complete_gpu_setup(GPU_STACK, "us-east-1", GPU,
                                          manager=mock.Mock(), wait=wait)
@@ -112,10 +113,10 @@ class LifecycleTests(unittest.TestCase):
         timeline = []
         eip = {"InstanceId": GPU, "Tags": [
             {"Key": "StudioDcvInstanceId", "Value": GPU}]}
-        with (mock.patch.object(handoff, "_eip", return_value=eip),
-              mock.patch.object(handoff, "restore_cpu", side_effect=lambda *a, **kw:
+        with (mock.patch.object(independent_eip, "_address", return_value=eip),
+              mock.patch.object(independent_eip, "restore_cpu", side_effect=lambda *a, **kw:
                                 (timeline.append("return") or {"owner": CPU})),
-              mock.patch.object(acm, "revoke_gpu", side_effect=lambda *a:
+              mock.patch.object(acm, "revoke_gpu", side_effect=lambda *a, **kw:
                                 (timeline.append("revoke") or {"revoked": True}))):
             result = cli.complete_gpu_stop(GPU_STACK, GPU, manager=mock.Mock())
         self.assertEqual(timeline, ["return", "revoke"])
@@ -124,33 +125,73 @@ class LifecycleTests(unittest.TestCase):
     def test_complete_gpu_stop_when_cpu_already_owns_ip_only_revokes(self):
         eip = {"InstanceId": CPU, "Tags": [
             {"Key": "StudioDcvInstanceId", "Value": CPU}]}
-        with (mock.patch.object(handoff, "_eip", return_value=eip),
-              mock.patch.object(handoff, "restore_cpu") as restore,
+        with (mock.patch.object(independent_eip, "_address", return_value=eip),
+              mock.patch.object(independent_eip, "_cpu_owner", return_value={"instance": CPU}),
+              mock.patch.object(independent_eip, "restore_cpu") as restore,
               mock.patch.object(acm, "revoke_gpu", return_value={"revoked": False}) as revoke):
             cli.complete_gpu_stop(GPU_STACK, GPU, manager=mock.Mock())
         restore.assert_not_called()
         revoke.assert_called_once()
 
     def test_gpu_source_preflight_rejects_running_cpu_before_ec2(self):
-        vm = {"State": {"Name": "running"},
-              "NetworkInterfaces": [{"NetworkInterfaceId": handoff.CPU_ENI}]}
-        with (mock.patch.object(handoff, "_stack_iid", return_value=CPU),
-              mock.patch.object(handoff, "_items", return_value={CPU: vm}),
-              mock.patch.object(cli, "trusted_owner") as trust):
-            with self.assertRaisesRegex(ValueError, "CPU must be stopped"):
+        owner = "i-aaaaaaaaaaaaaaaaa"
+        address = {"InstanceId": owner, "AssociationId": "eipassoc-test",
+                   "NetworkInterfaceId": "eni-aaaaaaaaaaaaaaaaa",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": owner}]}
+        with (mock.patch.object(independent_eip, "_address", return_value=address),
+              mock.patch.object(independent_eip, "_owner",
+                                side_effect=ValueError("Stop the current EIP owner"))):
+            with self.assertRaisesRegex(ValueError, "Stop the current EIP owner"):
                 cli.shared_gpu_source_ready(manager=mock.Mock())
-        trust.assert_not_called()
 
-    def test_gpu_source_preflight_checks_ownership_after_cpu_stop(self):
+    def test_gpu_source_preflight_accepts_stopped_replacement_cpu(self):
+        owner = "i-aaaaaaaaaaaaaaaaa"
+        stack = "studio-workstation-cpu-rez77"
+        eni = "eni-aaaaaaaaaaaaaaaaa"
+        address = {"InstanceId": owner, "AssociationId": "eipassoc-test",
+                   "NetworkInterfaceId": eni,
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": owner}]}
         vm = {"State": {"Name": "stopped"},
-              "NetworkInterfaces": [{"NetworkInterfaceId": handoff.CPU_ENI}]}
-        with (mock.patch.object(handoff, "_stack_iid", return_value=CPU),
-              mock.patch.object(handoff, "_items", return_value={CPU: vm}),
-              mock.patch.object(cli, "trusted_owner",
-                                side_effect=ValueError("EIP moved")) as trust):
-            with self.assertRaisesRegex(ValueError, "EIP moved"):
+              "NetworkInterfaces": [{"NetworkInterfaceId": eni}],
+              "Tags": [{"Key": "aws:cloudformation:stack-name", "Value": stack}]}
+        with (mock.patch.object(independent_eip, "_address", return_value=address),
+              mock.patch.object(independent_eip, "_owner", return_value=owner) as check,
+              mock.patch.object(handoff, "_items", return_value={owner: vm}),
+              mock.patch.object(handoff, "_stack_iid", return_value=owner)):
+            result = cli.shared_gpu_source_ready(manager=mock.Mock())
+        self.assertEqual(result, {"owner": owner, "state": "stopped", "stack": stack})
+        check.assert_called_once()
+
+    def test_gpu_source_preflight_accepts_clean_unassociated_eip(self):
+        with (mock.patch.object(independent_eip, "_address",
+                                return_value={"Tags": []}),
+              mock.patch.object(independent_eip, "_owner") as check):
+            result = cli.shared_gpu_source_ready(manager=mock.Mock())
+        self.assertEqual(result, {"owner": None, "state": "unassociated"})
+        check.assert_not_called()
+
+    def test_gpu_source_preflight_rejects_stale_unassociated_eip(self):
+        with mock.patch.object(independent_eip, "_address", return_value={
+            "Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU}]}):
+            with self.assertRaisesRegex(ValueError, "stale"):
                 cli.shared_gpu_source_ready(manager=mock.Mock())
-        trust.assert_called_once()
+
+    def test_gpu_source_preflight_rejects_wrong_cfn_instance(self):
+        owner = "i-aaaaaaaaaaaaaaaaa"
+        eni = "eni-aaaaaaaaaaaaaaaaa"
+        address = {"InstanceId": owner, "AssociationId": "eipassoc-test",
+                   "NetworkInterfaceId": eni,
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": owner}]}
+        vm = {"NetworkInterfaces": [{"NetworkInterfaceId": eni}],
+              "Tags": [{"Key": "aws:cloudformation:stack-name",
+                        "Value": "studio-workstation-cpu-rez77"}]}
+        with (mock.patch.object(independent_eip, "_address", return_value=address),
+              mock.patch.object(independent_eip, "_owner", return_value=owner),
+              mock.patch.object(handoff, "_items", return_value={owner: vm}),
+              mock.patch.object(handoff, "_stack_iid",
+                                return_value="i-bbbbbbbbbbbbbbbbb")):
+            with self.assertRaisesRegex(ValueError, "CloudFormation identity"):
+                cli.shared_gpu_source_ready(manager=mock.Mock())
 
     def test_gpu_start_refuses_running_cpu_before_ec2(self):
         vm = {"stack": GPU_STACK, "instance": GPU, "state": "stopped"}
@@ -187,21 +228,62 @@ class LifecycleTests(unittest.TestCase):
             {"stack": CPU_STACK, "instance": CPU, "state": "stopped"},
             {"stack": CPU_STACK, "instance": CPU, "state": "running"}]
         events = []
+        address = {"InstanceId": CPU, "AssociationId": "eipassoc-cpu",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU}]}
         with (mock.patch.object(cli, "describe", side_effect=states),
-              mock.patch.object(cli, "trusted_owner", side_effect=lambda *a:
-                                (events.append("owner-check") or (handoff.HOST, handoff.EIP_IP))),
+              mock.patch.object(independent_eip, "_address", side_effect=lambda *a:
+                                (events.append("owner-check") or address)),
               mock.patch.object(cli, "run", side_effect=lambda *a, **kw:
                                 events.append("ec2")),
               mock.patch.object(cli, "wait_cpu_https", side_effect=lambda *a:
                                 (events.append("tls") or TRUSTED))):
             self.command(["start", "--stack", CPU_STACK])
-        self.assertEqual(events, ["owner-check", "ec2", "ec2", "tls"])
+        self.assertEqual(events, ["owner-check", "ec2", "ec2", "owner-check", "tls"])
+
+    def test_cpu_restart_without_eip_does_not_attempt_trusted_url(self):
+        states = [
+            {"stack": CPU_STACK, "instance": CPU, "state": "stopped"},
+            {"stack": CPU_STACK, "instance": CPU, "state": "running"}]
+        events = []
+        with (mock.patch.object(cli, "describe", side_effect=states),
+              mock.patch.object(independent_eip, "_address", side_effect=lambda *a:
+                                (events.append("owner-check") or {"Tags": []})),
+              mock.patch.object(cli, "run", side_effect=lambda *a, **kw:
+                                events.append("ec2")),
+              mock.patch.object(cli, "wait_cpu_https") as tls):
+            self.command(["start", "--stack", CPU_STACK])
+        self.assertEqual(events, ["owner-check", "ec2", "ec2", "owner-check"])
+        tls.assert_not_called()
 
     def test_cpu_owner_mismatch_fails_before_ec2_start(self):
         vm = {"stack": CPU_STACK, "instance": CPU, "state": "stopped"}
+        foreign = {"InstanceId": GPU, "AssociationId": "eipassoc-foreign",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": GPU}]}
         with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(cli, "trusted_owner",
-                                side_effect=ValueError("foreign EIP")),
+              mock.patch.object(independent_eip, "_address", return_value=foreign),
+              mock.patch.object(cli, "run") as run,
+              contextlib.redirect_stderr(io.StringIO())):
+            with self.assertRaises(SystemExit):
+                cli.main(["start", "--stack", CPU_STACK])
+        run.assert_not_called()
+
+    def test_cpu_start_rejects_stale_unassociated_eip_tag(self):
+        vm = {"stack": CPU_STACK, "instance": CPU, "state": "stopped"}
+        stale = {"Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU}]}
+        with (mock.patch.object(cli, "describe", return_value=vm),
+              mock.patch.object(independent_eip, "_address", return_value=stale),
+              mock.patch.object(cli, "run") as run,
+              contextlib.redirect_stderr(io.StringIO())):
+            with self.assertRaises(SystemExit):
+                cli.main(["start", "--stack", CPU_STACK])
+        run.assert_not_called()
+
+    def test_cpu_start_rejects_missing_owner_tag_on_association(self):
+        vm = {"stack": CPU_STACK, "instance": CPU, "state": "stopped"}
+        malformed = {"InstanceId": CPU, "AssociationId": "eipassoc-cpu",
+                     "Tags": []}
+        with (mock.patch.object(cli, "describe", return_value=vm),
+              mock.patch.object(independent_eip, "_address", return_value=malformed),
               mock.patch.object(cli, "run") as run,
               contextlib.redirect_stderr(io.StringIO())):
             with self.assertRaises(SystemExit):

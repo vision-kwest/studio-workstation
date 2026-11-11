@@ -21,6 +21,8 @@ ARN = "arn:aws:cloudformation:us-east-1:" + h.ACCOUNT + ":stack/" + STACK + "/cp
 class CpuAWS(FakeAWS):
     def __init__(self):
         super().__init__()
+        self.cpu["VpcId"] = "vpc-01bbe5d01838f70b2"
+        self.cpu["IamInstanceProfile"] = {"Arn": h.BASE_PROFILE}
         self.stack_status = "CREATE_COMPLETE"
         self.deleted_sg = False
         self.deleted_volume = False
@@ -115,15 +117,27 @@ class CpuDestroyTests(unittest.TestCase):
 
     def test_cpu_delete_does_not_repurpose_shared_eip(self):
         self.cloud.eip["InstanceId"] = CPU
-        with self.assertRaisesRegex(ValueError, "Shared CPU EIP"):
+        with self.assertRaisesRegex(ValueError, "Release shared EIP"):
             self.invoke()
         self.assertEqual(self.cloud.moves, [])
 
-    def test_original_cpu_anchor_always_refused(self):
-        runner = mock.Mock()
-        with self.assertRaises(ValueError):
+    def test_original_cpu_anchor_is_subject_to_normal_stack_preflight(self):
+        runner = mock.Mock(return_value={"Stacks": []})
+        with self.assertRaisesRegex(ValueError, "Ambiguous CPU CloudFormation stack"):
             d.destroy_cpu(runner, runner, h.CPU_STACK, h.REGION)
-        runner.assert_not_called()
+        runner.assert_called_once_with(h.REGION, "cloudformation", "describe-stacks",
+                                       "--stack-name", h.CPU_STACK)
+
+    def test_cpu_destroy_preserves_unassociated_eip(self):
+        for key in ("InstanceId", "AssociationId", "NetworkInterfaceId"):
+            self.cloud.eip.pop(key, None)
+        self.cloud.eip["Tags"] = [t for t in self.cloud.eip["Tags"]
+                                  if t["Key"] != "StudioDcvInstanceId"]
+        result = self.invoke()
+        self.assertEqual(result["state"], "DELETE_COMPLETE")
+        self.assertEqual(result["shared_eip_preserved"], h.EIP_IP)
+        self.assertIsNone(self.cloud.eip.get("InstanceId"))
+        self.assertTrue(self.cloud.deleted_volume)
 
     def test_cli_routes_non_anchor_cpu_destroy_to_verified_engine(self):
         with (mock.patch.object(cli, "describe") as desc,

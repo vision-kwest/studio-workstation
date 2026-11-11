@@ -233,17 +233,35 @@ def trusted_url(stack, instance, *, manager=aws, check_tls=verified_dcv_hostname
 
 
 def shared_gpu_source_ready(*, manager=aws):
-    """Before a billable GPU create/start, prove CPU is stopped and owns the EIP."""
-    from runtime import issue43_hostname_handoff as handoff
-    if handoff._stack_iid(manager, handoff.CPU_STACK) != handoff.CPU_ID:
-        raise ValueError("Original CPU CloudFormation identity changed")
-    cpu = handoff._items(manager, handoff.CPU_ID)[handoff.CPU_ID]
-    if (cpu.get("State", {}).get("Name") != "stopped" or
-            cpu.get("NetworkInterfaces", [{}])[0].get("NetworkInterfaceId")
-            != handoff.CPU_ENI):
-        raise ValueError("CPU must be stopped and have its original ENI before GPU launch")
-    trusted_owner(DEFAULT_STACK, handoff.CPU_ID, manager=manager)
+    """Fail closed before GPU billing without requiring the original CPU anchor.
 
+    The shared EIP must be safely unassociated or attached to a verified,
+    stopped Studio CPU. Never start a GPU while another owner is running.
+    """
+    from runtime import independent_eip
+    from runtime import issue43_hostname_handoff as handoff
+
+    address = independent_eip._address(manager)
+    owner = address.get("InstanceId")
+    tagged = handoff._tags(address).get("StudioDcvInstanceId")
+    if owner is None:
+        if address.get("AssociationId") or address.get("NetworkInterfaceId") or tagged:
+            raise ValueError("Unassociated EIP has stale association or ownership tags")
+        return {"owner": None, "state": "unassociated"}
+    if not address.get("AssociationId") or not address.get("NetworkInterfaceId"):
+        raise ValueError("Associated EIP lacks verified association identity")
+
+    independent_eip._owner(manager, address)  # Requires stopped, approved instance.
+    vm = handoff._items(manager, owner)[owner]
+    interfaces = vm.get("NetworkInterfaces", [])
+    if len(interfaces) != 1 or interfaces[0].get("NetworkInterfaceId") != address["NetworkInterfaceId"]:
+        raise ValueError("EIP owner's network interface identity mismatch")
+    name = handoff._tags(vm).get("aws:cloudformation:stack-name", "")
+    if not re.fullmatch(r"studio-[a-z0-9-]{3,100}", name) or name.startswith("studio-gpu-cli-"):
+        raise ValueError("EIP owner is not a verified Studio CPU stack")
+    if handoff._stack_iid(manager, name) != owner:
+        raise ValueError("EIP owner CloudFormation identity changed")
+    return {"owner": owner, "state": "stopped", "stack": name}
 
 
 def gpu_restart_preflight(stack, instance, region, *, manager=aws, now=None):
@@ -324,39 +342,37 @@ def gpu_expiration_status(stack, instance, region, *, manager=aws, now=None):
 
 def complete_gpu_setup(stack, region, instance, *, manager=aws,
                        wait=wait_gpu_bootstrap):
-    """Run existing ACM + EIP components AFTER PR65 guarded launch/start."""
+    """Guarded GPU ACM enrollment and replacement-CPU EIP handoff."""
     if stack != GPU_ACCEPTANCE_STACK or region != DEFAULT_REGION:
         raise ValueError("GPU trusted setup limited to approved acceptance scope")
     wait(stack, region)
     from runtime import issue43_gpu_acm_setup as acm
-    from runtime import issue43_hostname_handoff as handoff
-    result = acm.prepare_gpu(manager)
+    from runtime import independent_eip
+    result = acm.prepare_gpu(manager, independent=True)
     if result["instance_id"] != instance:
         raise RuntimeError("GPU instance changed during ACM enrollment")
-    transfer = handoff.handoff_gpu(manager, verified_dcv_hostname, allow_live=True)
+    transfer = independent_eip.handoff_gpu(manager, verified_dcv_hostname)
     if transfer["owner"] != instance:
         raise RuntimeError("GPU EIP handoff owner mismatch")
-    # handoff_gpu already verified trusted TLS, the exact EIP owner/tag,
-    # and unchanged DNS; avoid a second, non-rollback-protected network check.
-    return "https://" + handoff.HOST + ":8443"
+    return "https://" + independent_eip.legacy.HOST + ":8443"
 
 
 def complete_gpu_stop(stack, instance, *, manager=aws):
-    """After EC2 confirms stopped, restore CPU EIP and revoke GPU-only IAM."""
+    """Restore replacement CPU EIP and revoke exact GPU certificate grant."""
     from runtime import issue43_gpu_acm_setup as acm
-    from runtime import issue43_hostname_handoff as handoff
+    from runtime import independent_eip
     if stack != GPU_ACCEPTANCE_STACK:
         raise ValueError("Not an approved GPU acceptance stack")
-    address = handoff._eip(manager)
+    address = independent_eip._address(manager)
     owner = address.get("InstanceId")
-    tag_owner = handoff._tags(address).get("StudioDcvInstanceId")
-    if owner == instance or (owner is None and tag_owner == instance):
-        result = handoff.restore_cpu(manager, instance, allow_live=True)
-        if result["owner"] != handoff.CPU_ID:
-            raise RuntimeError("CPU EIP return not verified")
-    elif owner != handoff.CPU_ID or tag_owner != handoff.CPU_ID:
+    tagged = independent_eip.legacy._tags(address).get("StudioDcvInstanceId")
+    if owner == instance or (owner is None and tagged == instance):
+        independent_eip.restore_cpu(manager, instance)
+    elif owner is not None and tagged == owner:
+        independent_eip._cpu_owner(manager, address)
+    else:
         raise ValueError("Unexpected EIP owner; refusing GPU cleanup")
-    return acm.revoke_gpu(manager, instance)
+    return acm.revoke_gpu(manager, instance, independent=True)
 
 
 def interactive_ssm(instance, region, *, attempts=8, sleep=time.sleep,
@@ -404,6 +420,14 @@ def command(args):
             print(json.dumps(acm.prepare_gpu(aws), indent=2))
         else:
             print(json.dumps(acm.revoke_gpu(aws, args.gpu_instance_id), indent=2))
+        return
+    if args.action in ("hostname-assign", "hostname-release"):
+        from runtime import independent_eip
+        if args.region != DEFAULT_REGION or not args.execute:
+            raise ValueError("Independent EIP operation requires us-east-1 and --execute")
+        result = (independent_eip.release(aws) if args.action == "hostname-release"
+                  else independent_eip.assign(aws, args.stack, verified_dcv_hostname))
+        print(json.dumps(result, indent=2))
         return
     if args.action in ("hostname-plan", "hostname-iam", "hostname-handoff",
                        "hostname-return-plan", "hostname-return"):
@@ -555,9 +579,6 @@ def command(args):
     if args.action == "destroy":
         if not args.delete_stack:
             raise ValueError("Refusing destruction: add --delete-stack")
-        if args.stack == DEFAULT_STACK:
-            raise ValueError("Refusing to destroy the original CPU anchor for the shared EIP; "
-                             "migrate the shared hostname first")
         from runtime import issue43_destroy
         if args.stack == GPU_ACCEPTANCE_STACK:
             result = issue43_destroy.destroy_gpu(aws, run, args.stack, args.region)
@@ -587,7 +608,14 @@ def command(args):
         if state["state"] != desired:
             raise ValueError(f"Expected {desired} before {args.action}, got {state['state']}")
         if args.action == "start" and args.stack == DEFAULT_STACK:
-            trusted_owner(args.stack, iid)  # Never start CPU against GPU EIP.
+            from runtime import independent_eip
+            address = independent_eip._address(aws)
+            owner = address.get("InstanceId")
+            tagged = independent_eip.legacy._tags(address).get("StudioDcvInstanceId")
+            if (owner not in (None, iid) or
+                    (owner is None and (address.get("AssociationId") or tagged)) or
+                    (owner == iid and (not address.get("AssociationId") or tagged != iid))):
+                raise ValueError("Shared EIP has unexpected ownership; refusing CPU start")
         if args.action == "start" and args.stack == GPU_ACCEPTANCE_STACK:
             shared_gpu_source_ready()  # CPU/EIP must be safe before billing.
             gpu_restart_preflight(args.stack, iid, args.region)  # Guard + deadline before EC2.
@@ -596,9 +624,14 @@ def command(args):
             address = handoff._eip(aws)
             owner = address.get("InstanceId")
             tagged = handoff._tags(address).get("StudioDcvInstanceId")
-            if not ((owner == iid and tagged == iid) or
-                    (owner == handoff.CPU_ID and tagged == handoff.CPU_ID) or
-                    (owner is None and tagged == iid)):
+            from runtime import independent_eip
+            if owner == iid and tagged == iid:
+                pass
+            elif owner is None and tagged == iid:
+                pass
+            elif owner and tagged == owner:
+                independent_eip._cpu_owner(aws, address)
+            else:
                 raise ValueError("Unexpected EIP ownership; refusing GPU stop orchestration")
         run(["aws", "ec2", f"{args.action}-instances", "--instance-ids", iid,
              "--region", args.region], capture=False)
@@ -611,7 +644,9 @@ def command(args):
             else:
                 print(json.dumps(complete_gpu_stop(args.stack, iid), indent=2))
         elif args.stack == DEFAULT_STACK and args.action == "start":
-            print("TRUSTED DCV:", wait_cpu_https(args.stack, iid))
+            from runtime import independent_eip
+            if independent_eip._address(aws).get("InstanceId") == iid:
+                print("TRUSTED DCV:", wait_cpu_https(args.stack, iid))
         print(json.dumps(describe(args.stack, args.region), indent=2))
         return
 
@@ -620,6 +655,7 @@ def main(argv=None):
                                 description="Validated CPU RES workstation lifecycle wrapper")
     sub = p.add_subparsers(dest="action", required=True)
     for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready",
+                   "hostname-assign", "hostname-release",
                    "hostname-plan", "hostname-iam", "hostname-handoff",
                    "hostname-return-plan", "hostname-return",
                    "hostname-acm-prepare", "hostname-acm-revoke",
@@ -631,8 +667,8 @@ def main(argv=None):
         if action in ("hostname-iam", "hostname-return-plan", "hostname-return", "hostname-acm-revoke"):
             s.add_argument("--gpu-instance-id", required=True,
                            help="Exact supervised GPU EC2 ID, no wildcard discovery")
-        if action in ("hostname-handoff", "hostname-return", "hostname-acm-prepare",
-                      "hostname-acm-revoke"):
+        if action in ("hostname-assign", "hostname-release", "hostname-handoff", "hostname-return",
+                      "hostname-acm-prepare", "hostname-acm-revoke"):
             s.add_argument("--execute", action="store_true",
                            help="Explicitly authorize guarded hostname/ACM AWS writes")
         if action == "extend-expiration":
