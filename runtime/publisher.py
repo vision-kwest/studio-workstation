@@ -4,8 +4,6 @@ import re
 import time
 
 PROFILE = "StudioEfsCiPublisher"
-FS = "fs-054fd0b72429f4569"
-TAG = "StudioPublisher"
 REGION = "us-east-1"
 
 
@@ -28,7 +26,6 @@ mkdir -p /opt/studio/packages
 printf 'fs-054fd0b72429f4569:/ /opt/studio/packages efs _netdev,tls,iam,nofail,x-systemd.automount 0 0\n' >> /etc/fstab
 systemctl daemon-reload
 mount /opt/studio/packages
-test -f /opt/studio/packages/prod/usd/26.05/package.py
 # Pin the tested public Rez publishing tools; never consume a moving branch.
 git clone https://github.com/vision-kwest/studio-rez.git /opt/studio/rez
 (cd /opt/studio/rez && git checkout --detach 2fee37e32a09c337d9486e00bcc2a16c3ff4b0fb)
@@ -64,14 +61,14 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
     if state != "running":
         raise ValueError("Publisher must be running")
     if args.action == "publisher-result":
-        if not re.fullmatch(r"[0-9a-f-]{36}", args.command_id):
+        if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", args.command_id):
             raise ValueError("Exact SSM command ID required")
         result = aws(REGION, "ssm", "get-command-invocation", "--command-id", args.command_id,
                      "--instance-id", args.instance_id)
         return {"status": result["Status"], "output": result.get("StandardOutputContent", "")[-2000:],
                 "error": result.get("StandardErrorContent", "")[-1200:]}
     if args.operation == "check":
-        commands = ["set -eu", "id", "test -d /opt/studio/packages",
+        commands = ["set -eu", "test -f /var/log/studio-publisher-ready", "id", "test -d /opt/studio/packages",
                     "mountpoint /opt/studio/packages", "test -w /opt/studio/packages/dev"]
     elif args.operation == "build":
         if not re.fullmatch(r"vision-kwest/[a-z0-9-]+", args.recipe_repo) or not re.fullmatch(r"[0-9a-f]{40}", args.recipe_ref):
@@ -84,6 +81,7 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
                     "git clone --no-checkout https://github.com/" + args.recipe_repo + ".git /tmp/studio-publisher-recipe",
                     "cd /tmp/studio-publisher-recipe",
                     "git checkout --detach " + args.recipe_ref,
+                    "test \"$(git rev-parse HEAD)\" = " + args.recipe_ref,
                     "test -f " + args.recipe_path,
                     "STUDIO_PACKAGE_ROOT=/opt/studio/packages bash " + args.recipe_path]
     else:
