@@ -35,8 +35,8 @@ def _owner(aws, address):
     vm = legacy._items(aws, iid)[iid]
     if vm.get("VpcId") != "vpc-01bbe5d01838f70b2" or vm.get("IamInstanceProfile", {}).get("Arn") != legacy.BASE_PROFILE:
         raise ValueError("EIP held by unrecognized instance")
-    if vm.get("State", {}).get("Name") not in ("stopped", "running"):
-        raise ValueError("EIP owner in unsafe state")
+    if vm.get("State", {}).get("Name") != "stopped":
+        raise ValueError("Stop the current EIP owner before releasing its address")
     return iid
 
 def release(aws):
@@ -46,9 +46,12 @@ def release(aws):
         if a.get("AssociationId") or legacy._tags(a).get("StudioDcvInstanceId"):
             raise ValueError("Unassociated EIP has stale ownership state")
         return {"allocation": legacy.EIP_ID, "state": "unassociated"}
-    if not a.get("AssociationId"):
-        raise ValueError("Associated EIP missing association ID")
+    if not a.get("AssociationId") or not a.get("NetworkInterfaceId"):
+        raise ValueError("Associated EIP missing association identity")
     aws(legacy.REGION, "ec2", "disassociate-address", "--association-id", a["AssociationId"])
+    current = _address(aws)
+    if current.get("AssociationId") or current.get("InstanceId"):
+        raise RuntimeError("EIP disassociation readback mismatch; ownership tag retained")
     aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID, "--tags", "Key=StudioDcvInstanceId")
     current = _address(aws)
     if current.get("AssociationId") or legacy._tags(current).get("StudioDcvInstanceId"):
@@ -60,8 +63,8 @@ def assign(aws, stack, check_tls):
     a = _address(aws)
     if a.get("AssociationId") or a.get("InstanceId") or legacy._tags(a).get("StudioDcvInstanceId"):
         raise ValueError("EIP is not unassociated; release its verified owner first")
-    # TLS/DCV must be checked locally before assignment by caller; after
-    # association validate public hostname and roll back on failure.
+    _guest_tls(aws, iid)
+    # Only after guest TLS/DCV readiness is proven do we move the public address.
     aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
         "--network-interface-id", eni, "--allow-reassociation", "false")
     try:
@@ -78,3 +81,35 @@ def assign(aws, stack, check_tls):
             aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID, "--tags", "Key=StudioDcvInstanceId")
         raise
     return {"allocation": legacy.EIP_ID, "instance": iid, "hostname": legacy.HOST}
+
+
+def _guest_tls(aws, iid):
+    """Require DCV, trusted ACM certificate and matching private key locally."""
+    import json
+    import time
+    commands = [
+        "set -eu",
+        "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
+        "systemctl is-active gdm3 dcvserver >/dev/null",
+        "dcv describe-session console >/dev/null",
+        "openssl x509 -in /etc/dcv/dcv.pem -noout -checkend 3600 >/dev/null",
+        "openssl x509 -in /etc/dcv/dcv.pem -noout -checkhost " + legacy.HOST + " | grep -q 'does match'",
+        "test \"$(openssl x509 -in /etc/dcv/dcv.pem -pubkey -noout | sha256sum | cut -d' ' -f1)\" = \"$(openssl pkey -in /etc/dcv/dcv.key -pubout | sha256sum | cut -d' ' -f1)\"",
+        "timeout 12 openssl s_client -connect 127.0.0.1:8443 -servername " + legacy.HOST + " -verify_hostname " + legacy.HOST + " -verify_return_error -brief </dev/null >/dev/null 2>&1",
+        "echo STUDIO_EIP_TLS_READY",
+    ]
+    result = aws(legacy.REGION, "ssm", "send-command", "--instance-ids", iid,
+                 "--document-name", "AWS-RunShellScript", "--parameters", json.dumps({"commands": commands}),
+                 "--timeout-seconds", "90")
+    cid = result["Command"]["CommandId"]
+    for _ in range(20):
+        time.sleep(3)
+        reply = aws(legacy.REGION, "ssm", "get-command-invocation", "--command-id", cid,
+                    "--instance-id", iid)
+        if reply.get("Status") == "Success":
+            if reply.get("ResponseCode") != 0 or "STUDIO_EIP_TLS_READY" not in reply.get("StandardOutputContent", "").splitlines():
+                raise RuntimeError("Guest DCV certificate readiness missing")
+            return
+        if reply.get("Status") in ("Failed", "TimedOut", "Cancelled"):
+            raise RuntimeError("Guest DCV certificate readiness failed")
+    raise RuntimeError("Guest DCV certificate readiness timed out")
