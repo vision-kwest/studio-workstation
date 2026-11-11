@@ -77,7 +77,7 @@ def assign(aws, stack, check_tls):
     _guest_tls(aws, iid)
     # Only after guest TLS/DCV readiness is proven do we move the public address.
     aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
-        "--network-interface-id", eni, "--allow-reassociation", "false")
+        "--network-interface-id", eni, "--no-allow-reassociation")
     try:
         aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,
             "--tags", "Key=StudioDcvInstanceId,Value=" + iid)
