@@ -340,6 +340,48 @@ def gpu_expiration_status(stack, instance, region, *, manager=aws, now=None):
                                   deadlines["volume_cleanup_at"], now=now)
 
 
+def install_efs_client(instance, region, *, manager=aws, sleep=time.sleep):
+    """Provision official EFS mount helper via AWS SSM Distributor.
+
+    The pinned Rez bundle contains no amazon-efs-utils .deb. Installation is
+    performed by the Studio CLI, never by unverified guest downloads.
+    """
+    command = None
+    for attempt in range(24):
+        try:
+            response = manager(region, "ssm", "send-command",
+                               "--instance-ids", instance,
+                               "--document-name", "AWS-ConfigureAWSPackage",
+                               "--parameters", json.dumps({
+                                   "action": ["Install"], "name": ["AmazonEFSUtils"],
+                                   "installationType": ["Uninstall and reinstall"]}),
+                               "--timeout-seconds", "180")
+            command = response["Command"]["CommandId"]
+            break
+        except subprocess.CalledProcessError as exc:
+            message = (exc.stderr or "") + str(exc)
+            if not any(x in message for x in ("InvalidInstanceId", "TargetNotConnected")):
+                raise
+            if attempt == 23:
+                raise RuntimeError("SSM EFS helper installation unavailable") from exc
+            sleep(10)
+    for attempt in range(60):
+        try:
+            result = manager(region, "ssm", "get-command-invocation",
+                             "--command-id", command, "--instance-id", instance)
+        except subprocess.CalledProcessError as exc:
+            if "InvocationDoesNotExist" not in ((exc.stderr or "") + str(exc)):
+                raise
+            result = {}
+        if result.get("Status") == "Success":
+            return
+        if result.get("Status") in ("Failed", "TimedOut", "Cancelled"):
+            raise RuntimeError("Official EFS helper installation failed: " +
+                               result.get("Status", "unknown"))
+        sleep(5)
+    raise RuntimeError("Timed out waiting for official EFS helper installation")
+
+
 def complete_gpu_setup(stack, region, instance, *, manager=aws,
                        wait=wait_gpu_bootstrap):
     """Guarded GPU ACM enrollment and replacement-CPU EIP handoff."""
@@ -489,12 +531,16 @@ def command(args):
             if (args.vpc_id != DEFAULT_VPC or args.subnet_id != DEFAULT_SUBNET or
                     args.instance_profile != DEFAULT_PROFILE or args.disk_size != 100):
                 raise ValueError("GPU acceptance must use the reviewed VPC, subnet, profile and 100 GiB disk")
+        if (args.rez_version_id or args.rez_sha256) and args.vpc_id != DEFAULT_VPC:
+            raise ValueError("Software EFS client SG requires the reviewed VPC")
         prefix = GPU_PREFIX if gpu else f"releases/{args.version}/res-2026.06"
         with tempfile.TemporaryDirectory(prefix="studio-cli-") as temp:
             template = Path(temp) / "workstation.json"
             render = [sys.executable, str(ROOT / "runtime/render_workstation.py"),
                       "--bucket", args.bucket, "--prefix", prefix, "--user", "workstation",
                       "--output", str(template)]
+            if args.rez_version_id or args.rez_sha256:
+                render.extend(["--rez-version-id", args.rez_version_id or "", "--rez-sha256", args.rez_sha256 or ""])
             if gpu:
                 render.extend(["--profile", "gpu", "--lifecycle", "persistent"])
                 if args.cleanup_token:
@@ -552,11 +598,15 @@ def command(args):
                 outcome["expiration"] = gpu_expiration_summary(
                     outcome["terminate_at"], outcome["volume_cleanup_at"])
                 print(json.dumps(outcome, indent=2), flush=True)
+                if args.rez_version_id:
+                    install_efs_client(outcome["guard"]["instance_id"], args.region)
                 print("GPU guard armed; waiting for RES/DCV and trusted HTTPS...", flush=True)
                 url = complete_gpu_setup(args.stack, args.region, outcome["guard"]["instance_id"])
                 print("TRUSTED DCV:", url)
                 return
             run(deploy, capture=False)
+            if args.rez_version_id:
+                install_efs_client(instance_id(args.stack, args.region), args.region)
             print(json.dumps(describe(args.stack, args.region), indent=2))
         return
     if args.action == "check-ready":
@@ -680,6 +730,8 @@ def main(argv=None):
                            help="Render and validate without launching AWS resources")
             s.add_argument("--profile", choices=["cpu", "gpu"], default="cpu")
             s.add_argument("--version", default="v0.1.3")
+            s.add_argument("--rez-version-id", help="Approved immutable S3 Rez bundle version")
+            s.add_argument("--rez-sha256", help="SHA-256 of approved Rez bundle")
             s.add_argument("--bucket", default=DEFAULT_BUCKET)
             s.add_argument("--image-id", default=None)
             s.add_argument("--vpc-id", default=DEFAULT_VPC)

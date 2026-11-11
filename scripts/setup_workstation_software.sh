@@ -14,10 +14,10 @@ trap 'rm -rf -- "$dir"; if test -n "$stage"; then rm -rf -- "$stage"; fi' EXIT
 aws --region us-east-1 s3api get-object --bucket studio-workstation-releases-401233741942-us-east-1 --key software/rez/3.4.0/studio-rez-ubuntu2404.tar.gz --version-id "$STUDIO_REZ_VERSION_ID" "$dir/bundle.tgz" >/dev/null
 printf '%s  %s\n' "$STUDIO_REZ_SHA256" "$dir/bundle.tgz" | sha256sum -c -
 tar -xzf "$dir/bundle.tgz" -C "$dir"
-if ! command -v mount.efs >/dev/null; then
-  dpkg -i "$dir"/amazon-efs-utils_*.deb
-fi
-command -v mount.efs >/dev/null
+# The Studio CLI installs the official EFS client via AWS SSM Distributor.
+# The immutable Rez bundle intentionally does not contain a .deb package.
+# This service retries until the independently managed helper is available.
+command -v mount.efs >/dev/null || { echo "Waiting for Studio CLI EFS helper installation"; exit 1; }
 mountpoint=/opt/studio/packages
 fstab=/etc/fstab
 entry="fs-054fd0b72429f4569:/ $mountpoint efs _netdev,nofail,x-systemd.automount,ro,tls,iam 0 0"

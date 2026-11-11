@@ -71,7 +71,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/usr/local/sbin/studio-software-setup
 RemainAfterExit=yes
 Restart=on-failure
