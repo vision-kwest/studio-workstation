@@ -260,39 +260,37 @@ def gpu_restart_preflight(stack, instance, region, *, manager=aws, now=None):
 
 def complete_gpu_setup(stack, region, instance, *, manager=aws,
                        wait=wait_gpu_bootstrap):
-    """Run existing ACM + EIP components AFTER PR65 guarded launch/start."""
+    """Guarded GPU ACM enrollment and replacement-CPU EIP handoff."""
     if stack != GPU_ACCEPTANCE_STACK or region != DEFAULT_REGION:
         raise ValueError("GPU trusted setup limited to approved acceptance scope")
     wait(stack, region)
     from runtime import issue43_gpu_acm_setup as acm
-    from runtime import issue43_hostname_handoff as handoff
-    result = acm.prepare_gpu(manager)
+    from runtime import independent_eip
+    result = acm.prepare_gpu(manager, independent=True)
     if result["instance_id"] != instance:
         raise RuntimeError("GPU instance changed during ACM enrollment")
-    transfer = handoff.handoff_gpu(manager, verified_dcv_hostname, allow_live=True)
+    transfer = independent_eip.handoff_gpu(manager, verified_dcv_hostname)
     if transfer["owner"] != instance:
         raise RuntimeError("GPU EIP handoff owner mismatch")
-    # handoff_gpu already verified trusted TLS, the exact EIP owner/tag,
-    # and unchanged DNS; avoid a second, non-rollback-protected network check.
-    return "https://" + handoff.HOST + ":8443"
+    return "https://" + independent_eip.legacy.HOST + ":8443"
 
 
 def complete_gpu_stop(stack, instance, *, manager=aws):
-    """After EC2 confirms stopped, restore CPU EIP and revoke GPU-only IAM."""
+    """Restore replacement CPU EIP and revoke exact GPU certificate grant."""
     from runtime import issue43_gpu_acm_setup as acm
-    from runtime import issue43_hostname_handoff as handoff
+    from runtime import independent_eip
     if stack != GPU_ACCEPTANCE_STACK:
         raise ValueError("Not an approved GPU acceptance stack")
-    address = handoff._eip(manager)
+    address = independent_eip._address(manager)
     owner = address.get("InstanceId")
-    tag_owner = handoff._tags(address).get("StudioDcvInstanceId")
-    if owner == instance or (owner is None and tag_owner == instance):
-        result = handoff.restore_cpu(manager, instance, allow_live=True)
-        if result["owner"] != handoff.CPU_ID:
-            raise RuntimeError("CPU EIP return not verified")
-    elif owner != handoff.CPU_ID or tag_owner != handoff.CPU_ID:
+    tagged = independent_eip.legacy._tags(address).get("StudioDcvInstanceId")
+    if owner == instance or (owner is None and tagged == instance):
+        independent_eip.restore_cpu(manager, instance)
+    elif owner is not None and tagged == owner:
+        independent_eip._cpu_owner(manager, address)
+    else:
         raise ValueError("Unexpected EIP owner; refusing GPU cleanup")
-    return acm.revoke_gpu(manager, instance)
+    return acm.revoke_gpu(manager, instance, independent=True)
 
 
 def interactive_ssm(instance, region, *, attempts=8, sleep=time.sleep,
