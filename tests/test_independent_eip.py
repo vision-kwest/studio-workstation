@@ -46,5 +46,48 @@ class IndependentEipTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 independent_eip.release(lambda *a: self.fail("unexpected AWS write"))
 
+
+    def test_gpu_preview_uses_replacement_cpu(self):
+        h = independent_eip.legacy
+        cpu, gpu = "i-aaaaaaaaaaaaaaaaa", "i-bbbbbbbbbbbbbbbbb"
+        address = {"InstanceId": cpu, "AssociationId": "eipassoc-old",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": cpu}]}
+        owner = {"instance": cpu, "stack": "studio-workstation-cpu-rez77",
+                 "eni": "eni-cpu", "association": "eipassoc-old"}
+        vm = {"State": {"Name": "running"}, "ImageId": h.GPU_AMI,
+              "InstanceType": "g4dn.xlarge",
+              "IamInstanceProfile": {"Arn": h.BASE_PROFILE},
+              "VpcId": "vpc-01bbe5d01838f70b2",
+              "NetworkInterfaces": [{"NetworkInterfaceId": "eni-gpu",
+                                     "Attachment": {"DeviceIndex": 0, "Status": "attached"}}]}
+        with (patch.object(independent_eip, "_address", return_value=address),
+              patch.object(independent_eip, "_cpu_owner", return_value=owner),
+              patch.object(h, "_stack_iid", return_value=gpu),
+              patch.object(h, "_items", return_value={gpu: vm}),
+              patch.object(h, "_gpu_guard", return_value={"terminate_at": "future"}) as guard,
+              patch("runtime.pr65_gpu_create.preflight") as preflight):
+            result = independent_eip.gpu_preview(lambda *a: None)
+        self.assertEqual(result["from"], cpu)
+        self.assertEqual(result["to"], gpu)
+        self.assertEqual(result["cpu"]["stack"], "studio-workstation-cpu-rez77")
+        guard.assert_called_once()
+        preflight.assert_called_once()
+
+    def test_restore_refuses_missing_cpu_return_tag(self):
+        with patch.object(independent_eip, "_address", return_value={
+            "InstanceId": "i-bbbbbbbbbbbbbbbbb",
+            "Tags": [{"Key": "StudioDcvInstanceId", "Value": "i-bbbbbbbbbbbbbbbbb"}]}):
+            with self.assertRaisesRegex(ValueError, "missing verified CPU return stack"):
+                independent_eip.restore_cpu(lambda *a: None, "i-bbbbbbbbbbbbbbbbb")
+
+    def test_handoff_refuses_unverified_guest_before_any_writes(self):
+        plan = {"to": "i-bbbbbbbbbbbbbbbbb"}
+        with patch.object(independent_eip, "gpu_preview", return_value=plan):
+            with self.assertRaisesRegex(ValueError, "guest TLS failed"):
+                independent_eip.handoff_gpu(
+                    lambda *a: self.fail("AWS write before TLS"),
+                    lambda *a: None,
+                    check_guest=lambda *a: (_ for _ in ()).throw(ValueError("guest TLS failed")))
+
 if __name__ == "__main__":
     unittest.main()
