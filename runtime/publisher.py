@@ -1,5 +1,4 @@
 """On-demand, isolated Studio EFS publisher. No workstation DCV or shared EIP."""
-import base64
 import json
 import re
 import time
