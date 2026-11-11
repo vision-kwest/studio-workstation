@@ -197,17 +197,35 @@ def trusted_url(stack, instance, *, manager=aws, check_tls=verified_dcv_hostname
 
 
 def shared_gpu_source_ready(*, manager=aws):
-    """Before a billable GPU create/start, prove CPU is stopped and owns the EIP."""
-    from runtime import issue43_hostname_handoff as handoff
-    if handoff._stack_iid(manager, handoff.CPU_STACK) != handoff.CPU_ID:
-        raise ValueError("Original CPU CloudFormation identity changed")
-    cpu = handoff._items(manager, handoff.CPU_ID)[handoff.CPU_ID]
-    if (cpu.get("State", {}).get("Name") != "stopped" or
-            cpu.get("NetworkInterfaces", [{}])[0].get("NetworkInterfaceId")
-            != handoff.CPU_ENI):
-        raise ValueError("CPU must be stopped and have its original ENI before GPU launch")
-    trusted_owner(DEFAULT_STACK, handoff.CPU_ID, manager=manager)
+    """Fail closed before GPU billing without requiring the original CPU anchor.
 
+    The shared EIP must be safely unassociated or attached to a verified,
+    stopped Studio CPU. Never start a GPU while another owner is running.
+    """
+    from runtime import independent_eip
+    from runtime import issue43_hostname_handoff as handoff
+
+    address = independent_eip._address(manager)
+    owner = address.get("InstanceId")
+    tagged = handoff._tags(address).get("StudioDcvInstanceId")
+    if owner is None:
+        if address.get("AssociationId") or address.get("NetworkInterfaceId") or tagged:
+            raise ValueError("Unassociated EIP has stale association or ownership tags")
+        return {"owner": None, "state": "unassociated"}
+    if not address.get("AssociationId") or not address.get("NetworkInterfaceId"):
+        raise ValueError("Associated EIP lacks verified association identity")
+
+    independent_eip._owner(manager, address)  # Requires stopped, approved instance.
+    vm = handoff._items(manager, owner)[owner]
+    interfaces = vm.get("NetworkInterfaces", [])
+    if len(interfaces) != 1 or interfaces[0].get("NetworkInterfaceId") != address["NetworkInterfaceId"]:
+        raise ValueError("EIP owner's network interface identity mismatch")
+    name = handoff._tags(vm).get("aws:cloudformation:stack-name", "")
+    if not re.fullmatch(r"studio-[a-z0-9-]{3,100}", name) or name.startswith("studio-gpu-cli-"):
+        raise ValueError("EIP owner is not a verified Studio CPU stack")
+    if handoff._stack_iid(manager, name) != owner:
+        raise ValueError("EIP owner CloudFormation identity changed")
+    return {"owner": owner, "state": "stopped", "stack": name}
 
 
 def gpu_restart_preflight(stack, instance, region, *, manager=aws, now=None):
