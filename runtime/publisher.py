@@ -69,7 +69,7 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
     elif args.operation == "build":
         if not re.fullmatch(r"vision-kwest/[a-z0-9-]+", args.recipe_repo) or not re.fullmatch(r"[0-9a-f]{40}", args.recipe_ref):
             raise ValueError("Build requires a pinned commit in a vision-kwest repository")
-        if not re.fullmatch(r"[a-zA-Z0-9_/-]+\\.sh", args.recipe_path) or ".." in args.recipe_path.split("/"):
+        if not re.fullmatch(r"[a-zA-Z0-9_/-]+\.sh", args.recipe_path) or ".." in args.recipe_path.split("/"):
             raise ValueError("Invalid recipe path")
         commands = ["set -eu", "mountpoint -q /opt/studio/packages",
                     "test -w /opt/studio/packages/dev",
