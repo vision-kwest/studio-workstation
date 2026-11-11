@@ -54,3 +54,25 @@ def test_create_bootstrap_pins_public_rez_and_iam_mount():
     assert "tls,iam" in script
     assert "studio-rez.git" in script
     assert result["instance_id"] == "i-" + "a"*17
+
+
+def test_cli_parses_publisher_commands(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    script = Path(__file__).resolve().parents[1] / "scripts/studio_workstation_cli.py"
+    spec = importlib.util.spec_from_file_location("studio_cli_publisher_test", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    seen = []
+    monkeypatch.setattr(module, "command", lambda args: seen.append(args))
+    for argv in (
+        ["publisher-create", "--security-group-id", "sg-test"],
+        ["publisher-status", "--instance-id", "i-" + "a"*17],
+        ["publisher-start", "--instance-id", "i-" + "a"*17],
+        ["publisher-stop", "--instance-id", "i-" + "a"*17],
+        ["publisher-run", "--instance-id", "i-" + "a"*17, "--operation", "check"],
+        ["publisher-result", "--instance-id", "i-" + "a"*17, "--command-id",
+         "00000000-0000-0000-0000-000000000000"],
+    ):
+        module.main(argv)
+        assert seen[-1].action == argv[0]
