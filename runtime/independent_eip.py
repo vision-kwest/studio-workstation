@@ -37,7 +37,7 @@ def _address(aws):
     legacy._dns(aws)
     return a
 
-def _owner(aws, address):
+def _owner(aws, address, *, require_stopped=True):
     iid = address.get("InstanceId")
     if not iid:
         return None
@@ -46,8 +46,11 @@ def _owner(aws, address):
     vm = legacy._items(aws, iid)[iid]
     if vm.get("VpcId") != "vpc-01bbe5d01838f70b2" or vm.get("IamInstanceProfile", {}).get("Arn") != legacy.BASE_PROFILE:
         raise ValueError("EIP held by unrecognized instance")
-    if vm.get("State", {}).get("Name") != "stopped":
+    state = vm.get("State", {}).get("Name")
+    if require_stopped and state != "stopped":
         raise ValueError("Stop the current EIP owner before releasing its address")
+    if not require_stopped and state not in ("stopped", "running"):
+        raise ValueError("EIP owner is not in an approved state")
     return iid
 
 def release(aws):
