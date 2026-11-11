@@ -11,6 +11,12 @@
         "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/*/res-2026.06/installation-scripts.tar.gz",
         "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/*/res-2026.06/virtual-desktop.tar.gz"
       ]
+    },
+    {
+      "Sid": "ReadExactRezBundleVersion",
+      "Effect": "Allow",
+      "Action": "s3:GetObjectVersion",
+      "Resource": "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/software/rez/3.4.0/studio-rez-ubuntu2404.tar.gz"
     }
   ]
 }

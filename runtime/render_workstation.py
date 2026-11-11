@@ -18,11 +18,13 @@ GPU_ARCHIVES={
     "installation-scripts.tar.gz": ("bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB", "084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5"),
     "virtual-desktop.tar.gz": ("nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53", "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
 }
-def render(bucket,prefix,user,profile="cpu"):
+def render(bucket,prefix,user,profile="cpu",rez_version_id=None,rez_sha256=None):
     if not re.fullmatch(r"[a-z0-9.-]{3,63}",bucket): raise ValueError("bucket")
     if not re.fullmatch(r"[A-Za-z0-9_./-]+",prefix) or ".." in prefix: raise ValueError("prefix")
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,30}",user): raise ValueError("user")
     if profile not in ("cpu", "gpu"): raise ValueError("profile")
+    if bool(rez_version_id) != bool(rez_sha256): raise ValueError("Rez release requires version ID and SHA-256")
+    if rez_version_id and (not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}",rez_version_id) or not re.fullmatch(r"[a-f0-9]{64}",rez_sha256)): raise ValueError("Invalid Rez release pin")
     gpu_family = "NVIDIA" if profile == "gpu" else "NONE"
     pinned = profile == "gpu" and bucket == PINNED_GPU_BUCKET and prefix.strip("/") == PINNED_GPU_PREFIX
     prefix=prefix.strip("/")
@@ -51,6 +53,39 @@ set +a
 """.replace("USERNAME",user).replace("APPURI",app).replace("REGION",REGION).replace("GPUFAMILY",gpu_family).replace(
         "APP_VERSION_LINE", "STUDIO_APP_VERSION_ID="+GPU_ARCHIVES["virtual-desktop.tar.gz"][0] if pinned else "").replace(
         "APP_SHA_LINE", "STUDIO_APP_SHA256="+GPU_ARCHIVES["virtual-desktop.tar.gz"][1] if pinned else "")
+    if rez_version_id:
+        script=(ROOT.parent/"scripts/setup_workstation_software.sh").read_text()
+        command += f"""cat > /etc/studio-software-release.env <<'STUDIO_RELEASE'
+STUDIO_REZ_VERSION_ID={rez_version_id}
+STUDIO_REZ_SHA256={rez_sha256}
+STUDIO_RELEASE
+chmod 600 /etc/studio-software-release.env
+cat > /usr/local/sbin/studio-software-setup <<'STUDIO_SETUP'
+{script}
+STUDIO_SETUP
+chmod 700 /usr/local/sbin/studio-software-setup
+cat > /etc/systemd/system/studio-software-setup.service <<'STUDIO_UNIT'
+[Unit]
+Description=Studio post-DCV Rez and EFS setup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/studio-software-setup
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
+STUDIO_UNIT
+systemctl daemon-reload
+systemctl enable studio-software-setup.service
+if test -f /root/bootstrap/semaphore/app_installed.lock; then
+  systemctl start --no-block studio-software-setup.service || true
+fi
+"""
     env=Environment(loader=FileSystemLoader(str(ROOT/"upstream")),undefined=StrictUndefined,keep_trailing_newline=True)
     userdata=env.get_template("bootstrap_userdata_linux_base_non_substitution.sh.jinja2").render(
         base_os="ubuntu2404",aws_region=REGION,bootstrap_package_uri=boot,
@@ -65,6 +100,8 @@ set +a
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--profile",choices=["cpu","gpu"],default="cpu")
+    p.add_argument("--rez-version-id")
+    p.add_argument("--rez-sha256")
     p.add_argument("--lifecycle",choices=["temporary","persistent"],default="temporary",help="GPU only; persistent enables stop/start")
     p.add_argument("--cleanup-token",default=None)
     p.add_argument("--test-stack",default=None)
@@ -74,6 +111,8 @@ def main():
     p.add_argument("--output",type=Path,required=True)
     a=p.parse_args()
     template=json.loads((ROOT/"workstation-template.json").read_text())
+    if a.rez_version_id and a.rez_sha256:
+        template["Resources"]["Workstation"]["Properties"]["SecurityGroupIds"].append("sg-058f2babb18747976")
     if a.profile == "gpu":
         template["Description"] = "GPU g4dn RES 2026.06 derived runtime; requires separately validated NVIDIA-capable AMI"
         # Task 7 temporary GPU test only: no open-by-default DCV and no orphan EBS.
@@ -123,7 +162,7 @@ def main():
         raise ValueError("cleanup scope only supported for GPU")
     elif a.lifecycle != "temporary":
         raise ValueError("persistent lifecycle is only supported for GPU")
-    template["Resources"]["Workstation"]["Properties"]["UserData"]={"Fn::Base64":{"Fn::Sub":render(a.bucket,a.prefix,a.user,a.profile)}}
+    template["Resources"]["Workstation"]["Properties"]["UserData"]={"Fn::Base64":{"Fn::Sub":render(a.bucket,a.prefix,a.user,a.profile,a.rez_version_id,a.rez_sha256)}}
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(template,indent=2)+"\n")
     print("Generated reviewable CloudFormation:",a.output)
