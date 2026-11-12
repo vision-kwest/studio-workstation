@@ -2,10 +2,10 @@
 set -euo pipefail
 # This is a new upstream download, never a copy of the existing EFS package.
 : "${REZ_BUILD_INSTALL_PATH:?Run through rez-build --install}"
-url="https://github.com/ollama/ollama/releases/download/v0.40.16/ollama-linux-amd64.tgz"
+url="https://github.com/ollama/ollama/releases/download/v0.40.16/ollama-linux-amd64.tar.zst"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-curl --fail --location --retry 3 "$url" --output "$work/ollama.tgz"
+curl --fail --location --retry 3 "$url" --output "$work/ollama.tar.zst"
 sha256sum "$work/ollama.tgz" | tee "$work/source.sha256"
 mkdir -p "$work/unpacked"
 tar -xzf "$work/ollama.tgz" -C "$work/unpacked"
