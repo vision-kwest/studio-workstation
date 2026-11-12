@@ -468,9 +468,9 @@ def command(args):
         if args.region != DEFAULT_REGION or not args.execute:
             raise ValueError("GPU ACM setup/revoke requires us-east-1 and explicit --execute")
         if args.action == "hostname-acm-prepare":
-            print(json.dumps(acm.prepare_gpu(aws), indent=2))
+            print(json.dumps(acm.prepare_gpu(aws, independent=True), indent=2))
         else:
-            print(json.dumps(acm.revoke_gpu(aws, args.gpu_instance_id), indent=2))
+            print(json.dumps(acm.revoke_gpu(aws, args.gpu_instance_id, independent=True), indent=2))
         return
     if args.action in ("hostname-assign", "hostname-release"):
         from runtime import independent_eip
@@ -489,17 +489,21 @@ def command(args):
             print(json.dumps(handoff.review_gpu_iam(args.gpu_instance_id), indent=2))
             return
         if args.action == "hostname-plan":
-            print(json.dumps(handoff.gpu_preview(aws), indent=2))
+            from runtime import independent_eip
+            if args.stack != GPU_ACCEPTANCE_STACK:
+                raise ValueError("GPU hostname plan requires the guarded acceptance stack")
+            print(json.dumps(independent_eip.gpu_preview(aws), indent=2))
             return
         if args.action == "hostname-return-plan":
             print(json.dumps(handoff.cpu_return_preview(aws, args.gpu_instance_id), indent=2))
             return
         if not args.execute:
             raise ValueError("Live hostname handoff requires a separately approved --execute")
+        from runtime import independent_eip
         if args.action == "hostname-handoff":
-            print(json.dumps(handoff.handoff_gpu(aws, verified_dcv_hostname, allow_live=True), indent=2))
+            print(json.dumps(independent_eip.handoff_gpu(aws, verified_dcv_hostname), indent=2))
         else:
-            print(json.dumps(handoff.restore_cpu(aws, args.gpu_instance_id, allow_live=True), indent=2))
+            print(json.dumps(independent_eip.restore_cpu(aws, args.gpu_instance_id), indent=2))
         return
     if args.action in ("publisher-create", "publisher-status", "publisher-start", "publisher-stop", "publisher-run", "publisher-result"):
         from runtime import publisher
