@@ -7,6 +7,7 @@
 | Page | Purpose |
 |---|---|
 | [Main README / Quick Start](../README.md) | Project state, first commands, key costs and access risks |
+| [Software packaging guide](software-packaging-guide.md) | **15-step tutorial** for preparing, validating, publishing, promoting and consuming Rez applications; living Issue #94 acceptance recipe |
 | [Studio CLI](studio-cli.md) | **Canonical create, preview, check-ready, connect, stop, start, destroy commands** |
 | [GPU workstation profile](gpu-workstation-profile.md) | Validated Tesla T4 / RES 2026.06 GPU runtime and pinned limits |
 | [GPU runtime provenance](../runtime/README.md) | Exact derived archive keys, versions, SHA-256 and acceptance evidence |
