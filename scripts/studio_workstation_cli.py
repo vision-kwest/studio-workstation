@@ -187,8 +187,8 @@ def gpu_ready(stack, region):
     raise ValueError("GPU readiness timed out; inspect SSM and RES bootstrap logs")
 
 
-def wait_gpu_bootstrap(stack, region, *, attempts=12, sleep=time.sleep):
-    """Wait through RES reboots/SSM reconnects without bypassing its readiness gate."""
+def wait_gpu_bootstrap(stack, region, *, attempts=48, sleep=time.sleep):
+    """Allow up to ~12 minutes for RES reboots, retaining fail-closed readiness.\n\n    The independent GPU termination/EBS schedules remain armed throughout.\n    """
     for attempt in range(attempts):
         try:
             gpu_ready(stack, region)
