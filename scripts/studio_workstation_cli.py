@@ -340,6 +340,15 @@ def gpu_expiration_status(stack, instance, region, *, manager=aws, now=None):
                                   deadlines["volume_cleanup_at"], now=now)
 
 
+def verify_software_bootstrap_source(source):
+    """Fail before billing if a stale checkout uses the removed bundled EFS .deb."""
+    if ("command -v mount.efs" not in source or
+            "amazon-efs-utils_*.deb" in source):
+        raise RuntimeError(
+            "Outdated Studio software bootstrap; run git pull --ff-only "
+            "and retry before launching billable EC2")
+
+
 def install_efs_client(instance, region, *, manager=aws, sleep=time.sleep):
     """Provision official EFS mount helper via AWS SSM Distributor.
 
@@ -533,6 +542,9 @@ def command(args):
                 raise ValueError("GPU acceptance must use the reviewed VPC, subnet, profile and 100 GiB disk")
         if (args.rez_version_id or args.rez_sha256) and args.vpc_id != DEFAULT_VPC:
             raise ValueError("Software EFS client SG requires the reviewed VPC")
+        if args.rez_version_id or args.rez_sha256:
+            verify_software_bootstrap_source(
+                (ROOT / "scripts/setup_workstation_software.sh").read_text())
         prefix = GPU_PREFIX if gpu else f"releases/{args.version}/res-2026.06"
         with tempfile.TemporaryDirectory(prefix="studio-cli-") as temp:
             template = Path(temp) / "workstation.json"
