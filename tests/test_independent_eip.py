@@ -73,6 +73,50 @@ class IndependentEipTests(unittest.TestCase):
         guard.assert_called_once()
         preflight.assert_called_once()
 
+    def test_return_preview_uses_recorded_replacement_cpu(self):
+        h = independent_eip.legacy
+        cpu, gpu = "i-aaaaaaaaaaaaaaaaa", "i-bbbbbbbbbbbbbbbbb"
+        address = {"InstanceId": gpu, "AssociationId": "eipassoc-gpu",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": gpu},
+                            {"Key": "StudioDcvReturnStack",
+                             "Value": "studio-workstation-cpu-rez77"}]}
+        cpu_vm = {"State": {"Name": "stopped"}, "InstanceType": "m7i.large",
+                  "VpcId": "vpc-01bbe5d01838f70b2",
+                  "IamInstanceProfile": {"Arn": h.BASE_PROFILE},
+                  "NetworkInterfaces": [{"NetworkInterfaceId": "eni-replacement",
+                                         "Attachment": {"DeviceIndex": 0}}]}
+        gpu_vm = {"State": {"Name": "stopped"},
+                  "Tags": [{"Key": "StudioStack", "Value": h.GPU_STACK},
+                           {"Key": "StudioCleanupToken", "Value": h.GPU_TOKEN}]}
+        def items(_, iid):
+            return {iid: {cpu: cpu_vm, gpu: gpu_vm}[iid]}
+        with (patch.object(independent_eip, "_address", return_value=address),
+              patch.object(h, "_stack_iid", return_value=cpu),
+              patch.object(h, "_items", side_effect=items)):
+            plan = independent_eip.cpu_return_preview(
+                lambda *a: self.fail("read-only preview made AWS write"), gpu)
+        self.assertEqual(plan["to"], cpu)
+        self.assertEqual(plan["cpu_stack"], "studio-workstation-cpu-rez77")
+        self.assertEqual(plan["cpu_eni"], "eni-replacement")
+
+    def test_return_preview_rejects_foreign_eip_tag(self):
+        h = independent_eip.legacy
+        cpu, gpu = "i-aaaaaaaaaaaaaaaaa", "i-bbbbbbbbbbbbbbbbb"
+        address = {"InstanceId": gpu, "AssociationId": "eipassoc-gpu",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": cpu},
+                            {"Key": "StudioDcvReturnStack",
+                             "Value": "studio-workstation-cpu-rez77"}]}
+        cpu_vm = {"State": {"Name": "stopped"}, "InstanceType": "m7i.large",
+                  "VpcId": "vpc-01bbe5d01838f70b2",
+                  "IamInstanceProfile": {"Arn": h.BASE_PROFILE},
+                  "NetworkInterfaces": [{"NetworkInterfaceId": "eni-replacement",
+                                         "Attachment": {"DeviceIndex": 0}}]}
+        with (patch.object(independent_eip, "_address", return_value=address),
+              patch.object(h, "_stack_iid", return_value=cpu),
+              patch.object(h, "_items", return_value={cpu: cpu_vm})):
+            with self.assertRaisesRegex(ValueError, "does not own"):
+                independent_eip.cpu_return_preview(lambda *a: None, gpu)
+
     def test_restore_refuses_missing_cpu_return_tag(self):
         with patch.object(independent_eip, "_address", return_value={
             "InstanceId": "i-bbbbbbbbbbbbbbbbb",
