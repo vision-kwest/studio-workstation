@@ -40,6 +40,7 @@ jobs:
       - name: Offline CPU/GPU shared EIP handoff and expiration guard tests
         run: |
           python3 -m unittest discover -s tests -p 'test_issue43_hostname_handoff.py' -v
+          python3 -m unittest discover -s tests -p 'test_independent_eip.py' -v
           python3 -m unittest discover -s tests -p 'test_issue43_gpu_acm_setup.py' -v
           python3 -m unittest discover -s tests -p 'test_issue43_cli_lifecycle.py' -v
           python3 -m unittest discover -s tests -p 'test_issue68_expiration_extension.py' -v
