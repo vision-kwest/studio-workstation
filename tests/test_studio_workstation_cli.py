@@ -131,7 +131,7 @@ class StudioCliTests(unittest.TestCase):
     def test_gpu_rejects_cpu_ami_before_aws(self, run):
         with self.assertRaises(SystemExit):
             self.invoke(["create", "--stack", "studio-gpu-test", "--profile", "gpu",
-                         "--image-id", cli.DEFAULT_AMI])
+                         "--image-id", "ami-027c98f85b155c2ac"])
         run.assert_not_called()
 
     @mock.patch.object(cli, "run")
@@ -225,9 +225,17 @@ class StudioCliTests(unittest.TestCase):
         self.assertFalse(any("deploy" in c or "create-stack" in c for c in calls))
 
     @mock.patch.object(cli, "aws")
+    def test_gpu_preflight_rejects_old_baked_ami_owner(self, aws):
+        from types import SimpleNamespace
+        aws.return_value = {"Images": [{"State": "available", "OwnerId": "401233741942"}]}
+        with self.assertRaisesRegex(ValueError, "unexpected owner"):
+            cli.gpu_release_preflight(SimpleNamespace(region="us-east-1", bucket=cli.DEFAULT_BUCKET))
+        aws.assert_called_once()
+
+    @mock.patch.object(cli, "aws")
     def test_gpu_preflight_checks_exact_s3_versions(self, aws):
         aws.side_effect = [
-            {"Images": [{"State": "available", "OwnerId": "401233741942"}]},
+            {"Images": [{"State": "available", "OwnerId": cli.GPU_AMI_OWNER}]},
             {"VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]},
             {"VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]},
             {"VersionId": cli.GPU_VERSIONS["virtual-desktop.tar.gz"]},
@@ -247,7 +255,7 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "aws")
     def test_gpu_preflight_fails_closed_on_wrong_version(self, aws):
         aws.side_effect = [
-            {"Images": [{"State": "available", "OwnerId": "401233741942"}]},
+            {"Images": [{"State": "available", "OwnerId": cli.GPU_AMI_OWNER}]},
             {"VersionId": "unexpected"},
         ]
         from types import SimpleNamespace
@@ -257,7 +265,7 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "aws")
     def test_gpu_preflight_rejects_changed_latest_s3_object(self, aws):
         aws.side_effect = [
-            {"Images": [{"State": "available", "OwnerId": "401233741942"}]},
+            {"Images": [{"State": "available", "OwnerId": cli.GPU_AMI_OWNER}]},
             {"VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]},
             {"VersionId": "unexpected-latest"},
         ]
