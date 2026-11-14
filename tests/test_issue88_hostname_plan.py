@@ -25,6 +25,19 @@ class HostnamePlanTests(unittest.TestCase):
         preview.assert_not_called()
 
 
+    def test_return_plan_uses_independent_replacement_owner(self):
+        preview = {"from": "i-gpu", "to": "i-replacement",
+                   "cpu_stack": "studio-workstation-cpu-rez77"}
+        with patch("runtime.independent_eip.cpu_return_preview",
+                   return_value=preview) as independent:
+            with patch("runtime.issue43_hostname_handoff.cpu_return_preview",
+                       side_effect=AssertionError("original CPU preview called")):
+                with redirect_stdout(io.StringIO()) as output:
+                    cli.main(["hostname-return-plan", "--gpu-instance-id",
+                              "i-0123456789abcdef0"])
+        self.assertEqual(json.loads(output.getvalue()), preview)
+        independent.assert_called_once()
+
     def test_acm_prepare_uses_independent_owner(self):
         with patch("runtime.issue43_gpu_acm_setup.prepare_gpu",
                    return_value={"acm": "verified"}) as prepare:
