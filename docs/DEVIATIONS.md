@@ -39,3 +39,7 @@ For every additional deviation, document:
 Earlier custom Image Builder and v0.6.0 systemd-bootstrap implementations diverged substantially from RES and encountered repeated build failures, including a custom service ordering cycle. These are *not* approved deviations and should not be reused as the canonical implementation.
 
 The register is a planning artifact. No AWS resource or provisioning script is changed by this documentation PR.
+
+## Issue #100 — restoring RES runtime GPU installation (draft)
+
+Against upstream `aws/res` **2026.06** commit `1f526a241fb293a29fb018f08ccf81c100c05a42`: retain `scripts/dcv/linux/gpu_drivers.sh`, `virtual-desktop-host/linux/install.sh` and `install_post_reboot.sh` stage order. Replace only the Studio CLI’s custom baked GPU AMI selection with the existing verified Canonical 24.04 parent AMI. No new driver installer/RES override. **Live validation and guest access to the upstream GRID distribution remain unverified.**
