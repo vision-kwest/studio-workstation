@@ -75,8 +75,8 @@ class IndependentEipTests(unittest.TestCase):
         self.assertEqual(result["from"], cpu)
         self.assertEqual(result["to"], gpu)
         self.assertEqual(result["cpu"]["stack"], "studio-workstation-cpu-rez77")
-        guard.assert_called_once()
-        preflight.assert_called_once()
+        self.assertEqual(guard.call_count, 2)
+        self.assertEqual(preflight.call_count, 2)
 
     def test_handoff_from_unassociated_has_no_cpu_return(self):
         gpu = "i-bbbbbbbbbbbbbbbbb"
