@@ -19,7 +19,7 @@ ARN = "arn:aws:cloudformation:us-east-1:401233741942:stack/" + STACK + "/uniquei
 TAGS = [{"Key": "StudioStack", "Value": STACK}, {"Key": "StudioCleanupToken", "Value": TOKEN}]
 NOW = dt.datetime(2026, 11, 1, 18, tzinfo=dt.timezone.utc)
 REGION = "us-east-1"
-PARAMS = ["ImageId=ami-027c98f85b155c2ac", "InstanceType=g4dn.xlarge",
+PARAMS = ["ImageId=ami-0d6dd9e8265d48906", "InstanceType=g4dn.xlarge",
           "DiskSizeGiB=100", "ClientCidr=192.0.2.42/32"]
 
 
@@ -81,7 +81,7 @@ class FakeAWS:
             return {"AttachedPolicies": []}
         if service == "cloudformation" and op == "create-stack":
             assert "--disable-rollback" in arguments
-            assert "ParameterKey=ImageId,ParameterValue=ami-027c98f85b155c2ac" in arguments
+            assert "ParameterKey=ImageId,ParameterValue=ami-0d6dd9e8265d48906" in arguments
             return {"StackId": ARN}
         if service == "cloudformation" and op == "describe-stacks":
             s = dict(self.stack, StackStatus=self.status)
