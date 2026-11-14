@@ -67,11 +67,33 @@ class IndependentEipTests(unittest.TestCase):
               patch.object(h, "_gpu_guard", return_value={"terminate_at": "future"}) as guard,
               patch("runtime.pr65_gpu_create.preflight") as preflight):
             result = independent_eip.gpu_preview(lambda *a: None)
+            with (patch.object(independent_eip, "_address", return_value={"Tags": []}),
+                  patch.object(independent_eip, "_cpu_owner", side_effect=AssertionError("CPU not needed"))):
+                free = independent_eip.gpu_preview(lambda *a: None)
+        self.assertIsNone(free["from"])
+        self.assertIsNone(free["old_association"])
         self.assertEqual(result["from"], cpu)
         self.assertEqual(result["to"], gpu)
         self.assertEqual(result["cpu"]["stack"], "studio-workstation-cpu-rez77")
-        guard.assert_called_once()
-        preflight.assert_called_once()
+        self.assertEqual(guard.call_count, 2)
+        self.assertEqual(preflight.call_count, 2)
+
+    def test_handoff_from_unassociated_has_no_cpu_return(self):
+        gpu = "i-bbbbbbbbbbbbbbbbb"
+        plan = {"from": None, "to": gpu, "cpu": None, "old_association": None,
+                "gpu_eni": "eni-gpu", "guard": {}}
+        after = {"InstanceId": gpu, "NetworkInterfaceId": "eni-gpu",
+                 "AssociationId": "eipassoc-gpu",
+                 "Tags": [{"Key": "StudioDcvInstanceId", "Value": gpu}]}
+        calls = []
+        def aws(region, service, op, *args):
+            calls.append(op)
+            return {"AssociationId": "eipassoc-gpu"} if op == "associate-address" else {}
+        with (patch.object(independent_eip, "gpu_preview", return_value=plan),
+              patch.object(independent_eip, "_address", side_effect=[{"Tags": []}, after])):
+            result = independent_eip.handoff_gpu(aws, lambda *a: None, check_guest=lambda *a: None)
+        self.assertEqual(result["owner"], gpu)
+        self.assertEqual(calls, ["associate-address", "create-tags"])
 
     def test_restore_refuses_missing_cpu_return_tag(self):
         with patch.object(independent_eip, "_address", return_value={

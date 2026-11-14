@@ -81,7 +81,11 @@ def gpu_preview(aws, *, now=None):
     from runtime import pr65_gpu_create
     now = now or dt.datetime.now(dt.timezone.utc)
     address = _address(aws)
-    cpu = _cpu_owner(aws, address)
+    cpu = _cpu_owner(aws, address) if address.get("InstanceId") else None
+    if cpu is None and (address.get("AssociationId") or address.get("NetworkInterfaceId")
+                       or legacy._tags(address).get("StudioDcvInstanceId")
+                       or legacy._tags(address).get("StudioDcvReturnStack")):
+        raise ValueError("Unassociated EIP has stale ownership state")
     gpu_id = legacy._stack_iid(aws, legacy.GPU_STACK)
     gpu = legacy._items(aws, gpu_id)[gpu_id]
     if (gpu.get("State", {}).get("Name") != "running"
@@ -98,9 +102,9 @@ def gpu_preview(aws, *, now=None):
         raise ValueError("GPU ENI identity/attachment mismatch")
     pr65_gpu_create.preflight(aws, legacy.REGION, legacy.GPU_STACK, legacy.GPU_TOKEN)
     guard = legacy._gpu_guard(aws, gpu, now)
-    return {"from": cpu["instance"], "to": gpu_id, "cpu": cpu,
+    return {"from": cpu["instance"] if cpu else None, "to": gpu_id, "cpu": cpu,
             "gpu_eni": interface["NetworkInterfaceId"],
-            "old_association": cpu["association"], "guard": guard}
+            "old_association": cpu["association"] if cpu else None, "guard": guard}
 
 
 def handoff_gpu(aws, check_public_tls, *, check_guest=None):
@@ -113,7 +117,8 @@ def handoff_gpu(aws, check_public_tls, *, check_guest=None):
     if (fresh["to"], fresh["old_association"]) != (pre["to"], pre["old_association"]):
         raise RuntimeError("GPU handoff scope changed")
     try:
-        aws(legacy.REGION, "ec2", "disassociate-address", "--association-id", pre["old_association"])
+        if pre["old_association"]:
+            aws(legacy.REGION, "ec2", "disassociate-address", "--association-id", pre["old_association"])
         current = _address(aws)
         if current.get("InstanceId") or current.get("AssociationId"):
             raise RuntimeError("EIP failed to disassociate")
@@ -121,15 +126,18 @@ def handoff_gpu(aws, check_public_tls, *, check_guest=None):
                      "--network-interface-id", pre["gpu_eni"], "--no-allow-reassociation")
         if not result.get("AssociationId"):
             raise RuntimeError("GPU EIP association missing")
+        tags = ["Key=StudioDcvInstanceId,Value=" + pre["to"]]
+        if pre["cpu"]:
+            tags.append("Key=StudioDcvReturnStack,Value=" + pre["cpu"]["stack"])
         aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,
-            "--tags", "Key=StudioDcvInstanceId,Value=" + pre["to"],
-            "Key=StudioDcvReturnStack,Value=" + pre["cpu"]["stack"])
+            "--tags", *tags)
         actual = _address(aws)
         if (actual.get("InstanceId") != pre["to"]
                 or actual.get("NetworkInterfaceId") != pre["gpu_eni"]
                 or actual.get("AssociationId") != result["AssociationId"]
                 or legacy._tags(actual).get("StudioDcvInstanceId") != pre["to"]
-                or legacy._tags(actual).get("StudioDcvReturnStack") != pre["cpu"]["stack"]):
+                or legacy._tags(actual).get("StudioDcvReturnStack") !=
+                (pre["cpu"]["stack"] if pre["cpu"] else None)):
             raise RuntimeError("GPU EIP owner readback mismatch")
         check_public_tls(legacy.HOST, legacy.EIP_IP)
         return {"owner": pre["to"], "previous_cpu": pre["from"],
@@ -145,6 +153,13 @@ def handoff_gpu(aws, check_public_tls, *, check_guest=None):
         current = _address(aws)
         if current.get("InstanceId") or current.get("AssociationId"):
             raise RuntimeError("GPU handoff failed; EIP rollback unverified") from error
+        if not pre["cpu"]:
+            aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID,
+                "--tags", "Key=StudioDcvInstanceId")
+            actual = _address(aws)
+            if actual.get("InstanceId") or actual.get("AssociationId") or legacy._tags(actual).get("StudioDcvInstanceId"):
+                raise RuntimeError("GPU handoff failed; unassociated EIP rollback unverified") from error
+            raise RuntimeError("GPU handoff failed; EIP restored to unassociated") from error
         restored = aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
                        "--network-interface-id", pre["cpu"]["eni"], "--no-allow-reassociation")
         aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,

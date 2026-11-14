@@ -150,11 +150,13 @@ def _preflight(aws):
     owner = eip.get("InstanceId")
     tagged = h._tags(eip).get("StudioDcvInstanceId")
     if owner == iid and tagged == iid:
-        if not eip.get("AssociationId") or not h._tags(eip).get("StudioDcvReturnStack"):
-            raise ValueError("GPU EIP return stack not verified")
+        if not eip.get("AssociationId"):
+            raise ValueError("GPU EIP association missing")
     elif owner is None and tagged == iid:
         if not h._tags(eip).get("StudioDcvReturnStack"):
             raise ValueError("GPU EIP return stack missing")
+    elif owner is None and tagged is None and not eip.get("AssociationId") and not eip.get("NetworkInterfaceId") and not h._tags(eip).get("StudioDcvReturnStack"):
+        pass  # GPU failed before claiming the independent allocation.
     elif owner and tagged == owner:
         independent_eip._cpu_owner(aws, eip)
     else:
@@ -213,9 +215,13 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
         run(["aws", "ec2", "wait", "instance-stopped", "--instance-ids", iid,
              "--region", region], capture=False)
     from runtime import independent_eip
-    if ids["eip_owner"] == iid or ids["eip_owner"] is None:
+    if ids["eip_owner"] == iid:
+        if h._tags(h._eip(aws)).get("StudioDcvReturnStack"):
+            independent_eip.restore_cpu(aws, iid)
+        else:
+            independent_eip.release(aws)
+    elif ids["eip_owner"] is None and h._tags(h._eip(aws)).get("StudioDcvInstanceId") == iid:
         independent_eip.restore_cpu(aws, iid)
-    independent_eip._cpu_owner(aws, h._eip(aws))
     h._dns(aws)
     acm.revoke_gpu(aws, iid, independent=True)
     run(["aws", "cloudformation", "delete-stack", "--stack-name", ids["arn"],
@@ -262,13 +268,17 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
     if any(x.get("Name") in ids["schedules"] for x in remaining):
         raise RuntimeError("GPU expiration schedule remains")
     eip = h._eip(aws)
-    verified_cpu = independent_eip._cpu_owner(aws, eip)
+    verified_cpu = independent_eip._cpu_owner(aws, eip) if eip.get("InstanceId") else None
+    if not verified_cpu and (eip.get("AssociationId") or eip.get("NetworkInterfaceId") or
+                             h._tags(eip).get("StudioDcvInstanceId") or h._tags(eip).get("StudioDcvReturnStack")):
+        raise RuntimeError("Shared EIP cleanup left stale ownership state")
     h._dns(aws)
     if acm._get_role_state(aws, iid):
         raise RuntimeError("GPU ACM permission remained after cleanup")
     return {"stack": stack, "state": "DELETE_COMPLETE", "instance": iid,
             "volume_removed": ids["vid"], "schedules_removed": ids["schedules"],
-            "eip_owner": verified_cpu["instance"], "cpu_certificate_access": "preserved"}
+            "eip_owner": verified_cpu["instance"] if verified_cpu else None,
+            "cpu_certificate_access": "preserved"}
 
 
 def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
