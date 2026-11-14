@@ -2,7 +2,7 @@
 import io
 import json
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from unittest.mock import patch
 from scripts import studio_workstation_cli as cli
 
@@ -20,8 +20,11 @@ class HostnamePlanTests(unittest.TestCase):
 
     def test_reject_other_stack_before_preview(self):
         with patch("runtime.independent_eip.gpu_preview") as preview:
-            with self.assertRaisesRegex(ValueError, "guarded acceptance stack"):
-                cli.main(["hostname-plan", "--stack", "studio-other"])
+            with redirect_stderr(io.StringIO()) as stderr:
+                with self.assertRaises(SystemExit) as failure:
+                    cli.main(["hostname-plan", "--stack", "studio-other"])
+            self.assertEqual(failure.exception.code, 1)
+            self.assertIn("guarded acceptance stack", stderr.getvalue())
         preview.assert_not_called()
 
 
