@@ -67,29 +67,16 @@ class IndependentEipTests(unittest.TestCase):
               patch.object(h, "_gpu_guard", return_value={"terminate_at": "future"}) as guard,
               patch("runtime.pr65_gpu_create.preflight") as preflight):
             result = independent_eip.gpu_preview(lambda *a: None)
+            with (patch.object(independent_eip, "_address", return_value={"Tags": []}),
+                  patch.object(independent_eip, "_cpu_owner", side_effect=AssertionError("CPU not needed"))):
+                free = independent_eip.gpu_preview(lambda *a: None)
+        self.assertIsNone(free["from"])
+        self.assertIsNone(free["old_association"])
         self.assertEqual(result["from"], cpu)
         self.assertEqual(result["to"], gpu)
         self.assertEqual(result["cpu"]["stack"], "studio-workstation-cpu-rez77")
         guard.assert_called_once()
         preflight.assert_called_once()
-
-    def test_gpu_preview_allows_clean_unassociated_eip(self):
-        h = independent_eip.legacy
-        gpu = "i-bbbbbbbbbbbbbbbbb"
-        vm = {"State": {"Name": "running"}, "ImageId": h.GPU_AMI,
-              "InstanceType": "g4dn.xlarge", "VpcId": "vpc-01bbe5d01838f70b2",
-              "IamInstanceProfile": {"Arn": h.BASE_PROFILE},
-              "NetworkInterfaces": [{"NetworkInterfaceId": "eni-gpu",
-                                     "Attachment": {"DeviceIndex": 0, "Status": "attached"}}]}
-        with (patch.object(independent_eip, "_address", return_value={"Tags": []}),
-              patch.object(independent_eip, "_cpu_owner", side_effect=AssertionError("CPU not needed")),
-              patch.object(h, "_stack_iid", return_value=gpu),
-              patch.object(h, "_items", return_value={gpu: vm}),
-              patch.object(h, "_gpu_guard", return_value={"terminate_at": "future"}),
-              patch("runtime.pr65_gpu_create.preflight")):
-            p = independent_eip.gpu_preview(lambda *a: None)
-        self.assertIsNone(p["from"])
-        self.assertIsNone(p["old_association"])
 
     def test_handoff_from_unassociated_has_no_cpu_return(self):
         gpu = "i-bbbbbbbbbbbbbbbbb"
