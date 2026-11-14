@@ -211,19 +211,20 @@ def wait_gpu_bootstrap(stack, region, *, attempts=48, sleep=time.sleep):
 
 
 def trusted_owner(stack, instance, *, manager=aws):
-    """Only the already-approved CPU/GPU stack may claim the shared EIP."""
+    """Verify the current, independently assigned EIP owner; no CPU anchor."""
+    from runtime import independent_eip
     from runtime import issue43_hostname_handoff as handoff
-    expected = {DEFAULT_STACK: handoff.CPU_ID,
-                GPU_ACCEPTANCE_STACK: instance}
-    if stack not in expected or instance != expected[stack]:
-        raise ValueError("Shared hostname is restricted to the approved CPU/GPU stack")
-    if handoff._stack_iid(manager, stack) != instance:
+    if not re.fullmatch(r"studio-[a-z0-9-]{3,100}", stack or ""):
+        raise ValueError("Unapproved Studio stack")
+    actual, eni = independent_eip._target(manager, stack)
+    if actual != instance:
         raise ValueError("CloudFormation workstation identity changed")
-    address = handoff._eip(manager)
+    address = independent_eip._address(manager)  # Also checks unchanged DNS.
     if (address.get("InstanceId") != instance or
+            address.get("NetworkInterfaceId") != eni or
+            not address.get("AssociationId") or
             handoff._tags(address).get("StudioDcvInstanceId") != instance):
         raise ValueError("Shared EIP is not owned by this workstation")
-    handoff._dns(manager)
     return handoff.HOST, handoff.EIP_IP
 
 
@@ -495,7 +496,8 @@ def command(args):
             print(json.dumps(independent_eip.gpu_preview(aws), indent=2))
             return
         if args.action == "hostname-return-plan":
-            print(json.dumps(handoff.cpu_return_preview(aws, args.gpu_instance_id), indent=2))
+            from runtime import independent_eip
+            print(json.dumps(independent_eip.cpu_return_preview(aws, args.gpu_instance_id), indent=2))
             return
         if not args.execute:
             raise ValueError("Live hostname handoff requires a separately approved --execute")
@@ -639,7 +641,7 @@ def command(args):
             if args.stack in (DEFAULT_STACK, GPU_ACCEPTANCE_STACK):
                 state["trusted_dcv_url"] = trusted_url(args.stack, state["instance"])
             else:
-                state["trusted_dcv_url"] = verified_dcv_hostname(args.hostname, state["public_ip"])
+                state["trusted_dcv_url"] = trusted_url(args.stack, state["instance"])
         print(json.dumps(state, indent=2))
         return
     if args.action == "destroy":
@@ -663,7 +665,7 @@ def command(args):
             print(trusted_url(args.stack, iid))
             print("Trusted HTTPS verified; log in with the local workstation account.")
         elif args.hostname:
-            print(verified_dcv_hostname(args.hostname, state["public_ip"]))
+            print(trusted_url(args.stack, iid))
             print("DNS and certificate validated; log in with the local workstation account.")
         else:
             print(state["dcv_url"] or "No public IPv4 address. Use --ssm for administrative access.")

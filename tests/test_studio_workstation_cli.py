@@ -68,6 +68,30 @@ class StudioCliTests(unittest.TestCase):
         self.assertIn("https://dcv.kwesidavis.com:8443", output.getvalue())
         run.assert_not_called()
 
+    def test_replacement_cpu_requires_independent_eip_ownership_for_hostname(self):
+        stack = "studio-workstation-cpu-rez77"
+        iid = "i-0123456789abcdeff"
+        vm = dict(STATE, stack=stack, instance=iid,
+                  public_ip="54.159.180.104")
+        with (mock.patch.object(cli, "describe", return_value=vm),
+              mock.patch.object(cli, "trusted_url",
+                                return_value="https://dcv.kwesidavis.com:8443") as owner,
+              contextlib.redirect_stdout(io.StringIO()) as output):
+            cli.main(["connect", "--stack", stack, "--hostname", "dcv.kwesidavis.com"])
+        owner.assert_called_once_with(stack, iid)
+        self.assertIn("https://dcv.kwesidavis.com:8443", output.getvalue())
+
+    def test_replacement_cpu_rejects_unowned_hostname(self):
+        stack = "studio-workstation-cpu-rez77"
+        vm = dict(STATE, stack=stack, instance="i-0123456789abcdeff")
+        with (mock.patch.object(cli, "describe", return_value=vm),
+              mock.patch.object(cli, "trusted_url", side_effect=ValueError(
+                  "Shared EIP is not owned by this workstation")),
+              contextlib.redirect_stderr(io.StringIO())):
+            with self.assertRaises(SystemExit):
+                cli.main(["status", "--stack", stack, "--hostname",
+                          "dcv.kwesidavis.com"])
+
     def test_trusted_hostname_rejected_when_stopped(self):
         vm = dict(STATE, public_ip="54.159.180.104", state="stopped")
         with mock.patch.object(cli, "describe", return_value=vm), \

@@ -342,15 +342,44 @@ class LifecycleTests(unittest.TestCase):
                                 mock.Mock(returncode=254, stderr="AccessDenied"),
                                 sleep=lambda *_: None)
 
+    def test_trusted_owner_accepts_replacement_cpu_without_original_anchor(self):
+        stack = "studio-workstation-cpu-rez77"
+        replacement = "i-0123456789abcdeff"
+        eni = "eni-0123456789abcdeff"
+        address = {"InstanceId": replacement, "NetworkInterfaceId": eni,
+                   "AssociationId": "eipassoc-replacement",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": replacement}]}
+        with (mock.patch.object(independent_eip, "_target",
+                                return_value=(replacement, eni)) as target,
+              mock.patch.object(independent_eip, "_address",
+                                return_value=address) as eip):
+            self.assertEqual(cli.trusted_owner(stack, replacement),
+                             (handoff.HOST, handoff.EIP_IP))
+        target.assert_called_once_with(cli.aws, stack)
+        eip.assert_called_once_with(cli.aws)
+
     def test_trusted_owner_refuses_ambiguous_stack_and_foreign_eip(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "Unapproved Studio stack"):
             cli.trusted_owner("different-stack", GPU)
-        address = {"InstanceId": CPU, "Tags": [
-            {"Key": "StudioDcvInstanceId", "Value": CPU}]}
-        with (mock.patch.object(handoff, "_stack_iid", return_value=GPU),
-              mock.patch.object(handoff, "_eip", return_value=address)):
+        address = {"InstanceId": CPU, "NetworkInterfaceId": "eni-gpu",
+                   "AssociationId": "eipassoc-old",
+                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU}]}
+        with (mock.patch.object(independent_eip, "_target",
+                                return_value=(GPU, "eni-gpu")),
+              mock.patch.object(independent_eip, "_address",
+                                return_value=address)):
             with self.assertRaisesRegex(ValueError, "not owned"):
                 cli.trusted_owner(GPU_STACK, GPU)
+
+    def test_trusted_owner_rejects_stale_eni_and_missing_association(self):
+        replacement = "i-0123456789abcdeff"
+        with (mock.patch.object(independent_eip, "_target",
+                                return_value=(replacement, "eni-current")),
+              mock.patch.object(independent_eip, "_address", return_value={
+                  "InstanceId": replacement, "NetworkInterfaceId": "eni-old",
+                  "Tags": [{"Key": "StudioDcvInstanceId", "Value": replacement}]})):
+            with self.assertRaisesRegex(ValueError, "not owned"):
+                cli.trusted_owner("studio-workstation-cpu-rez77", replacement)
 
 
 

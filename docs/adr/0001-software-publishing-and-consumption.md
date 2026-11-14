@@ -1,3 +1,5 @@
+> **Historical design decision (2026-11-05).** The proposed *trusted CI runner* below was superseded by merged [on-demand publisher PR #76](https://github.com/vision-kwest/studio-workstation/pull/76): EC2 publisher profile with SSM, pinned reviewed recipes, IAM/TLS EFS, explicit `dev → test → prod` reference promotion. [PR #73](https://github.com/vision-kwest/studio-workstation/pull/73) and [PR #80](https://github.com/vision-kwest/studio-workstation/pull/80) implemented the consumer bootstrap. The promotion tool now uses shared immutable artifacts with stage symlinks, not payload-copy promotion. Preserve the original ADR as design history; use [current operations](../publisher.md) for deployments.
+
 # ADR-0001 — Publisher/consumer software delivery on Studio EFS
 
 **Date:** 2026-11-05  
