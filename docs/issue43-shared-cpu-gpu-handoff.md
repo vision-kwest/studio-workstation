@@ -1,3 +1,5 @@
+> **Archived Issue #43 pre-merge acceptance plan.** This text reflects the design before merged PRs #67, #79, #89 and #91; its statements that the GPU was not launched, the old CPU was required, or the feature branch was unmerged are historical, **not current operating requirements**. The old CPU has been terminated. See [independent EIP](independent-eip.md) and [current CLI](studio-cli.md) for active commands and constraints.
+
 # Issue #43 — CPU/GPU shared static DCV hostname (OFFLINE implementation; LIVE DISABLED)
 
 **Status:** An offline, fail-closed handoff workflow exists only in
