@@ -179,6 +179,17 @@ class ScopedDestroyTests(unittest.TestCase):
         self.assertNotIn("eip-detach", self.fake.events)
         self.assertFalse(self.fake.schedules)
 
+    def test_destroy_failed_gpu_without_eip_or_cpu(self):
+        for key in ("InstanceId", "AssociationId", "NetworkInterfaceId"):
+            self.fake.eip.pop(key, None)
+        self.fake.eip["Tags"] = [t for t in self.fake.eip["Tags"]
+                                 if t["Key"] != "StudioDcvInstanceId"]
+        self.fake.gpu["State"]["Name"] = "stopped"
+        result = self.destroy()
+        self.assertIsNone(result["eip_owner"])
+        self.assertTrue(self.fake.deleted_volume)
+        self.assertFalse(self.fake.schedules)
+
     def test_wrong_volume_tag_fails_before_any_mutation(self):
         self.fake.volume["Tags"][0]["Value"] = "unrelated-token"
         with self.assertRaisesRegex(ValueError, "ownership"):
