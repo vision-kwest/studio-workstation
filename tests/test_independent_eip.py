@@ -73,6 +73,41 @@ class IndependentEipTests(unittest.TestCase):
         guard.assert_called_once()
         preflight.assert_called_once()
 
+    def test_gpu_preview_allows_clean_unassociated_eip(self):
+        h = independent_eip.legacy
+        gpu = "i-bbbbbbbbbbbbbbbbb"
+        vm = {"State": {"Name": "running"}, "ImageId": h.GPU_AMI,
+              "InstanceType": "g4dn.xlarge", "VpcId": "vpc-01bbe5d01838f70b2",
+              "IamInstanceProfile": {"Arn": h.BASE_PROFILE},
+              "NetworkInterfaces": [{"NetworkInterfaceId": "eni-gpu",
+                                     "Attachment": {"DeviceIndex": 0, "Status": "attached"}}]}
+        with (patch.object(independent_eip, "_address", return_value={"Tags": []}),
+              patch.object(independent_eip, "_cpu_owner", side_effect=AssertionError("CPU not needed")),
+              patch.object(h, "_stack_iid", return_value=gpu),
+              patch.object(h, "_items", return_value={gpu: vm}),
+              patch.object(h, "_gpu_guard", return_value={"terminate_at": "future"}),
+              patch("runtime.pr65_gpu_create.preflight")):
+            p = independent_eip.gpu_preview(lambda *a: None)
+        self.assertIsNone(p["from"])
+        self.assertIsNone(p["old_association"])
+
+    def test_handoff_from_unassociated_has_no_cpu_return(self):
+        gpu = "i-bbbbbbbbbbbbbbbbb"
+        plan = {"from": None, "to": gpu, "cpu": None, "old_association": None,
+                "gpu_eni": "eni-gpu", "guard": {}}
+        after = {"InstanceId": gpu, "NetworkInterfaceId": "eni-gpu",
+                 "AssociationId": "eipassoc-gpu",
+                 "Tags": [{"Key": "StudioDcvInstanceId", "Value": gpu}]}
+        calls = []
+        def aws(region, service, op, *args):
+            calls.append(op)
+            return {"AssociationId": "eipassoc-gpu"} if op == "associate-address" else {}
+        with (patch.object(independent_eip, "gpu_preview", return_value=plan),
+              patch.object(independent_eip, "_address", side_effect=[{"Tags": []}, after])):
+            result = independent_eip.handoff_gpu(aws, lambda *a: None, check_guest=lambda *a: None)
+        self.assertEqual(result["owner"], gpu)
+        self.assertEqual(calls, ["associate-address", "create-tags"])
+
     def test_restore_refuses_missing_cpu_return_tag(self):
         with patch.object(independent_eip, "_address", return_value={
             "InstanceId": "i-bbbbbbbbbbbbbbbbb",
