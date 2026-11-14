@@ -496,7 +496,8 @@ def command(args):
             print(json.dumps(independent_eip.gpu_preview(aws), indent=2))
             return
         if args.action == "hostname-return-plan":
-            print(json.dumps(handoff.cpu_return_preview(aws, args.gpu_instance_id), indent=2))
+            from runtime import independent_eip
+            print(json.dumps(independent_eip.cpu_return_preview(aws, args.gpu_instance_id), indent=2))
             return
         if not args.execute:
             raise ValueError("Live hostname handoff requires a separately approved --execute")
