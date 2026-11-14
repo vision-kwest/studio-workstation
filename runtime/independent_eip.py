@@ -159,6 +159,44 @@ def handoff_gpu(aws, check_public_tls, *, check_guest=None):
 
 
 
+def cpu_return_preview(aws, gpu_id):
+    """Read-only GPU -> verified replacement CPU plan; never use old CPU_ID."""
+    if not re.fullmatch(r"i-[0-9a-f]{8,17}", gpu_id or ""):
+        raise ValueError("Invalid GPU instance ID")
+    address = _address(aws)
+    tags = legacy._tags(address)
+    stack = tags.get("StudioDcvReturnStack", "")
+    if (not re.fullmatch(r"studio-[a-z0-9-]{3,100}", stack)
+            or stack.startswith("studio-gpu-cli-")):
+        raise ValueError("GPU EIP missing verified CPU return stack")
+    iid = legacy._stack_iid(aws, stack)
+    cpu = legacy._items(aws, iid)[iid]
+    if (cpu.get("State", {}).get("Name") != "stopped"
+            or cpu.get("InstanceType") not in ("m7i.large", "m7i.xlarge")
+            or cpu.get("VpcId") != "vpc-01bbe5d01838f70b2"
+            or cpu.get("IamInstanceProfile", {}).get("Arn") != legacy.BASE_PROFILE
+            or len(cpu.get("NetworkInterfaces", [])) != 1
+            or cpu["NetworkInterfaces"][0].get("Attachment", {}).get("DeviceIndex") != 0):
+        raise ValueError("Replacement CPU is not a verified stopped workstation")
+    eni = cpu["NetworkInterfaces"][0]["NetworkInterfaceId"]
+    owner = address.get("InstanceId")
+    if owner not in (None, gpu_id) or tags.get("StudioDcvInstanceId") != gpu_id:
+        raise ValueError("GPU does not own the EIP according to its tag")
+    if owner:
+        gpu = legacy._items(aws, gpu_id)[gpu_id]
+        if (gpu.get("State", {}).get("Name") not in ("stopped", "terminated")
+                or legacy._tags(gpu).get("StudioStack") != legacy.GPU_STACK
+                or legacy._tags(gpu).get("StudioCleanupToken") != legacy.GPU_TOKEN
+                or not address.get("AssociationId")):
+            raise ValueError("GPU must be stopped and match its cleanup scope")
+    elif address.get("AssociationId"):
+        raise ValueError("Unassociated EIP has unexpected association")
+    return {"from": gpu_id, "to": iid, "cpu_stack": stack, "cpu_eni": eni,
+            "association": address.get("AssociationId"),
+            "allocation_id": legacy.EIP_ID, "hostname": legacy.HOST,
+            "ip": legacy.EIP_IP, "cpu_will_remain_stopped": True}
+
+
 def restore_cpu(aws, gpu_id):
     """Return EIP from stopped GPU to the recorded, verified source CPU."""
     if not re.fullmatch(r"i-[0-9a-f]{8,17}", gpu_id or ""):
