@@ -1,6 +1,6 @@
 # Documentation index
 
-**Current operating instructions** are separated here from current project plans and historical acceptance records. PR #65 and PR #67 are merged; software-delivery PR #73 and OpenUSD publisher PR #7 remain drafts (status checked 2026-11-05). When an archived note says "NO-GO", "not merged", "not deployed", or "pending", read it as a **statement from the date of that checkpoint**, not a current project-wide prohibition.
+**Current operating instructions (2026-11-13)** are separated from dated planning and acceptance records. CPU software integration (PR #73), on-demand publisher (PR #76), independent EIP ownership (PR #79), Rez bootstrap (PR #80), and GPU expiration (PR #69) are merged. Old PR #7 (trusted GitHub Actions runner) and PR #72 are closed as superseded. When an archived note says "NO-GO", "not merged", "not deployed", or "pending", read it as a **statement from the date of that checkpoint**, not a current project-wide prohibition.
 
 ## Start here — current information
 
@@ -13,11 +13,14 @@
 | [Workstation lifecycle](workstation-lifecycle-visual.md) | EBS, stop/start, changed public IP, cleanup |
 | [Architecture](visual-architecture.md) | Image creation versus running EC2 workstation |
 | [CPU lifecycle/TLS](cpu-acceptance-lifecycle-tls.md) | CPU live-acceptance record and security background |
-| [Release tooling](../scripts/README.md) | Release building/publication, historical paths and updated version-read caveat |
+| [Release tooling](../scripts/README.md) | Release building/publication and historical immutable releases |
+| [Independent EIP](independent-eip.md) | Account-owned address; release to an unassociated state, then assign to verified workstation |
+| [On-demand publisher](publisher.md) | Publisher EC2 lifecycle, SSM pinned recipes and explicit Rez promotions |
+| [Software acceptance history](rez-software-acceptance.md) | Dated Phase 1 record; later live CPU acceptance is separate |
 
 ## Trusted DCV hostname (PR #67 merged; acceptance history below)
 
-- [Merged PR #67](https://github.com/vision-kwest/studio-workstation/pull/67) implemented scoped ACM/TLS, CPU/GPU shared hostname and guarded EIP handoff; supervised CPU/GPU trusted browser login and cleanup were observed. Exact GPU expiration enhancements remain in [Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68) / draft [PR #69](https://github.com/vision-kwest/studio-workstation/pull/69).
+- [Merged PR #67](https://github.com/vision-kwest/studio-workstation/pull/67) implemented scoped ACM/TLS, CPU/GPU shared hostname and guarded EIP handoff; supervised CPU/GPU trusted browser login and cleanup were observed. GPU expiration and extension enhancements were merged in [PR #69](https://github.com/vision-kwest/studio-workstation/pull/69). Independent EIP assignment and release were merged in [PR #79](https://github.com/vision-kwest/studio-workstation/pull/79).
 - [Issue #43 — EIP, ACM and AWS Workload Credentials Provider](issue43-acm-dcv.md) and [CPU/GPU shared-hostname design](issue43-shared-cpu-gpu-handoff.md) retain their dated **pre-merge** proposals and acceptance checkpoints; statements such as “unapproved” were true at their original review dates, not today.
 - The original Lambda/EventBridge/DDNS approach was retired by PR #67. Always consult the [current Studio CLI](studio-cli.md) rather than treating old design gates as live operating instructions.
 
@@ -26,7 +29,7 @@
 - [Repository charter](../AGENTS.md) — permanent RES/DCV/safety boundaries and review expectations.
 - [Minimum-change engineering playbook](../ENGINEERING_PLAYBOOK.md) — reusable assignment, evidence, estimation, approval and scope-control method.
 - [Current workstation software brief](../PROJECT_BRIEF_WORKSTATION_SOFTWARE.md) and [ADR-0001: EFS publisher/consumer architecture](adr/0001-software-publishing-and-consumption.md) — accepted design, explicit dependencies and live definition of done.
-- Implementation ownership: [workstation Issue #74](https://github.com/vision-kwest/studio-workstation/issues/74) / draft [PR #73](https://github.com/vision-kwest/studio-workstation/pull/73); [OpenUSD publisher Issue #8](https://github.com/vision-kwest/studio-openusd/issues/8) / draft [PR #7](https://github.com/vision-kwest/studio-openusd/pull/7). **Offline implementation does not mean live accepted.**
+- Implemented consumer: [merged PR #73](https://github.com/vision-kwest/studio-workstation/pull/73) with follow-on bootstrap [PR #80](https://github.com/vision-kwest/studio-workstation/pull/80). Implemented publisher: [merged PR #76](https://github.com/vision-kwest/studio-workstation/pull/76). The earlier self-hosted-runner design in [OpenUSD Issue #8](https://github.com/vision-kwest/studio-openusd/issues/8) / [PR #7](https://github.com/vision-kwest/studio-openusd/pull/7) is superseded. Actual OpenUSD publisher compilation and untrusted-recipe isolation still require acceptance.
 - Future shared writable models/projects remain [Issue #71](https://github.com/vision-kwest/studio-workstation/issues/71), separate from read-only production software consumption.
 
 ## Historical source audits and design gates
