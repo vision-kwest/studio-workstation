@@ -263,7 +263,12 @@ def revoke_gpu(aws, gpu_id, *, independent=False):
     eip = handoff._eip(aws)
     if independent:
         from runtime import independent_eip
-        independent_eip._cpu_owner(aws, eip)
+        if eip.get("InstanceId"):
+            independent_eip._cpu_owner(aws, eip)
+        elif (eip.get("AssociationId") or eip.get("NetworkInterfaceId") or
+              handoff._tags(eip).get("StudioDcvInstanceId") or
+              handoff._tags(eip).get("StudioDcvReturnStack")):
+            raise ValueError("Unassociated EIP has stale ownership state")
     elif (eip.get("InstanceId") != handoff.CPU_ID or
             handoff._tags(eip).get("StudioDcvInstanceId") != handoff.CPU_ID):
         raise ValueError("Return EIP and ownership tag to CPU before revoking GPU ACM")
