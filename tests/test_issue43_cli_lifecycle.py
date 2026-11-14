@@ -98,21 +98,21 @@ class LifecycleTests(unittest.TestCase):
             self.command(["stop", "--stack", GPU_STACK])
         self.assertEqual(timeline, ["stop", "stopped", "return-and-revoke"])
 
-    def test_unexpected_gpu_eip_owner_fails_before_stopping(self):
+    def test_foreign_eip_does_not_block_ec2_stop(self):
         info = {"stack": GPU_STACK, "instance": GPU, "state": "running"}
         with (mock.patch.object(cli, "describe", return_value=info),
               mock.patch.object(cli, "run") as run,
-              mock.patch.object(handoff, "_eip", return_value={
-                  "InstanceId": "i-foreign", "Tags": []}),
+              mock.patch.object(cli, "complete_gpu_stop", side_effect=ValueError("foreign EIP")),
               contextlib.redirect_stderr(io.StringIO())):
             with self.assertRaises(SystemExit):
                 cli.main(["stop", "--stack", GPU_STACK])
-        run.assert_not_called()
+        self.assertTrue(any("stop-instances" in call.args[0] for call in run.call_args_list))
 
     def test_complete_gpu_stop_restores_eip_then_revokes_exact_grant(self):
         timeline = []
         eip = {"InstanceId": GPU, "Tags": [
-            {"Key": "StudioDcvInstanceId", "Value": GPU}]}
+            {"Key": "StudioDcvInstanceId", "Value": GPU},
+            {"Key": "StudioDcvReturnStack", "Value": CPU_STACK}]}
         with (mock.patch.object(independent_eip, "_address", return_value=eip),
               mock.patch.object(independent_eip, "restore_cpu", side_effect=lambda *a, **kw:
                                 (timeline.append("return") or {"owner": CPU})),
@@ -132,6 +132,15 @@ class LifecycleTests(unittest.TestCase):
             cli.complete_gpu_stop(GPU_STACK, GPU, manager=mock.Mock())
         restore.assert_not_called()
         revoke.assert_called_once()
+
+    def test_stop_after_failed_create_with_unassociated_eip(self):
+        vm = {"stack": GPU_STACK, "instance": GPU, "state": "running"}
+        with (mock.patch.object(cli, "describe", return_value=vm),
+              mock.patch.object(cli, "run") as run,
+              mock.patch.object(independent_eip, "_address", return_value={"Tags": []}),
+              mock.patch.object(acm, "revoke_gpu", return_value={"revoked": False})):
+            self.command(["stop", "--stack", GPU_STACK])
+        self.assertTrue(any("stop-instances" in x.args[0] for x in run.call_args_list))
 
     def test_gpu_source_preflight_rejects_running_cpu_before_ec2(self):
         owner = "i-aaaaaaaaaaaaaaaaa"
