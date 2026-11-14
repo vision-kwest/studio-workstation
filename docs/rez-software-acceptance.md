@@ -1,3 +1,5 @@
+> **Historical Phase 1 snapshot (2026-11-05), not a current readiness statement.** PR #73 and subsequent Rez provisioning fixes in PR #80 are merged, and CPU Rez/OpenUSD live acceptance was completed. The original test instances have been retired. Consult [current Studio CLI](studio-cli.md) and [publisher runbook](publisher.md) for operating commands. Details below describe the earlier offline design and must not be interpreted as today's unfulfilled approvals.
+
 # Rez 3.4.0 / OpenUSD 26.05 software integration — Phase 1 offline only
 
 Current base: `studio-workstation` main `e2d1961f0307`. No guest installation, EFS access, AWS policy change, package promotion or live login tested.
