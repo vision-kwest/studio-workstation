@@ -45,6 +45,9 @@ def run(directory):
             assert required <= modified.keys()
             if filename=="installation-scripts.tar.gz":
                 assert original.keys()==modified.keys()
+                for name in required:
+                    if name.endswith(".sh"):
+                        subprocess.run(["bash", "-n"], input=modified[name], check=True)
                 for name in original:
                     if name not in required:
                         assert original[name]==modified[name],name
