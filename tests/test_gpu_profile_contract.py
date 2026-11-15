@@ -105,8 +105,8 @@ class GpuProfileContracts(unittest.TestCase):
         from scripts import studio_workstation_cli as cli
         expected = {
             "installation-scripts.tar.gz": (
-                "bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB",
-                "084e704e5c3e79152b0324664f153a826ced40b878c1a87e31cf62e4f9551bb5"),
+                "sgj5wZfqMTRUImWDDbxR08emK755aU7A",
+                "6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d"),
             "virtual-desktop.tar.gz": (
                 "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
                 "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
@@ -116,13 +116,15 @@ class GpuProfileContracts(unittest.TestCase):
         for name, (version, digest) in expected.items():
             self.assertEqual(cli.GPU_VERSIONS[name], version)
             self.assertEqual(GPU_ARCHIVES[name], (version, digest))
-            self.assertEqual(manifest["archives"][name]["s3_version_id"], version)
-            self.assertEqual(manifest["archives"][name]["sha256"], digest)
+            if name == "virtual-desktop.tar.gz":  # PR #65 manifest remains historical
+                self.assertEqual(manifest["archives"][name]["s3_version_id"], version)
+                self.assertEqual(manifest["archives"][name]["sha256"], digest)
             self.assertEqual(cli.GPU_KEYS[name],
-                             ("releases/pr65-pinned-download-084e704e/res-2026.06/" + name
+                             ("releases/issue100-res-native-20261115/res-2026.06/" + name
                               if name == "installation-scripts.tar.gz"
                               else "releases/task7-pr61-postreboot-a8ec326/res-2026.06/" + name))
-            self.assertEqual(manifest["archives"][name]["s3_key"], cli.GPU_KEYS[name])
+            if name == "virtual-desktop.tar.gz":
+                self.assertEqual(manifest["archives"][name]["s3_key"], cli.GPU_KEYS[name])
         self.assertEqual(PINNED_GPU_PREFIX, cli.GPU_PREFIX)
         self.assertEqual(PINNED_GPU_APP_PREFIX, cli.GPU_APP_PREFIX)
         self.assertNotEqual(PINNED_GPU_PREFIX, PINNED_GPU_APP_PREFIX)

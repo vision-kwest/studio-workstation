@@ -25,11 +25,12 @@ DEFAULT_VPC = "vpc-01bbe5d01838f70b2"
 DEFAULT_SUBNET = "subnet-0986937ce71fb97cb"
 DEFAULT_PROFILE = "StudioWorkstationSSMRole"
 DEFAULT_REGION = "us-east-1"
-GPU_AMI = "ami-027c98f85b155c2ac"
-GPU_PREFIX = "releases/pr65-pinned-download-084e704e/res-2026.06"
+GPU_AMI = DEFAULT_AMI  # Canonical 24.04: let RES install NVIDIA after runtime dependencies
+GPU_AMI_OWNER = "099720109477"  # Canonical
+GPU_PREFIX = "releases/issue100-res-native-20261115/res-2026.06"
 GPU_APP_PREFIX = "releases/task7-pr61-postreboot-a8ec326/res-2026.06"
 GPU_VERSIONS = {
-    "installation-scripts.tar.gz": "bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB",
+    "installation-scripts.tar.gz": "sgj5wZfqMTRUImWDDbxR08emK755aU7A",
     "virtual-desktop.tar.gz": "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
 }
 GPU_KEYS = {
@@ -138,7 +139,7 @@ def verified_dcv_hostname(hostname, public_ip):
 def gpu_release_preflight(args):
     """Read-only preflight of pinned AMI and S3 object versions."""
     images = aws(args.region, "ec2", "describe-images", "--image-ids", GPU_AMI)["Images"]
-    if len(images) != 1 or images[0]["State"] != "available" or images[0]["OwnerId"] != "401233741942":
+    if len(images) != 1 or images[0]["State"] != "available" or images[0]["OwnerId"] != GPU_AMI_OWNER:
         raise ValueError("Validated GPU AMI unavailable or unexpected owner")
     for name, version in GPU_VERSIONS.items():
         key = GPU_KEYS[name]
