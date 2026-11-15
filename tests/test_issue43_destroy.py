@@ -190,6 +190,28 @@ class ScopedDestroyTests(unittest.TestCase):
         self.assertTrue(self.fake.deleted_volume)
         self.assertFalse(self.fake.schedules)
 
+    def test_resume_deleted_stack_removes_retained_volume_and_schedules(self):
+        self.fake.stack["StackStatus"] = "DELETE_COMPLETE"
+        self.fake.gpu["State"]["Name"] = "terminated"
+        self.fake.deleted_sg = self.fake.deleted_lt = True
+        self.fake.volume["State"] = "available"
+        self.fake.volume["Attachments"] = []
+        self.fake.gpu["Tags"].append({"Key": "aws:cloudformation:stack-id",
+                                      "Value": self.fake.stack["StackId"]})
+        self.fake.eip.pop("InstanceId", None)
+        self.fake.eip.pop("AssociationId", None)
+        self.fake.eip.pop("NetworkInterfaceId", None)
+        self.fake.eip["Tags"] = [t for t in self.fake.eip["Tags"]
+                                 if t["Key"] not in ("StudioDcvInstanceId", "StudioDcvReturnStack")]
+        acm._revoke_grant(self.fake, GPU)
+        self.fake.events.clear()
+        with mock.patch.object(h, "_dns"):
+            result = destroy.destroy_gpu(self.fake, self.fake.run, h.GPU_STACK,
+                                         h.REGION, sleep=lambda _: None)
+        self.assertEqual(result["state"], "DELETE_COMPLETE")
+        self.assertTrue(self.fake.deleted_volume)
+        self.assertFalse(self.fake.schedules)
+
     def test_wrong_volume_tag_fails_before_any_mutation(self):
         self.fake.volume["Tags"][0]["Value"] = "unrelated-token"
         with self.assertRaisesRegex(ValueError, "ownership"):

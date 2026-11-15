@@ -202,10 +202,100 @@ def _gone(aws, kind, service, operation, key, physical_id):
     raise RuntimeError("GPU " + kind + " not verifiably removed")
 
 
+def _resume_deleted_gpu(aws, run, region, sleep):
+    """Resume only an independently identified, deleted PR65 GPU stack."""
+    instances = _tagged_inventory(aws, "ec2", "describe-instances", "Reservations")
+    if len(instances) != 1:
+        raise RuntimeError("Resume requires exactly one tagged GPU instance")
+    vm = instances[0]
+    _owned(vm)
+    iid = vm.get("InstanceId", "")
+    arn = h._tags(vm).get("aws:cloudformation:stack-id", "")
+    prefix = ("arn:aws:cloudformation:" + region + ":" + h.ACCOUNT +
+              ":stack/" + h.GPU_STACK + "/")
+    if (not re.fullmatch(r"i-[0-9a-f]{8,17}", iid) or
+            not arn.startswith(prefix) or vm.get("State", {}).get("Name") != "terminated"):
+        raise RuntimeError("Unverified deleted GPU identity")
+    stack = aws(region, "cloudformation", "describe-stacks", "--stack-name", arn)["Stacks"]
+    if (len(stack) != 1 or stack[0].get("StackId") != arn or
+            stack[0].get("StackStatus") != "DELETE_COMPLETE"):
+        raise RuntimeError("GPU stack is not verified deleted")
+    _owned(stack[0])
+    eip = h._eip(aws)
+    if (eip.get("AssociationId") or eip.get("NetworkInterfaceId") or
+            h._tags(eip).get("StudioDcvInstanceId") or
+            h._tags(eip).get("StudioDcvReturnStack")):
+        raise RuntimeError("Shared EIP ownership not clean")
+    h._dns(aws)
+    if acm._get_role_state(aws, iid):
+        raise RuntimeError("GPU certificate grant still present")
+    for kind, operation, field in (("sg", "describe-security-groups", "SecurityGroups"),
+                                   ("lt", "describe-launch-templates", "LaunchTemplates")):
+        if _tagged_inventory(aws, "ec2", operation, field):
+            raise RuntimeError("GPU " + kind + " not yet removed")
+    names = {x["Name"] for x in aws(region, "scheduler", "list-schedules",
+                                    "--group-name", guard.GROUP).get("Schedules", [])}
+    terminate = "studio-pr65-i-" + iid
+    volumes = _tagged_inventory(aws, "ec2", "describe-volumes", "Volumes")
+    volume_schedules = [n for n in names if n.startswith("studio-pr65-v-")]
+    if len(volume_schedules) > 1:
+        raise RuntimeError("Ambiguous volume schedules")
+    if not volume_schedules and volumes:
+        raise RuntimeError("Cannot establish retained volume identity")
+    vid = volume_schedules[0][len("studio-pr65-v-"):] if volume_schedules else None
+    if vid and not re.fullmatch(r"vol-[0-9a-f]{8,17}", vid):
+        raise RuntimeError("Invalid retained volume ID")
+    if terminate in names:
+        _schedule(aws, terminate, guard.TERMINATE, {"InstanceIds": [iid]})
+    if vid:
+        _schedule(aws, volume_schedules[0], guard.DELETE_VOLUME, {"VolumeId": vid})
+    if volumes:
+        if len(volumes) != 1 or volumes[0].get("VolumeId") != vid:
+            raise RuntimeError("Unverified retained volume")
+        volume = volumes[0]
+        _owned(volume)
+        if (not volume.get("Encrypted") or volume.get("State") != "available" or
+                volume.get("Attachments")):
+            raise RuntimeError("Retained volume is not safely detached")
+        run(["aws", "ec2", "delete-volume", "--volume-id", vid,
+             "--region", region], capture=False)
+    if vid:
+        for attempt in range(12):
+            if _absent(lambda: _one(aws, "ec2", "describe-volumes",
+                                    "--volume-ids", vid), MISSING["volume"]) is None:
+                break
+            if attempt == 11:
+                raise RuntimeError("Retained volume deletion not verified")
+            sleep(3)
+    if _tagged_inventory(aws, "ec2", "describe-volumes", "Volumes"):
+        raise RuntimeError("GPU tagged volume remains")
+    for name in (terminate, volume_schedules[0] if vid else None):
+        if name and name in names:
+            run(["aws", "scheduler", "delete-schedule", "--group-name", guard.GROUP,
+                 "--name", name, "--region", region], capture=False)
+            if _absent(lambda: aws(region, "scheduler", "get-schedule",
+                                   "--group-name", guard.GROUP, "--name", name),
+                       MISSING["schedule"]) is not None:
+                raise RuntimeError("Schedule removal not verified: " + name)
+    return {"stack": h.GPU_STACK, "state": "DELETE_COMPLETE", "instance": iid,
+            "volume_removed": vid, "schedules_removed": sorted(names &
+            {terminate, volume_schedules[0] if vid else ""}),
+            "cpu_certificate_access": "preserved"}
+
+
 def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
     """Synchronous, fail-closed cleanup of the exact accepted PR65 GPU scope."""
     if stack != h.GPU_STACK or region != h.REGION:
         raise ValueError("GPU teardown restricted to exact PR65 stack and region")
+    try:
+        stacks = aws(region, "cloudformation", "describe-stacks",
+                     "--stack-name", stack)["Stacks"]
+    except subprocess.CalledProcessError as exc:
+        if "ValidationError" not in (exc.stderr or ""):
+            raise
+        return _resume_deleted_gpu(aws, run, region, sleep)
+    if len(stacks) == 1 and stacks[0].get("StackStatus") == "DELETE_COMPLETE":
+        return _resume_deleted_gpu(aws, run, region, sleep)
     ids = _preflight(aws)  # Must complete before any EC2/EIP/IAM write.
     iid = ids["iid"]
     if ids["state"] in ("running", "stopping"):
