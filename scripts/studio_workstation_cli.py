@@ -27,10 +27,10 @@ DEFAULT_PROFILE = "StudioWorkstationSSMRole"
 DEFAULT_REGION = "us-east-1"
 GPU_AMI = DEFAULT_AMI  # Canonical 24.04: let RES install NVIDIA after runtime dependencies
 GPU_AMI_OWNER = "099720109477"  # Canonical
-GPU_PREFIX = "releases/pr65-pinned-download-084e704e/res-2026.06"
+GPU_PREFIX = "releases/issue100-res-native-20261115/res-2026.06"
 GPU_APP_PREFIX = "releases/task7-pr61-postreboot-a8ec326/res-2026.06"
 GPU_VERSIONS = {
-    "installation-scripts.tar.gz": "bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB",
+    "installation-scripts.tar.gz": "sgj5wZfqMTRUImWDDbxR08emK755aU7A",
     "virtual-desktop.tar.gz": "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
 }
 GPU_KEYS = {
