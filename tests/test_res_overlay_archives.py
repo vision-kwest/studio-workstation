@@ -64,9 +64,12 @@ def run(directory):
                 assert b"STUDIO_STANDALONE" in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
                 assert b'modinfo -k "$(uname -r)" nvidia' in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
                 driver=modified["scripts/dcv/linux/gpu_drivers.sh"]
-                assert b"--no-sign-request" in driver and b"sha256sum -c -" in driver
+                upstream=original["scripts/dcv/linux/gpu_drivers.sh"]
+                signed=b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive $NVIDIA_S3_BUCKET_PATH .'
+                assert upstream.count(signed)==driver.count(signed)==1
+                assert b"--no-sign-request" not in driver
+                assert b"sha256sum -c -" in driver
                 assert b"cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156" in driver
-                assert b"s3 cp --quiet --recursive" not in driver
             else:
                 assert original.keys()==modified.keys()
                 for name in original:
