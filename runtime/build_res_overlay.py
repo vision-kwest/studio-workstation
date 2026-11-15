@@ -37,6 +37,12 @@ def patch_post_reboot_dpms(raw):
     """
     old = b'      /bin/bash "${SCRIPT_DIR}/../../dcv/linux/dcv_server.sh" -o $BASE_OS -g $GPU_FAMILY -s "${SCRIPT_DIR}/.."'
     fix = b"""      if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
+        if [[ "${GPU_FAMILY}" == "NVIDIA" ]]; then
+          command -v nvidia-smi >/dev/null && modinfo -k "$(uname -r)" nvidia >/dev/null || {
+            echo "RES NVIDIA driver missing for active kernel" >&2
+            exit 1
+          }
+        fi
         # The base AMI may contain a malformed DPMS file even when DCV install is skipped.
         mkdir -p /etc/X11/xorg.conf.d
         printf '%s\\n' 'Section "Extensions"' '    Option "DPMS" "Disable"' 'EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf
