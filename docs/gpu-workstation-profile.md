@@ -7,6 +7,7 @@ For the current user-facing commands, use [Studio CLI](studio-cli.md). Earlier s
 ## Runtime and GPU integration
 
 - The renderer in [`runtime/render_workstation.py`](../runtime/render_workstation.py) accepts `--profile gpu`, limits GPU instance type to `g4dn.xlarge`, and invokes the original RES 2026.06 host installer with `-g NVIDIA`.
+- **Issue #100 installer published, GPU acceptance pending:** new version `sgj5wZfqMTRUImWDDbxR08emK755aU7A` (SHA-256 `6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d`); it retains the original RES signed NVIDIA download plus a checksum/kernel-module check. See [runtime release provenance](../runtime/README.md).
 - New GPU launches use a driver-free Canonical base and let the **existing RES post-reboot installer** install NVIDIA GRID; the immutable RES archives, RES cloud-init/reboot continuation and DCV setup remain unchanged. Verify guest S3 driver download rights and `nvidia-smi` after the final reboot before promoting this candidate.
 - `STUDIO_STANDALONE=true` isolates RES-only broker, cluster-setting and external identity dependencies while using DCV Linux `system` authentication.
 - GPU persistent mode uses encrypted gp3 root EBS, stop-on-shutdown and `DeleteOnTermination=false`. Application files survive EC2 stop/start; its public IPv4 can change.
@@ -19,7 +20,7 @@ Unlike the early single-prefix proposal, PR #65 fetches the two pinned GPU archi
 
 | Archive | Key |
 |---|---|
-| Installer | `releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz` |
+| Installer | `releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz` |
 | Application | `releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz` |
 
 The exact SHA-256 and S3 VersionIds are documented in [runtime provenance](../runtime/README.md); preserve `s3:GetObjectVersion` instance-role permissions for both exact keys.
@@ -30,7 +31,7 @@ The exact SHA-256 and S3 VersionIds are documented in [runtime provenance](../ru
 python3 runtime/render_workstation.py \
   --profile gpu --lifecycle persistent \
   --bucket studio-workstation-releases-401233741942-us-east-1 \
-  --prefix releases/pr65-pinned-download-084e704e/res-2026.06 \
+  --prefix releases/issue100-res-native-20261115/res-2026.06 \
   --user workstation \
   --cleanup-token pr65-b23c8e5fdf67b683cd35 \
   --test-stack studio-gpu-cli-accept65 \
