@@ -111,8 +111,7 @@ class LifecycleTests(unittest.TestCase):
     def test_complete_gpu_stop_restores_eip_then_revokes_exact_grant(self):
         timeline = []
         eip = {"InstanceId": GPU, "Tags": [
-            {"Key": "StudioDcvInstanceId", "Value": GPU},
-            {"Key": "StudioDcvReturnStack", "Value": CPU_STACK}]}
+            {"Key": "StudioDcvInstanceId", "Value": GPU}]}
         with (mock.patch.object(independent_eip, "_address", return_value=eip),
               mock.patch.object(independent_eip, "restore_cpu", side_effect=lambda *a, **kw:
                                 (timeline.append("return") or {"owner": CPU})),
@@ -134,8 +133,7 @@ class LifecycleTests(unittest.TestCase):
         revoke.assert_called_once()
 
     def test_stop_after_failed_create_with_unassociated_eip(self):
-        vm = {"stack": GPU_STACK, "instance": GPU, "state": "running"}
-        with (mock.patch.object(cli, "describe", return_value=vm),
+        with (mock.patch.object(cli, "describe", return_value={"stack": GPU_STACK, "instance": GPU, "state": "running"}),
               mock.patch.object(cli, "run") as run,
               mock.patch.object(independent_eip, "_address", return_value={"Tags": []}),
               mock.patch.object(acm, "revoke_gpu", return_value={"revoked": False})):

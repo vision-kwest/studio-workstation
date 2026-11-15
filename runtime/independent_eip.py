@@ -58,7 +58,10 @@ def _cpu_owner(aws, address):
     """Verify a stopped CPU is the current EIP owner, independent of old anchor."""
     iid = _owner(aws, address)
     if not iid:
-        raise ValueError("Expected an associated stopped CPU owner")
+        if (address.get("AssociationId") or address.get("NetworkInterfaceId") or
+                legacy._tags(address).get("StudioDcvInstanceId") or legacy._tags(address).get("StudioDcvReturnStack")):
+            raise ValueError("Unassociated EIP has stale ownership state")
+        return None
     eni = address.get("NetworkInterfaceId")
     vm = legacy._items(aws, iid)[iid]
     interfaces = vm.get("NetworkInterfaces", [])
@@ -81,11 +84,7 @@ def gpu_preview(aws, *, now=None):
     from runtime import pr65_gpu_create
     now = now or dt.datetime.now(dt.timezone.utc)
     address = _address(aws)
-    cpu = _cpu_owner(aws, address) if address.get("InstanceId") else None
-    if cpu is None and (address.get("AssociationId") or address.get("NetworkInterfaceId")
-                       or legacy._tags(address).get("StudioDcvInstanceId")
-                       or legacy._tags(address).get("StudioDcvReturnStack")):
-        raise ValueError("Unassociated EIP has stale ownership state")
+    cpu = _cpu_owner(aws, address)
     gpu_id = legacy._stack_iid(aws, legacy.GPU_STACK)
     gpu = legacy._items(aws, gpu_id)[gpu_id]
     if (gpu.get("State", {}).get("Name") != "running"
@@ -126,18 +125,15 @@ def handoff_gpu(aws, check_public_tls, *, check_guest=None):
                      "--network-interface-id", pre["gpu_eni"], "--no-allow-reassociation")
         if not result.get("AssociationId"):
             raise RuntimeError("GPU EIP association missing")
-        tags = ["Key=StudioDcvInstanceId,Value=" + pre["to"]]
-        if pre["cpu"]:
-            tags.append("Key=StudioDcvReturnStack,Value=" + pre["cpu"]["stack"])
         aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,
-            "--tags", *tags)
+            "--tags", "Key=StudioDcvInstanceId,Value=" + pre["to"],
+            *(["Key=StudioDcvReturnStack,Value=" + pre["cpu"]["stack"]] if pre["cpu"] else []))
         actual = _address(aws)
         if (actual.get("InstanceId") != pre["to"]
                 or actual.get("NetworkInterfaceId") != pre["gpu_eni"]
                 or actual.get("AssociationId") != result["AssociationId"]
                 or legacy._tags(actual).get("StudioDcvInstanceId") != pre["to"]
-                or legacy._tags(actual).get("StudioDcvReturnStack") !=
-                (pre["cpu"]["stack"] if pre["cpu"] else None)):
+                or legacy._tags(actual).get("StudioDcvReturnStack") != (pre["cpu"]["stack"] if pre["cpu"] else None)):
             raise RuntimeError("GPU EIP owner readback mismatch")
         check_public_tls(legacy.HOST, legacy.EIP_IP)
         return {"owner": pre["to"], "previous_cpu": pre["from"],
@@ -154,11 +150,8 @@ def handoff_gpu(aws, check_public_tls, *, check_guest=None):
         if current.get("InstanceId") or current.get("AssociationId"):
             raise RuntimeError("GPU handoff failed; EIP rollback unverified") from error
         if not pre["cpu"]:
-            aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID,
-                "--tags", "Key=StudioDcvInstanceId")
-            actual = _address(aws)
-            if actual.get("InstanceId") or actual.get("AssociationId") or legacy._tags(actual).get("StudioDcvInstanceId"):
-                raise RuntimeError("GPU handoff failed; unassociated EIP rollback unverified") from error
+            aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID, "--tags", "Key=StudioDcvInstanceId")
+            _cpu_owner(aws, _address(aws))
             raise RuntimeError("GPU handoff failed; EIP restored to unassociated") from error
         restored = aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
                        "--network-interface-id", pre["cpu"]["eni"], "--no-allow-reassociation")
@@ -180,6 +173,8 @@ def restore_cpu(aws, gpu_id):
         raise ValueError("Invalid GPU instance ID")
     address = _address(aws)
     cpu_stack = legacy._tags(address).get("StudioDcvReturnStack")
+    if not cpu_stack and address.get("InstanceId") in (None, gpu_id) and (not address.get("InstanceId") or address.get("AssociationId")):
+        return release(aws)
     if (not cpu_stack or not re.fullmatch(r"studio-[a-z0-9-]{3,100}", cpu_stack)
             or cpu_stack.startswith("studio-gpu-cli-")):
         raise ValueError("GPU EIP missing verified CPU return stack")

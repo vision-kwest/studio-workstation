@@ -92,7 +92,7 @@
               },
               "VolumeType": "gp3",
               "Encrypted": true,
-              "DeleteOnTermination": false
+              "DeleteOnTermination": true
             }
           }
         ],

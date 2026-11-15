@@ -115,7 +115,7 @@ def _preflight(aws):
     block = [x for x in vm.get("BlockDeviceMappings", [])
              if x.get("DeviceName") == ROOT]
     if (len(block) != 1 or block[0].get("Ebs", {}).get("DeleteOnTermination") is not True):
-        raise ValueError("Retained GPU root EBS identity not verified")
+        raise ValueError("Delete-on-termination GPU root EBS identity not verified")
     vid = block[0]["Ebs"].get("VolumeId")
     if not re.fullmatch(r"vol-[0-9a-f]{8,17}", vid or ""):
         raise ValueError("Unexpected retained GPU volume ID")
@@ -151,13 +151,11 @@ def _preflight(aws):
     tagged = h._tags(eip).get("StudioDcvInstanceId")
     if owner == iid and tagged == iid:
         if not eip.get("AssociationId"):
-            raise ValueError("GPU EIP association missing")
+            raise ValueError("GPU EIP return stack not verified")
     elif owner is None and tagged == iid:
         if not h._tags(eip).get("StudioDcvReturnStack"):
             raise ValueError("GPU EIP return stack missing")
-    elif owner is None and tagged is None and not eip.get("AssociationId") and not eip.get("NetworkInterfaceId") and not h._tags(eip).get("StudioDcvReturnStack"):
-        pass  # GPU failed before claiming the independent allocation.
-    elif owner and tagged == owner:
+    elif tagged == owner:
         independent_eip._cpu_owner(aws, eip)
     else:
         raise ValueError("Unexpected EIP owner")
@@ -215,13 +213,9 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
         run(["aws", "ec2", "wait", "instance-stopped", "--instance-ids", iid,
              "--region", region], capture=False)
     from runtime import independent_eip
-    if ids["eip_owner"] == iid:
-        if h._tags(h._eip(aws)).get("StudioDcvReturnStack"):
-            independent_eip.restore_cpu(aws, iid)
-        else:
-            independent_eip.release(aws)
-    elif ids["eip_owner"] is None and h._tags(h._eip(aws)).get("StudioDcvInstanceId") == iid:
+    if ids["eip_owner"] == iid or ids["eip_owner"] is None:
         independent_eip.restore_cpu(aws, iid)
+    independent_eip._cpu_owner(aws, h._eip(aws))
     h._dns(aws)
     acm.revoke_gpu(aws, iid, independent=True)
     run(["aws", "cloudformation", "delete-stack", "--stack-name", ids["arn"],
@@ -236,13 +230,12 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
     _gone(aws, "sg", "ec2", "describe-security-groups", "--group-ids", ids["sg"])
     _gone(aws, "lt", "ec2", "describe-launch-templates",
           "--launch-template-ids", ids["lt"])
-    # EC2 deletes its root EBS on termination; CloudFormation owns the lifecycle.
     for attempt in range(12):
         if _absent(lambda: _one(aws, "ec2", "describe-volumes",
                                 "--volume-ids", ids["vid"]), MISSING["volume"]) is None:
             break
         if attempt == 11:
-            raise RuntimeError("CloudFormation did not remove GPU root EBS")
+            raise RuntimeError("Retained GPU EBS deletion not independently verified")
         sleep(3)
     _verify_no_orphans(aws, ids)
     # Keep both independent PR65 schedules until the instance, EBS and stack are gone.
@@ -261,17 +254,13 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
     if any(x.get("Name") in ids["schedules"] for x in remaining):
         raise RuntimeError("GPU expiration schedule remains")
     eip = h._eip(aws)
-    verified_cpu = independent_eip._cpu_owner(aws, eip) if eip.get("InstanceId") else None
-    if not verified_cpu and (eip.get("AssociationId") or eip.get("NetworkInterfaceId") or
-                             h._tags(eip).get("StudioDcvInstanceId") or h._tags(eip).get("StudioDcvReturnStack")):
-        raise RuntimeError("Shared EIP cleanup left stale ownership state")
+    verified_cpu = independent_eip._cpu_owner(aws, eip)
     h._dns(aws)
     if acm._get_role_state(aws, iid):
         raise RuntimeError("GPU ACM permission remained after cleanup")
     return {"stack": stack, "state": "DELETE_COMPLETE", "instance": iid,
             "volume_removed": ids["vid"], "schedules_removed": ids["schedules"],
-            "eip_owner": verified_cpu["instance"] if verified_cpu else None,
-            "cpu_certificate_access": "preserved"}
+            "eip_owner": verified_cpu["instance"] if verified_cpu else None, "cpu_certificate_access": "preserved"}
 
 
 def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
@@ -322,7 +311,7 @@ def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
             h._tags(group).get("aws:cloudformation:stack-id") != arn):
         raise ValueError("CPU security group does not belong to stack")
     block = [x for x in vm.get("BlockDeviceMappings", []) if x.get("DeviceName") == ROOT]
-    if len(block) != 1:
+    if len(block) != 1 or block[0].get("Ebs", {}).get("DeleteOnTermination") is not True:
         raise ValueError("Expected exactly one CPU root block mapping")
     disk = block[0].get("Ebs", {})
     vid = disk.get("VolumeId")
@@ -360,14 +349,6 @@ def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
         raise RuntimeError("CPU CloudFormation deletion not independently verified")
     _gone(aws, "instance", "ec2", "describe-instances", "--instance-ids", iid)
     _gone(aws, "sg", "ec2", "describe-security-groups", "--group-ids", sg)
-    leftover = _absent(lambda: _one(aws, "ec2", "describe-volumes",
-                                    "--volume-ids", vid), MISSING["volume"])
-    if leftover is not None:
-        if (leftover.get("VolumeId") != vid or leftover.get("State") != "available" or
-                leftover.get("Attachments") or not leftover.get("Encrypted")):
-            raise RuntimeError("CPU retained EBS not safely detached")
-        run(["aws", "ec2", "delete-volume", "--volume-id", vid,
-             "--region", region], capture=False)
     for attempt in range(12):
         if _absent(lambda: _one(aws, "ec2", "describe-volumes",
                                 "--volume-ids", vid), MISSING["volume"]) is None:

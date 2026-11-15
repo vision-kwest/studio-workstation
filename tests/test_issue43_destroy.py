@@ -178,15 +178,11 @@ class ScopedDestroyTests(unittest.TestCase):
         self.assertNotIn("eip-detach", self.fake.events)
         self.assertFalse(self.fake.schedules)
 
-    def test_destroy_failed_gpu_without_eip_or_cpu(self):
-        for key in ("InstanceId", "AssociationId", "NetworkInterfaceId"):
-            self.fake.eip.pop(key, None)
-        self.fake.eip["Tags"] = [t for t in self.fake.eip["Tags"]
-                                 if t["Key"] != "StudioDcvInstanceId"]
-        self.fake.gpu["State"]["Name"] = "stopped"
-        result = self.destroy()
+    def test_destroy_without_cpu_preserves_free_eip(self):
+        self.fake.eip.update(InstanceId=None, AssociationId=None, NetworkInterfaceId=None)
+        self.fake.eip["Tags"] = [t for t in self.fake.eip["Tags"] if t["Key"] != "StudioDcvInstanceId"]
+        result = destroy.destroy_gpu(self.fake, self.fake.run, h.GPU_STACK, h.REGION, sleep=lambda _: None)
         self.assertIsNone(result["eip_owner"])
-        self.assertTrue(self.fake.deleted_volume)
         self.assertFalse(self.fake.schedules)
 
     def test_wrong_volume_tag_fails_before_any_mutation(self):
@@ -222,7 +218,7 @@ class ScopedDestroyTests(unittest.TestCase):
 
     def test_retained_volume_still_in_use_prevents_schedule_deletion(self):
         self.fake.stuck_volume = True
-        with self.assertRaisesRegex(RuntimeError, "CloudFormation did not remove GPU root EBS"):
+        with self.assertRaisesRegex(RuntimeError, "Retained GPU EBS deletion not independently verified"):
             self.destroy()
         self.assertEqual(len(self.fake.schedules), 2)
         self.assertFalse(self.fake.deleted_volume)

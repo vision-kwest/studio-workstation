@@ -33,16 +33,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Export review source snapshots (no Git credentials)
-        run: |
-          git archive HEAD > /tmp/studio-review-head.tar
-          git fetch --no-tags --depth=1 origin 419ba96da7d98e63ea78c3dddc900969de653310
-          git archive FETCH_HEAD > /tmp/studio-review-base.tar
-      - uses: actions/upload-artifact@v4
-        with:
-          name: issue103-review-sources
-          path: /tmp/studio-review-*.tar
-          retention-days: 1
       - name: Compile standalone certificate and CLI modules
         run: python3 -m py_compile scripts/studio_dcv_acm.py scripts/studio_workstation_cli.py runtime/issue43_hostname_handoff.py runtime/issue43_gpu_acm_setup.py runtime/issue43_destroy.py runtime/issue68_expiration_extension.py
       - name: Test ACM certificate activation (no AWS credentials)

@@ -38,7 +38,7 @@ The command is **`python3 studio workstation`**. It is not an installed system-l
 | `stop --stack NAME` | Stops the resolved EC2 instance; waits for `stopped` |
 | `start --stack NAME` | Starts the same instance; approved GPU **first** checks its exact PR #65 Scheduler/IAM safeguards and requires at least 80 minutes remaining before EC2 start, then checks RES/ACM/EIP and trusted HTTPS; approved CPU waits for trusted HTTPS |
 | `extend-expiration --stack NAME --additional-minutes N` | Immediately extends the approved GPU's exact EC2 and EBS expiration schedules (no `--execute` or preview); validates IAM, ownership and bounded deadlines first |
-| `destroy --stack NAME --delete-stack` | Approved GPU scope: verified stack, retained EBS, exact IAM and two expiration schedules cleaned in guarded order; non-anchor CPU stacks use scoped cleanup. Original shared-hostname CPU anchor is protected. Failures require operator reconciliation |
+| `destroy --stack NAME --delete-stack` | CloudFormation deletes the CPU/GPU instance and its root EBS; stop/start still preserves EBS. Shared EIP/DNS/ACM/EFS remain. Independent GPU expiry guards stay armed until deletion is verified and self-delete after execution if the client disconnects. Long-lived data belongs on shared EFS; writable storage is pending #96. |
 
 `--yes`, `--confirm-stack`, and `--confirm-instance` **were removed**. Running a command is authorization; you will not be asked to type the same stack or instance twice. `--delete-stack` remains mandatory for destructive teardown; `--dry-run` is how to preview creation. AWS subprocesses pass `--no-cli-pager`, so CloudShell should no longer stop at `(END)` after ValidateTemplate.
 
@@ -120,7 +120,7 @@ The **current implementation** only allows this account-specific GPU scope:
 | Instance type | `g4dn.xlarge` (Tesla T4) |
 | Stack name | `studio-gpu-cli-accept65` **only** |
 | Cleanup token (ownership label, not credential) | `pr65-b23c8e5fdf67b683cd35` **only** |
-| Root storage | Encrypted 100 GiB gp3, **retained** on termination |
+| Root storage | Encrypted 100 GiB gp3; preserved on stop/start, **deleted** on termination |
 | EC2 role | `StudioWorkstationSSMRole` |
 | Scheduler group | `studio-task7-pr61` |
 | Scheduler role | `studio-pr65-cli-expiration` (restricted to exact stack/token tags) |
@@ -214,7 +214,7 @@ remains unmerged in PR #69.
 
 For the original CPU anchor and exact scoped GPU, connect verifies `dcv.kwesidavis.com` DNS, shared EIP owner and system CA TLS before printing the trusted URL. It does not open a browser; use the Linux `workstation` account. CPU start requires CPU EIP ownership and waits for trusted HTTPS. GPU start requires the original CPU stopped and owning the EIP, and reenrolls/reverifies RES, ACM, EIP and HTTPS after EC2 health; stop waits for EC2 stopped before returning EIP and revoking GPU-only ACM permission. **The GPU's PR #65 expiration deadlines continue while stopped.** If fewer than 80 minutes remain, or the original independent schedules/IAM/ownership checks fail, the CLI refuses a GPU restart **before** EC2 starts. The GPU deadline is never extended automatically by `start`; if allowed by the existing bounded policy, use the separate `extend-expiration --additional-minutes` command first. Otherwise use the guarded cleanup path.
 
-The `destroy --delete-stack` operation is irreversible. It **refuses the original shared-hostname CPU anchor**, which must be deliberately migrated before destruction. For the approved GPU, it independently verifies stack identity, EIP owner, expiration schedules and exact tagged resource inventory; returns EIP to the original stopped CPU; revokes GPU IAM; deletes the exact stack; verifies instance, launch template and security group removal; deletes only the independently verified detached retained EBS; and removes both schedules **only after cleanup**. Non-anchor CPU stacks use their own scoped stack and EBS cleanup. Unexpected resources, IAM denial, attached volumes or partially deleted stacks fail closed and may require operator reconciliation; do not treat CLI failure as cleanup success. Verify absence in AWS after any failed destroy.
+The `destroy --delete-stack` operation is irreversible: local CPU/GPU root EBS is deleted with the instance by EC2/CloudFormation, not by a separate CLI volume-deletion step. The CLI verifies ownership before requesting stack deletion and verifies resource absence afterward. Shared EIP/DNS/ACM/EFS remain independent; release or return the EIP and revoke GPU-only certificate access before deleting compute. Independent GPU expiration safeguards remain armed until cleanup is verified. A CloudShell disconnect does not cancel an accepted CloudFormation deletion; remaining one-shot schedules self-delete after execution. AWS permission/dependency failures still require inspection; never treat CLI failure as cleanup success. Writable shared EFS storage is pending #96, so do not assume current home-directory files survive destroy.
 
 Task 5 regressions used mocked AWS interfaces; the supervised Task 6 live acceptance subsequently passed scoped CLI create/connect/stop/destroy and preserved the GPU test file through stop/start. The pre-start 80-minute rejection above is **offline verified only**, not a claim of a second live GPU acceptance.
 
