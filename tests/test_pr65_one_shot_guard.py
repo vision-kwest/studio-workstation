@@ -16,7 +16,7 @@ NOW = dt.datetime(2026, 11, 1, 18, 0, tzinfo=dt.timezone.utc)
 def resources():
     instance = {"InstanceId": IID, "Tags": deepcopy(TAGS), "State": {"Name": "running"},
                 "BlockDeviceMappings": [{"DeviceName": "/dev/sda1", "Ebs": {
-                    "VolumeId": VID, "DeleteOnTermination": False}}]}
+                    "VolumeId": VID, "DeleteOnTermination": True}}]}
     volume = {"VolumeId": VID, "Tags": deepcopy(TAGS), "State": "in-use",
               "Attachments": [{"InstanceId": IID, "VolumeId": VID, "Device": "/dev/sda1"}]}
     return instance, volume
@@ -37,10 +37,10 @@ class OneShotGuardTests(unittest.TestCase):
         self.assertEqual(p["termination"]["ScheduleExpression"], "at(2026-11-01T20:30:00)")
         self.assertEqual(p["volume_cleanup"]["ScheduleExpression"], "at(2026-11-01T21:15:00)")
 
-    def test_retained_root_volume_required(self):
+    def test_root_volume_deleted_on_termination(self):
         instance, vol = resources()
-        instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"] = True
-        with self.assertRaisesRegex(ValueError, "retained"):
+        instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"] = False
+        with self.assertRaisesRegex(ValueError, "CloudFormation-managed"):
             plan(instance, vol, STACK, TOKEN, NOW)
 
     def test_root_volume_id_must_match_attachment(self):
