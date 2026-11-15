@@ -31,7 +31,7 @@ class FakeAWS:
                     "NetworkInterfaces": [{"NetworkInterfaceId": "eni-0123456789abcdef0",
                                            "Attachment": {"DeviceIndex": 0, "Status": "attached"}}],
                     "BlockDeviceMappings": [{"DeviceName": "/dev/sda1",
-                                              "Ebs": {"VolumeId": VOLUME, "DeleteOnTermination": False}}]}
+                                              "Ebs": {"VolumeId": VOLUME, "DeleteOnTermination": True}}]}
         self.volume = {"VolumeId": VOLUME, "State": "in-use", "Tags": copy.deepcopy(tags),
                        "Attachments": [{"InstanceId": GPU, "VolumeId": VOLUME, "Device": "/dev/sda1"}]}
         self.eip = {"AllocationId": h.EIP_ID, "PublicIp": h.EIP_IP,
