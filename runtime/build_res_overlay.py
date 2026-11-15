@@ -46,6 +46,17 @@ def patch_post_reboot_dpms(raw):
     return raw.replace(old, old + b"\n" + fix)
 
 
+def patch_gpu_driver_download(raw):
+    """Keep RES GRID installer; adapt only its public S3 fetch for standalone."""
+    old = b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive $NVIDIA_S3_BUCKET_PATH .'
+    new = (b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --no-sign-request --quiet '
+           b'${NVIDIA_S3_BUCKET_PATH}NVIDIA-Linux-x86_64-595.91.07-grid-aws.run . || return $?\n'
+           b"  echo 'cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156  "
+           b"NVIDIA-Linux-x86_64-595.91.07-grid-aws.run' | sha256sum -c - || return $?")
+    if raw.count(old) != 1:
+        raise ValueError("Pinned RES GPU download source anchor changed")
+    return raw.replace(old, new)
+
 def patch_xserver_dcv_access(raw):
     """Grant only the local DCV service user, only in standalone mode."""
     old = b'        return "SI:localuser:dcv" in xhost_output'
@@ -137,9 +148,12 @@ def main():
             if len(post)!=1:
                 raise ValueError("Cannot locate unique RES post-reboot installer")
             post_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==post[0])).read()
+            drivers="scripts/dcv/linux/gpu_drivers.sh"
+            gpu_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==drivers)).read()
         output=rewrite(raw,mapping,replacements={
             matches[0]:patch_dcv_dpms(original),
             post[0]:patch_post_reboot_dpms(post_raw),
+            drivers:patch_gpu_driver_download(gpu_raw),
         })
     else:
         with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as tf:
