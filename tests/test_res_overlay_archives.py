@@ -16,6 +16,7 @@ EXPECTED={
         "scripts/virtual-desktop-host/linux/install.sh",
         "scripts/common/linux/install_app.sh",
         "scripts/dcv/linux/debian/dcv_server.sh",
+        "scripts/dcv/linux/gpu_drivers.sh",
         "scripts/virtual-desktop-host/linux/install_post_reboot.sh",
     },
     "virtual-desktop.tar.gz":{
@@ -58,6 +59,10 @@ def run(directory):
                 assert b"install_post_reboot.sh" in modified["scripts/virtual-desktop-host/linux/install.sh"]
                 assert b"printf" in modified["scripts/dcv/linux/debian/dcv_server.sh"]
                 assert b"STUDIO_STANDALONE" in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
+                driver=modified["scripts/dcv/linux/gpu_drivers.sh"]
+                assert b"--no-sign-request" in driver and b"sha256sum -c -" in driver
+                assert b"cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156" in driver
+                assert b"s3 cp --quiet --recursive" not in driver
             else:
                 assert original.keys()==modified.keys()
                 for name in original:
