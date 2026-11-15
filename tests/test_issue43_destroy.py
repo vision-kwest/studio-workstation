@@ -212,6 +212,28 @@ class ScopedDestroyTests(unittest.TestCase):
         self.assertTrue(self.fake.deleted_volume)
         self.assertFalse(self.fake.schedules)
 
+    def test_resume_rejects_foreign_volume_and_scheduler(self):
+        self.fake.stack["StackStatus"] = "DELETE_COMPLETE"
+        self.fake.gpu["State"]["Name"] = "terminated"
+        self.fake.deleted_sg = self.fake.deleted_lt = True
+        self.fake.volume.update(State="available", Attachments=[])
+        self.fake.gpu["Tags"].append({"Key": "aws:cloudformation:stack-id",
+                                      "Value": self.fake.stack["StackId"]})
+        for key in ("InstanceId", "AssociationId", "NetworkInterfaceId"):
+            self.fake.eip.pop(key, None)
+        self.fake.eip["Tags"] = [t for t in self.fake.eip["Tags"]
+                                 if t["Key"] not in ("StudioDcvInstanceId", "StudioDcvReturnStack")]
+        acm._revoke_grant(self.fake, GPU)
+        with mock.patch.object(h, "_dns"):
+            self.fake.volume["Tags"][0]["Value"] = "foreign"
+            with self.assertRaisesRegex(ValueError, "ownership"):
+                self.destroy()
+            self.fake.volume["Tags"][0]["Value"] = h.GPU_TOKEN
+            self.fake.schedules["studio-pr65-v-" + VOLUME]["Target"]["Input"] = '{"VolumeId":"vol-foreign"}'
+            with self.assertRaisesRegex(ValueError, "schedule target"):
+                self.destroy()
+        self.assertFalse(self.fake.deleted_volume)
+
     def test_wrong_volume_tag_fails_before_any_mutation(self):
         self.fake.volume["Tags"][0]["Value"] = "unrelated-token"
         with self.assertRaisesRegex(ValueError, "ownership"):
