@@ -52,16 +52,14 @@ def patch_post_reboot_dpms(raw):
     return raw.replace(old, old + b"\n" + fix)
 
 
-def patch_gpu_driver_download(raw):
-    """Keep RES GRID installer; adapt only its public S3 fetch for standalone."""
+def patch_gpu_driver_checksum(raw):
+    """Retain RES's original signed S3 command; verify its exact GRID payload."""
     old = b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive $NVIDIA_S3_BUCKET_PATH .'
-    new = (b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --no-sign-request --quiet '
-           b'${NVIDIA_S3_BUCKET_PATH}NVIDIA-Linux-x86_64-595.91.07-grid-aws.run . || return $?\n'
-           b"  echo 'cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156  "
-           b"NVIDIA-Linux-x86_64-595.91.07-grid-aws.run' | sha256sum -c - || return $?")
+    check = (b"\n  echo 'cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156  "
+             b"NVIDIA-Linux-x86_64-595.91.07-grid-aws.run' | sha256sum -c - || return $?")
     if raw.count(old) != 1:
         raise ValueError("Pinned RES GPU download source anchor changed")
-    return raw.replace(old, new)
+    return raw.replace(old, old + check)
 
 def patch_xserver_dcv_access(raw):
     """Grant only the local DCV service user, only in standalone mode."""
@@ -159,7 +157,7 @@ def main():
         output=rewrite(raw,mapping,replacements={
             matches[0]:patch_dcv_dpms(original),
             post[0]:patch_post_reboot_dpms(post_raw),
-            drivers:patch_gpu_driver_download(gpu_raw),
+            drivers:patch_gpu_driver_checksum(gpu_raw),
         })
     else:
         with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as tf:
