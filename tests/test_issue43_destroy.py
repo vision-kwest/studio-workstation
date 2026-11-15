@@ -100,8 +100,7 @@ class FakeCleanup(IAMFake):
             self.stack["StackStatus"] = "DELETE_COMPLETE"
             self.gpu["State"]["Name"] = "terminated"
             if not self.stuck_volume:
-                self.volume["State"] = "available"
-                self.volume["Attachments"] = []
+                self.deleted_volume = True
             self.deleted_sg = True
             self.deleted_lt = True
         elif "stack-delete-complete" in cmd:
@@ -170,7 +169,7 @@ class ScopedDestroyTests(unittest.TestCase):
         self.assertLess(actions.index("ec2 stop-instances"), actions.index("eip-detach"))
         self.assertLess(actions.index("eip-return"), actions.index("iam-revoke"))
         self.assertLess(actions.index("iam-revoke"), actions.index("cloudformation delete-stack"))
-        self.assertLess(actions.index("ec2 delete-volume"), actions.index("scheduler delete-schedule"))
+        self.assertNotIn("ec2 delete-volume", actions)
 
     def test_previously_stopped_gpu_and_cpu_owned_eip_still_clean(self):
         self.fake.gpu["State"]["Name"] = "stopped"
@@ -223,7 +222,7 @@ class ScopedDestroyTests(unittest.TestCase):
 
     def test_retained_volume_still_in_use_prevents_schedule_deletion(self):
         self.fake.stuck_volume = True
-        with self.assertRaisesRegex(RuntimeError, "Retained EBS not detached"):
+        with self.assertRaisesRegex(RuntimeError, "CloudFormation did not remove GPU root EBS"):
             self.destroy()
         self.assertEqual(len(self.fake.schedules), 2)
         self.assertFalse(self.fake.deleted_volume)

@@ -114,7 +114,7 @@ def _preflight(aws):
         raise ValueError("GPU instance state not safe for teardown")
     block = [x for x in vm.get("BlockDeviceMappings", [])
              if x.get("DeviceName") == ROOT]
-    if (len(block) != 1 or block[0].get("Ebs", {}).get("DeleteOnTermination") is not False):
+    if (len(block) != 1 or block[0].get("Ebs", {}).get("DeleteOnTermination") is not True):
         raise ValueError("Retained GPU root EBS identity not verified")
     vid = block[0]["Ebs"].get("VolumeId")
     if not re.fullmatch(r"vol-[0-9a-f]{8,17}", vid or ""):
@@ -236,20 +236,13 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
     _gone(aws, "sg", "ec2", "describe-security-groups", "--group-ids", ids["sg"])
     _gone(aws, "lt", "ec2", "describe-launch-templates",
           "--launch-template-ids", ids["lt"])
-    vol = _absent(lambda: _one(aws, "ec2", "describe-volumes",
-                               "--volume-ids", ids["vid"]), MISSING["volume"])
-    if vol is not None:
-        _owned(vol)
-        if vol["VolumeId"] != ids["vid"] or vol["State"] != "available" or vol.get("Attachments"):
-            raise RuntimeError("Retained EBS not detached; do not delete other volumes")
-        run(["aws", "ec2", "delete-volume", "--volume-id", ids["vid"],
-             "--region", region], capture=False)
+    # EC2 deletes its root EBS on termination; CloudFormation owns the lifecycle.
     for attempt in range(12):
         if _absent(lambda: _one(aws, "ec2", "describe-volumes",
                                 "--volume-ids", ids["vid"]), MISSING["volume"]) is None:
             break
         if attempt == 11:
-            raise RuntimeError("Retained GPU EBS deletion not independently verified")
+            raise RuntimeError("CloudFormation did not remove GPU root EBS")
         sleep(3)
     _verify_no_orphans(aws, ids)
     # Keep both independent PR65 schedules until the instance, EBS and stack are gone.
