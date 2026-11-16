@@ -73,6 +73,13 @@ The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`
 
 After provisioning, set a unique local `workstation` password interactively via SSM (`sudo passwd workstation`); DCV uses **Linux system credentials**, not AWS console credentials. Login through the DCV URL printed by `connect`.
 
+### Optional software through Rez
+
+The [VS Code package guide](software/vscode/README.md) covers the pinned
+`vscode-1.146.0` recipe, publisher build, dev/test/prod acceptance and desktop launch.
+After it has been published and accepted in production, run
+`studio-rez-env vscode-1.146.0 -- code --new-window .` from a DCV terminal.
+
 ## Trusted DCV HTTPS — Issue #43 (PR #67 merged)
 
 The approved CPU workstation `studio-workstation-cpu-v013` has a dedicated

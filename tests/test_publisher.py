@@ -1,4 +1,5 @@
 from argparse import Namespace
+import json
 import pytest
 from runtime import publisher
 
@@ -76,3 +77,36 @@ def test_cli_parses_publisher_commands(monkeypatch):
     ):
         module.main(argv)
         assert seen[-1].action == argv[0]
+
+
+@pytest.mark.parametrize("operation,stages", [
+    ("promote-test", "dev test"), ("promote-prod", "test prod")])
+@pytest.mark.parametrize("version", [
+    "26.05", "1.146.0", "", "1", "1..146", "1.146.", "../1.146.0",
+    "1.146.0/other", "1.146.0;id", "$(id)", "1.146.0\n"])
+def test_promotion_version_validation(monkeypatch, operation, stages, version):
+    calls = []
+    def aws(region, *args):
+        calls.append(args)
+        if args[:2] == ("ec2", "describe-instances"):
+            return {"Reservations": [{"Instances": [{"State": {"Name": "running"},
+                "Tags": [{"Key": "StudioRole", "Value": "Publisher"}],
+                "IamInstanceProfile": {"Arn": "arn:aws:iam::123:instance-profile/StudioEfsCiPublisher"}}]}]}
+        if args[:2] == ("ssm", "send-command"):
+            return {"Command": {"CommandId": "test-command"}}
+        if args[:2] == ("ssm", "get-command-invocation"):
+            return {"Status": "Success"}
+        raise AssertionError(args)
+
+    monkeypatch.setattr(publisher.time, "sleep", lambda _: None)
+    args = Namespace(region="us-east-1", action="publisher-run",
+        instance_id="i-" + "a"*17, operation=operation, name="vscode", version=version)
+    if version in ("26.05", "1.146.0"):
+        assert publisher.command(args, aws)["status"] == "Success"
+        sent = calls[1]
+        commands = json.loads(sent[sent.index("--parameters") + 1])["commands"]
+        assert commands[-1].endswith(f"studio-rez-promote-package vscode {version} {stages}")
+    else:
+        with pytest.raises(ValueError, match="Invalid package name/version"):
+            publisher.command(args, aws)
+        assert len(calls) == 1  # Read-only ownership check; no SSM command sent.

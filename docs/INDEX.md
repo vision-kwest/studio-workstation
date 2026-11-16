@@ -8,6 +8,7 @@
 |---|---|
 | [Main README / Quick Start](../README.md) | Project state, first commands, key costs and access risks |
 | [Studio CLI](studio-cli.md) | **Canonical create, preview, check-ready, connect, stop, start, destroy commands** |
+| [VS Code Rez package](../software/vscode/README.md) | Pinned desktop editor, publisher build, stage promotion, launch and acceptance |
 | [GPU workstation profile](gpu-workstation-profile.md) | Validated Tesla T4 / RES 2026.06 GPU runtime and pinned limits |
 | [GPU runtime provenance](../runtime/README.md) | Exact derived archive keys, versions, SHA-256 and acceptance evidence |
 | [Workstation lifecycle](workstation-lifecycle-visual.md) | EBS, stop/start, changed public IP, cleanup |
