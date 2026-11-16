@@ -16,8 +16,8 @@ jobs:
           echo '59d1d9520a7dce78f7bc38ef6445848d2feff8c93e2f3eeaa378daf5cace4eea  .issue98.patch.gz' | sha256sum --check
           gzip --decompress --stdout .issue98.patch.gz > /tmp/issue98.patch
           echo '0b9545e93816362a0984200ab8077041148feb5f7d0eb5a09e1da25d7342cde3  /tmp/issue98.patch' | sha256sum --check
-          git apply --index /tmp/issue98.patch
-          git rm .issue98.patch.gz .github/workflows/issue98-apply.yml
+          git apply --index --exclude='.github/workflows/*' /tmp/issue98.patch
+          git rm .issue98.patch.gz
           git diff --cached --check
       - run: python3 -m pip install 'jinja2>=3,<4'
       - name: Run lifecycle regression suites
