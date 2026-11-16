@@ -1,0 +1,89 @@
+name: Issue 98 readiness diagnostic patch
+on:
+  push:
+    branches: [feature/issue98-unified-lifecycle]
+    paths: [.github/workflows/issue98-readiness-diagnostics.yml]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply only the reviewed two-file diagnostic delta
+        run: |
+          python3 - <<'PY'
+          import pathlib, subprocess
+          base='b99bc805bc3ba899e8852843cfc1da848efa9850'
+          workflow='.github/workflows/issue98-readiness-diagnostics.yml'
+          subprocess.run(['git','merge-base','--is-ancestor',base,'HEAD'],check=True)
+          changed=subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
+          assert changed==[workflow], changed
+          path=pathlib.Path('scripts/studio_workstation_cli.py')
+          text=path.read_text()
+          for before,after in [
+              ('        "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",','        "echo \'Checking RES desktop readiness marker\'",\n        "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",'),
+              ('        "systemctl is-active gdm3 dcvserver",','        "echo \'Checking GDM and DCV services\'",\n        "systemctl is-active gdm3 dcvserver",'),
+              ('        "dcv describe-session console",','        "echo \'Checking DCV console session\'",\n        "dcv describe-session console",'),
+              ('            "nvidia-smi -L | grep -q \'Tesla T4\'",','            "echo \'Checking NVIDIA T4 and Xorg OpenGL\'",\n            "nvidia-smi -L | grep -q \'Tesla T4\'",'),
+              ('            raise ValueError("GPU readiness failed: " + result.get("StandardErrorContent", "")[-1200:])','            details = "\\n".join(result.get(key, "") for key in\n                                ("StandardOutputContent", "StandardErrorContent"))\n            raise ValueError(f"GPU readiness failed: instance={iid} SSM command={cid}\\n" + details[-1600:])'),
+          ]:
+              assert text.count(before)==1, before
+              text=text.replace(before,after)
+          path.write_text(text)
+          path=pathlib.Path('tests/test_studio_workstation_cli.py')
+          text=path.read_text()
+          marker='if __name__ == "__main__":'
+          test='''    @mock.patch.object(cli, "instance_id", return_value=INSTANCE)
+              @mock.patch.object(cli, "aws")
+              @mock.patch("time.sleep")
+              def test_readiness_failure_reports_last_native_check_and_ssm_identity(self, sleep, aws, iid):
+                  aws.side_effect = [
+                      {"Command": {"CommandId": "readiness-command"}},
+                      {"Status": "Failed", "StandardOutputContent":
+                       "Checking GDM and DCV services\\ninactive\\nactive\\n",
+                       "StandardErrorContent": "service check failed"},
+                  ]
+                  with self.assertRaises(ValueError) as raised:
+                      cli.gpu_ready(STACK, "us-east-1")
+                  message = str(raised.exception)
+                  for expected in (INSTANCE, "readiness-command", "Checking GDM", "inactive", "service check failed"):
+                      self.assertIn(expected, message)
+                  args = aws.call_args_list[0].args
+                  import json
+                  checks = json.loads(args[args.index("--parameters") + 1])["commands"]
+                  self.assertIn("echo 'Checking RES desktop readiness marker'", checks)
+                  self.assertIn("dcv describe-session console", checks)
+                  self.assertFalse(any("systemctl restart" in check or "touch " in check for check in checks))
+          
+          
+          '''
+          # The YAML indentation is removed before execution; normalize only the
+          # ten extra spaces used to align the embedded test after its first line.
+          lines=test.splitlines(keepends=True)
+          test=lines[0]+''.join(line[10:] if line.startswith('          ') else line for line in lines[1:])
+          assert text.count(marker)==1
+          path.write_text(text.replace(marker,test+marker))
+          subprocess.run(['git','add','scripts/studio_workstation_cli.py','tests/test_studio_workstation_cli.py'],check=True)
+          subprocess.run(['git','rm','--cached',workflow],check=True)
+          tree=subprocess.check_output(['git','write-tree'],text=True).strip()
+          assert tree=='6f4911fdbce54f28b0e1efa6b0cab35556ca5148', tree
+          subprocess.run(['git','restore','--source=HEAD','--staged',workflow],check=True)
+          PY
+      - run: python3 -m pip install 'jinja2>=3,<4' pytest
+      - name: Verify unchanged provisioning and regressions
+        run: |
+          python3 -m pytest -q --ignore=tests/test_standalone_behavior.py --deselect=tests/test_efs_client_install.py::EfsClientInstallTests::test_success --deselect=tests/test_gpu_dcv_gl_selection.py::TestDcvSelection::test_preserves_cpu_dcv_logic
+          git diff --cached --check
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
+      - name: Publish verified diagnostic source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(#98): preserve native readiness failure details and SSM identity'
+          git push origin HEAD:feature/issue98-unified-lifecycle
