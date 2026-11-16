@@ -30,6 +30,7 @@ jobs:
           assert hashlib.sha256(packed).hexdigest()=='27e64db469b38aefa8c2e72e179c6a0c75b9cc380a1476f3ecb64842c3c657e8'
           bundle=json.loads(lzma.decompress(packed))
           assert bundle['base']==base and len(bundle['files'])==46
+          pathlib.Path('/tmp/issue98-paths.json').write_text(json.dumps([e['path'] for e in bundle['files']]))
           for entry in bundle['files']:
               path=pathlib.Path(entry['path'])
               assert not path.is_absolute() and '..' not in path.parts and '.git' not in path.parts
@@ -58,17 +59,40 @@ jobs:
           python3 -m pytest -q --ignore=tests/test_standalone_behavior.py --deselect=tests/test_efs_client_install.py::EfsClientInstallTests::test_success --deselect=tests/test_gpu_dcv_gl_selection.py::TestDcvSelection::test_preserves_cpu_dcv_logic
           git diff --check
           python3 -m compileall -q scripts runtime
-      - name: Publish only verified source without workflow-permission expansion
+      - name: Stage only reviewed source and verify exact tree
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          import json,pathlib,subprocess
+          paths=json.loads(pathlib.Path('/tmp/issue98-paths.json').read_text())
+          subprocess.run(['git','add','-A','--',*paths],check=True)
+          PY
           git rm .github/issue98-transfer.part{0,1,2,3}.b64
-          git add -A
           git rm --cached .github/workflows/issue98-transfer.yml
+          git write-tree | tee /tmp/issue98-tree.txt
+          git archive --format=tar.gz -o /tmp/issue98-candidate.tar.gz "$(git write-tree)"
+          git archive --format=tar.gz -o /tmp/issue98-base.tar.gz 1e3efa077f141aabd7adfc936a947f51621873e4
+          git diff --cached --numstat 1e3efa077f141aabd7adfc936a947f51621873e4 | tee /tmp/issue98-numstat.txt
+          git ls-files --others --exclude-standard > /tmp/issue98-untracked.txt
           test "$(git write-tree)" = '1c75db4c7c813a7e9b0cea08174feaad002bb352'
           git restore --source=HEAD --staged .github/workflows/issue98-transfer.yml
           test -z "$(git diff --cached --name-only -- .github/workflows)"
           git diff --cached --check
-          git diff --cached --numstat 1e3efa077f141aabd7adfc936a947f51621873e4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue98-recovered-source
+          path: |
+            /tmp/issue98-candidate.tar.gz
+            /tmp/issue98-base.tar.gz
+            /tmp/issue98-tree.txt
+            /tmp/issue98-numstat.txt
+            /tmp/issue98-untracked.txt
+          retention-days: 3
+      - name: Publish only verified source without workflow-permission expansion
+        run: |
+          set -euo pipefail
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'feat(#98): unified disposable workstation lifecycle and explicit DCV ownership'
