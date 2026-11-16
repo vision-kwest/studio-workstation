@@ -1,130 +1,94 @@
-"""Focused offline tests only; no AWS calls."""
+"""The two schedules protect one workstation, never an independent disk lifecycle."""
+import copy
 import datetime as dt
+import json
 import unittest
-from copy import deepcopy
 from unittest.mock import Mock
-from runtime.pr65_one_shot_guard import plan, arm, TERMINATE, DELETE_VOLUME, GROUP, ROLE
 
-STACK = "studio-gpu-cli-review1"
-TOKEN = "unique-review-token-123"
-IID = "i-0123456789abcdef0"
-VID = "vol-0123456789abcdef0"
-TAGS = [{"Key": "StudioStack", "Value": STACK}, {"Key": "StudioCleanupToken", "Value": TOKEN}]
-NOW = dt.datetime(2026, 11, 1, 18, 0, tzinfo=dt.timezone.utc)
+from runtime import pr65_one_shot_guard as guard, pr65_gpu_create as creator
+from workstation_fake import AWS, NOW, h, inventory
 
 
-def resources():
-    instance = {"InstanceId": IID, "Tags": deepcopy(TAGS), "State": {"Name": "running"},
-                "BlockDeviceMappings": [{"DeviceName": "/dev/sda1", "Ebs": {
-                    "VolumeId": VID, "DeleteOnTermination": True}}]}
-    volume = {"VolumeId": VID, "Tags": deepcopy(TAGS), "State": "in-use",
-              "Attachments": [{"InstanceId": IID, "VolumeId": VID, "Device": "/dev/sda1"}]}
-    return instance, volume
+class GuardTests(unittest.TestCase):
+    def setUp(self):
+        self.aws=AWS(); self.selected=self.aws.desktop()
+        self.proposal=guard.status(self.aws,self.selected,now=NOW)
 
+    def test_stack_and_instance_targets_have_no_volume_deadline(self):
+        p=self.proposal
+        self.assertEqual(json.loads(p['termination']['Target']['Input']),{'StackName':self.selected['stack_id']})
+        self.assertEqual(json.loads(p['fallback']['Target']['Input']),{'InstanceIds':[self.selected['instance']]})
+        self.assertNotIn('volume',json.dumps(p).lower())
+        self.assertEqual(dt.datetime.fromisoformat(p['terminate_at']),NOW+dt.timedelta(minutes=150))
+        self.assertEqual(p['fallback']['ScheduleExpression'],'at(2026-11-16T20:35:00)')
 
-class OneShotGuardTests(unittest.TestCase):
-    def proposal(self):
-        return plan(*resources(), STACK, TOKEN, NOW)
+    def test_all_local_disks_must_delete_on_termination(self):
+        for mutation in ('missing','retain-root','retain-second','wrong-stack','wrong-token','wrong-arn','duplicate-tag'):
+            vm=copy.deepcopy(self.selected['vm'])
+            if mutation=='missing':vm['BlockDeviceMappings']=[]
+            elif mutation=='retain-root':vm['BlockDeviceMappings'][0]['Ebs']['DeleteOnTermination']=False
+            elif mutation=='retain-second':vm['BlockDeviceMappings'].append({'Ebs':{'DeleteOnTermination':False}})
+            elif mutation=='duplicate-tag':vm['Tags'].append(vm['Tags'][0])
+            else:
+                key={'wrong-stack':'StudioStack','wrong-token':'StudioCleanupToken','wrong-arn':'aws:cloudformation:stack-id'}[mutation]
+                next(t for t in vm['Tags'] if t['Key']==key)['Value']='foreign'
+            with self.subTest(mutation=mutation),self.assertRaises(ValueError):
+                guard.verify_ownership(vm,self.selected['stack'],self.selected['token'],self.selected['stack_id'])
 
-    def test_two_one_time_targets_from_existing_pattern(self):
-        p = self.proposal()
-        self.assertEqual(p["termination"]["Target"]["Arn"], TERMINATE)
-        self.assertEqual(p["volume_cleanup"]["Target"]["Arn"], DELETE_VOLUME)
-        self.assertEqual(p["termination"]["GroupName"], GROUP)
-        self.assertEqual(p["termination"]["Target"]["RoleArn"], ROLE)
-        self.assertEqual(p["termination"]["ActionAfterCompletion"], "DELETE")
-        self.assertEqual(p["volume_cleanup"]["Target"]["Input"], '{"VolumeId":"' + VID + '"}')
-        self.assertEqual(p["termination"]["ScheduleExpression"], "at(2026-11-01T20:30:00)")
-        self.assertEqual(p["volume_cleanup"]["ScheduleExpression"], "at(2026-11-01T21:15:00)")
+    def test_rejects_invalid_expiration_before_mutations(self):
+        for minutes in (0,59,241,True,100.5,'150'):
+            with self.subTest(minutes=minutes),self.assertRaises(ValueError):guard.validate_durations(minutes)
+        for minutes in (60,150,240):guard.validate_durations(minutes)
 
-    def test_root_volume_deleted_on_termination(self):
-        instance, vol = resources()
-        instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"] = False
-        with self.assertRaisesRegex(ValueError, "CloudFormation-managed"):
-            plan(instance, vol, STACK, TOKEN, NOW)
+    def test_wrong_or_missing_schedule_cannot_authorize_restart(self):
+        original=copy.deepcopy(self.aws.schedules)
+        for kind in ('termination','fallback'):
+            name=self.proposal[kind]['Name']
+            for field,value in [('State','DISABLED'),('ActionAfterCompletion','NONE'),('GroupName','foreign'),
+                                ('FlexibleTimeWindow',{'Mode':'FLEXIBLE','MaximumWindowInMinutes':10}),
+                                ('ScheduleExpressionTimezone','US/Pacific')]:
+                self.aws.schedules=copy.deepcopy(original);self.aws.schedules[name][field]=value
+                with self.subTest(kind=kind,field=field),self.assertRaises((RuntimeError,ValueError)):
+                    guard.status(self.aws,self.selected,now=NOW,headroom=80)
+            for field,value in [('RoleArn','foreign'),('Arn','foreign'),('Input','{}'),('RetryPolicy',{})]:
+                self.aws.schedules=copy.deepcopy(original);self.aws.schedules[name]['Target'][field]=value
+                with self.subTest(kind=kind,field=field),self.assertRaises((RuntimeError,ValueError)):
+                    guard.status(self.aws,self.selected,now=NOW,headroom=80)
+            self.aws.schedules=copy.deepcopy(original);del self.aws.schedules[name]
+            with self.assertRaises(Exception):guard.status(self.aws,self.selected,now=NOW,headroom=80)
 
-    def test_root_volume_id_must_match_attachment(self):
-        instance, vol = resources()
-        vol["Attachments"][0]["InstanceId"] = "i-00000000000000000"
-        with self.assertRaisesRegex(ValueError, "attachment"):
-            plan(instance, vol, STACK, TOKEN, NOW)
+    def test_expired_near_deadline_and_exact_restart_boundary(self):
+        for elapsed,allowed in ((70,True),(71,False),(151,False)):
+            with self.subTest(elapsed=elapsed):
+                if allowed:guard.status(self.aws,self.selected,now=NOW+dt.timedelta(minutes=elapsed),headroom=80)
+                else:
+                    with self.assertRaisesRegex(ValueError,'remaining-time'):
+                        guard.status(self.aws,self.selected,now=NOW+dt.timedelta(minutes=elapsed),headroom=80)
+        self.assertEqual(guard.status(self.aws,self.selected,now=NOW+dt.timedelta(minutes=151))['status'],'expired')
 
-    def test_bad_instance_tags_rejected(self):
-        instance, vol = resources()
-        instance["Tags"][1]["Value"] = "wrong-token"
-        with self.assertRaisesRegex(ValueError, "ownership"):
-            plan(instance, vol, STACK, TOKEN, NOW)
+    def test_plan_tampering_rejected_before_schedule_write(self):
+        for key in ('termination','fallback'):
+            p=copy.deepcopy(self.proposal);p[key]['Target']['Input']='{}'
+            scheduler=Mock();ec2=Mock()
+            with self.assertRaises(ValueError):guard.arm(scheduler,ec2,p)
+            scheduler.create_schedule.assert_not_called();ec2.terminate_instances.assert_not_called()
 
-    def test_bad_ebs_tags_rejected(self):
-        instance, vol = resources()
-        vol["Tags"][1]["Value"] = "wrong-token"
-        with self.assertRaisesRegex(ValueError, "ownership"):
-            plan(instance, vol, STACK, TOKEN, NOW)
+    def test_arming_failure_terminates_only_owned_instance_and_reports_double_failure(self):
+        for double in (False,True):
+            scheduler=Mock();scheduler.create_schedule.side_effect=RuntimeError('injected')
+            ec2=Mock()
+            if double:ec2.terminate_instances.side_effect=RuntimeError('denied')
+            with self.subTest(double=double),self.assertRaisesRegex(RuntimeError,'Guard'):
+                guard.arm(scheduler,ec2,self.proposal)
+            ec2.terminate_instances.assert_called_once_with(InstanceIds=[self.selected['instance']])
 
-    def test_duplicate_scope_tags_rejected(self):
-        instance, vol = resources()
-        vol["Tags"].append(vol["Tags"][0])
-        with self.assertRaisesRegex(ValueError, "Duplicate"):
-            plan(instance, vol, STACK, TOKEN, NOW)
+    def test_wrong_safety_association_does_not_pass_for_other_gpu(self):
+        other=self.aws.desktop('gpu-b')
+        for field in ('token','safety_stack','stack_id'):
+            forged=dict(self.selected);forged[field]=other[field]
+            with self.subTest(field=field),self.assertRaises(ValueError):guard.status(self.aws,forged,now=NOW)
 
-    def test_deadline_bounded_and_utc(self):
-        with self.assertRaisesRegex(ValueError, "bounds"):
-            plan(*resources(), STACK, TOKEN, NOW, minutes=500)
-        with self.assertRaisesRegex(ValueError, "UTC"):
-            plan(*resources(), STACK, TOKEN, NOW.replace(tzinfo=None))
-
-    def test_both_schedules_verified(self):
-        proposal = self.proposal()
-        scheduler = Mock()
-        expected = {proposal[k]["Name"]: proposal[k] for k in ("termination", "volume_cleanup")}
-        scheduler.get_schedule.side_effect = lambda Name, GroupName: expected[Name]
-        ec2 = Mock()
-        result = arm(scheduler, ec2, proposal)
-        self.assertTrue(result["guard_armed"])
-        self.assertEqual(scheduler.create_schedule.call_count, 2)
-        self.assertEqual(scheduler.get_schedule.call_count, 2)
-        ec2.terminate_instances.assert_not_called()
-
-    def test_mutated_plan_cannot_target_another_instance_or_volume(self):
-        p = self.proposal()
-        p["volume_cleanup"]["Target"]["Input"] = '{"VolumeId":"vol-00000000000000000"}'
-        scheduler, ec2 = Mock(), Mock()
-        with self.assertRaisesRegex(ValueError, "target or input"):
-            arm(scheduler, ec2, p)
-        scheduler.create_schedule.assert_not_called()
-        ec2.terminate_instances.assert_not_called()
-
-    def test_readback_wrong_target_requests_emergency_termination(self):
-        p = self.proposal()
-        scheduler = Mock()
-        wrong = deepcopy(p["termination"])
-        wrong["Target"]["Arn"] = "arn:aws:scheduler:::aws-sdk:ec2:startInstances"
-        scheduler.get_schedule.return_value = wrong
-        ec2 = Mock()
-        with self.assertRaisesRegex(RuntimeError, "retained EBS"):
-            arm(scheduler, ec2, p)
-        ec2.terminate_instances.assert_called_once_with(InstanceIds=[IID])
-        self.assertEqual(scheduler.create_schedule.call_count, 1)
-
-    def test_ebs_schedule_creation_failure_requests_emergency_termination(self):
-        p = self.proposal()
-        scheduler = Mock()
-        scheduler.create_schedule.side_effect = [None, PermissionError("permission denied")]
-        scheduler.get_schedule.return_value = p["termination"]
-        ec2 = Mock()
-        with self.assertRaisesRegex(RuntimeError, "retained EBS"):
-            arm(scheduler, ec2, p)
-        ec2.terminate_instances.assert_called_once_with(InstanceIds=[IID])
-
-    def test_emergency_termination_failure_is_not_hidden(self):
-        p = self.proposal()
-        scheduler = Mock()
-        scheduler.create_schedule.side_effect = RuntimeError("scheduler down")
-        ec2 = Mock()
-        ec2.terminate_instances.side_effect = RuntimeError("ec2 down")
-        with self.assertRaisesRegex(RuntimeError, "termination failed"):
-            arm(scheduler, ec2, p)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_extra_target_or_schedule_settings_fail_closed(self):
+        for key,value in [('KmsKeyArn','foreign'),('StartDate','tomorrow'),('Target',dict(self.proposal['termination']['Target'],DeadLetterConfig={'Arn':'foreign'}))]:
+            self.aws.schedules[self.proposal['termination']['Name']]=dict(self.proposal['termination'],**{key:value})
+            with self.subTest(key=key),self.assertRaises(RuntimeError):guard.status(self.aws,self.selected,now=NOW)

@@ -1,15 +1,14 @@
-"""Bounded, supervised GPU CloudFormation creation with Task 7-style expiry.
-
-Task 2 implementation only. The public CLI retains a hard live-launch block
-until a separately approved Task 3 activation.
-"""
+"""Native GPU stack creation, with independently scoped expiration armed before billing."""
 import datetime as dt
+import hashlib
+import re
+from pathlib import Path
 import json
 import time
 
 from runtime import pr65_one_shot_guard as guard
 
-POLICY = "StudioPr65ExactTaggedExpiry"
+POLICY = "StudioWorkstationExpiry"
 POLL_SECONDS = 3
 MAX_DISCOVERY_SECONDS = 120
 
@@ -20,6 +19,10 @@ class Scheduler:
 
     def create_schedule(self, **spec):
         return self.aws_call(self.region, "scheduler", "create-schedule",
+                             "--cli-input-json", json.dumps(spec))
+
+    def update_schedule(self, **spec):
+        return self.aws_call(self.region, "scheduler", "update-schedule",
                              "--cli-input-json", json.dumps(spec))
 
     def get_schedule(self, **keys):
@@ -36,55 +39,87 @@ class EC2:
                              "--instance-ids", *keys["InstanceIds"])
 
 
-def preflight(aws_call, region, stack, token, *, role_arn=guard.ROLE):
-    """Verify independent schedule destination and exact scoped role BEFORE create."""
+def preflight(aws_call, region, stack, token, *, role_arn):
+    """Verify exact native expiration permissions before billing or restart."""
+    if region != "us-east-1" or not role_arn.startswith("arn:aws:iam::401233741942:role/"):
+        raise ValueError("Unexpected expiration region/account")
     group = aws_call(region, "scheduler", "get-schedule-group", "--name", guard.GROUP)
     if group.get("State") != "ACTIVE":
         raise ValueError("Expiration Scheduler group is not ACTIVE")
-    role = aws_call(region, "iam", "get-role", "--role-name", role_arn.rsplit("/", 1)[-1])["Role"]
-    if role.get("Arn") != role_arn:
-        raise ValueError("Unexpected expiration role")
-    trust = role.get("AssumeRolePolicyDocument", {})
-    statements = trust.get("Statement", [])
-    group_arn = ("arn:aws:scheduler:us-east-1:401233741942:"
-                 "schedule-group/" + guard.GROUP)
-    if not any(s.get("Effect") == "Allow" and s.get("Action") == "sts:AssumeRole" and
-               s.get("Principal", {}).get("Service") == "scheduler.amazonaws.com" and
-               s.get("Condition", {}).get("ArnEquals", {}).get("aws:SourceArn") == group_arn and
-               s.get("Condition", {}).get("StringEquals", {}).get("aws:SourceAccount") == "401233741942"
-               for s in statements):
-        raise ValueError("Expiration role scheduler trust mismatch")
-    doc = aws_call(region, "iam", "get-role-policy",
-                   "--role-name", role_arn.rsplit("/", 1)[-1],
+    name = role_arn.rsplit("/", 1)[-1]
+    role = aws_call(region, "iam", "get-role", "--role-name", name)["Role"]
+    trust = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow",
+             "Principal": {"Service": "scheduler.amazonaws.com"}, "Action": "sts:AssumeRole",
+             "Condition": {"StringEquals": {"aws:SourceAccount": "401233741942"},
+                           "ArnEquals": {"aws:SourceArn": "arn:aws:scheduler:us-east-1:401233741942:schedule-group/" + guard.GROUP}}}]}
+    if role.get("Arn") != role_arn or role.get("AssumeRolePolicyDocument") != trust:
+        raise ValueError("Expiration role identity/trust mismatch")
+    doc = aws_call(region, "iam", "get-role-policy", "--role-name", name,
                    "--policy-name", POLICY)["PolicyDocument"]
-    if isinstance(doc, str):
-        doc = json.loads(doc)
-    allows = [s for s in doc.get("Statement", []) if s.get("Effect") == "Allow"]
-    expected = {
-        "ec2:TerminateInstances": "instance",
-        "ec2:DeleteVolume": "volume",
-    }
-    if len(allows) != 2:
-        raise ValueError("Expiration role must have exactly two scoped grants")
-    for action, kind in expected.items():
-        scoped = [s for s in allows if s.get("Action") == action]
-        resource = "arn:aws:ec2:us-east-1:401233741942:" + kind + "/*"
-        if len(scoped) != 1 or scoped[0].get("Resource") != resource or (
-            scoped[0].get("Condition", {}).get("StringEquals") != {
-                "ec2:ResourceTag/StudioStack": stack,
-                "ec2:ResourceTag/StudioCleanupToken": token,
-            }
-        ):
-            raise ValueError("Expiration role permissions do not match exact test scope")
-    policies = aws_call(region, "iam", "list-role-policies",
-                        "--role-name", role_arn.rsplit("/", 1)[-1])
-    if policies.get("PolicyNames") != [POLICY] or policies.get("IsTruncated", False):
-        raise ValueError("Unexpected inline policies on expiration role")
-    attached = aws_call(region, "iam", "list-attached-role-policies",
-                        "--role-name", role_arn.rsplit("/", 1)[-1])
-    if attached.get("AttachedPolicies") or attached.get("IsTruncated", False):
-        raise ValueError("Unexpected managed policies on expiration role")
+    doc = json.loads(doc) if isinstance(doc, str) else doc
+    scope = {"StringEquals": {"ec2:ResourceTag/StudioStack": stack,
+                              "ec2:ResourceTag/StudioCleanupToken": token}}
+    expected = [{"Effect": "Allow", "Action": action,
+                 "Resource": "arn:aws:ec2:us-east-1:401233741942:" + kind + "/*", "Condition": scope}
+                for action, kind in (("ec2:TerminateInstances", "instance"), ("ec2:DeleteSecurityGroup", "security-group"))]
+    expected += [{"Effect": "Allow", "Action": "cloudformation:DeleteStack",
+                  "Resource": "arn:aws:cloudformation:us-east-1:401233741942:stack/" + stack + "/*",
+                  "Condition": {"StringEquals": {"aws:ResourceTag/StudioCleanupToken": token}}},
+                 {"Effect": "Allow", "Action": ["ec2:DescribeInstances", "ec2:DescribeInstanceAttribute",
+                  "ec2:DescribeSecurityGroups", "ec2:DescribeNetworkInterfaces", "ec2:DescribeVolumes", "ec2:DescribeTags",
+                  "ec2:DescribeInstanceCreditSpecifications", "ec2:DescribeLaunchTemplates",
+                  "ssm:DescribeAssociation", "ssm:ListAssociations"],
+                  "Resource": "*"}]
+    if doc != {"Version": "2012-10-17", "Statement": expected}:
+        raise ValueError("Expiration role permissions differ from exact workstation scope")
+    inline = aws_call(region, "iam", "list-role-policies", "--role-name", name)
+    attached = aws_call(region, "iam", "list-attached-role-policies", "--role-name", name)
+    if (inline.get("PolicyNames") != [POLICY] or attached.get("AttachedPolicies") or
+            inline.get("IsTruncated") or attached.get("IsTruncated")):
+        raise ValueError("Unexpected additional expiration policies")
 
+
+
+def safety_name(stack):
+    return "studio-expiry-" + hashlib.sha256(stack.encode()).hexdigest()[:20]
+
+
+def safety(aws, region, stack, *, create=False, arn=None, cleanup=False):
+    from runtime.workstation_inventory import stack_record
+    if region != "us-east-1" or not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack):
+        raise ValueError("Invalid safety-stack scope")
+    name = safety_name(stack)
+    if create:
+        template = Path(__file__).resolve().parents[1] / "infra/workstation-expiration-role.json"
+        aws(region, "cloudformation", "create-stack", "--stack-name", name,
+            "--template-body", "file://" + str(template), "--capabilities", "CAPABILITY_IAM",
+            "--parameters", "ParameterKey=WorkstationStack,ParameterValue=" + stack,
+            "--tags", "Key=StudioManaged,Value=expiry", "Key=StudioWorkstation,Value=" + stack,
+            "--on-failure", "DELETE", "--timeout-in-minutes", "5")
+        aws(region, "cloudformation", "wait", "stack-create-complete", "--stack-name", name)
+    record = stack_record(aws, region, arn or name)
+    if record is None:
+        raise ValueError("Expiration safety stack is absent")
+    outputs = {v["OutputKey"]: v["OutputValue"] for v in record.get("Outputs", [])}
+    tags = guard._tags(record)
+    token = record["StackId"].rsplit("/", 1)[-1]
+    params = {p["ParameterKey"]: p["ParameterValue"] for p in record.get("Parameters", [])}
+    if (not record["StackId"].startswith("arn:aws:cloudformation:us-east-1:401233741942:stack/" + name + "/") or
+            record["StackName"] != name or (not cleanup and record["StackStatus"] != "CREATE_COMPLETE") or
+            tags.get("StudioManaged") != "expiry" or tags.get("StudioWorkstation") != stack or
+            params.get("WorkstationStack") != stack or
+            (outputs and (outputs.get("WorkstationStack") != stack or outputs.get("CleanupToken") != token))):
+        raise ValueError("Native safety-stack identity mismatch")
+    resources = aws(region, "cloudformation", "list-stack-resources", "--stack-name", record["StackId"])["StackResourceSummaries"]
+    if len(resources) > 1 or any((r.get("LogicalResourceId"), r.get("ResourceType")) != ("ExpirationRole", "AWS::IAM::Role") for r in resources):
+        raise ValueError("Unexpected resource in safety stack")
+    physical = resources[0].get("PhysicalResourceId") if resources else None
+    role = "arn:aws:iam::401233741942:role/" + physical if physical else None
+    if (outputs and role != outputs.get("ExpirationRoleArn")) or (not cleanup and not role):
+        raise ValueError("Safety role is not owned by this CloudFormation stack")
+    if not cleanup:
+        preflight(aws, region, stack, token, role_arn=role)
+    return {"arn": record["StackId"], "token": token, "role": role, "state": record["StackStatus"]}
 
 def _one_instance(aws_call, region, iid):
     data = aws_call(region, "ec2", "describe-instances", "--instance-ids", iid)
@@ -104,109 +139,89 @@ def _tags_match(item, stack, token):
 
 
 def _emergency(aws_call, region, stack_id, stack, token, iid, stack_owned):
-    """Best effort; never claim success or conceal orphaned retained EBS."""
+    """Prefer native teardown. Fall back only to the exact owned EC2 instance."""
     problems = []
+    if stack_owned:
+        try:
+            aws_call(region, "cloudformation", "delete-stack", "--stack-name", stack_id)
+            return problems
+        except Exception as exc:
+            problems.append("stack deletion: " + str(exc))
     if iid:
         try:
             instance = _one_instance(aws_call, region, iid)
-            if not _tags_match(instance, stack, token):
+            if not _tags_match(instance, stack, token) or guard._tags(instance).get("aws:cloudformation:stack-id") != stack_id:
                 raise RuntimeError("Emergency instance ownership mismatch")
             aws_call(region, "ec2", "terminate-instances", "--instance-ids", iid)
         except Exception as exc:
             problems.append("instance termination: " + str(exc))
-    if stack_owned:
-        try:
-            aws_call(region, "cloudformation", "delete-stack", "--stack-name", stack_id)
-        except Exception as exc:
-            problems.append("stack deletion: " + str(exc))
-    else:
-        problems.append("stack ownership not verified; no automatic stack delete")
     return problems
 
 
-def create_guarded(aws_call, region, stack, token, template, parameters,
-                   *, minutes=150, volume_delay_minutes=45,
+def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150,
                    clock=time.monotonic, sleep=time.sleep, utc_now=None):
-    """Create asynchronously; arm both schedules as soon as the retained root EBS is seen.
-
-    On discovery/arming failure request termination and stack deletion, but
-    ALWAYS require human verification of retained EBS and the final stack state.
-    """
-    if region != "us-east-1":
-        raise ValueError("Only validated us-east-1 is supported")
-    guard.validate_durations(minutes, volume_delay_minutes)
-    # Do not create ANY CloudFormation resources if the independent IAM/scheduler
-    # configuration is missing, untrusted or scoped to a different test.
-    preflight(aws_call, region, stack, token)
+    """Arm native stack expiration BEFORE CreateStack, then add exact-instance fallback."""
+    guard.validate_durations(minutes)
+    body = json.loads(Path(template).read_text())
+    instance = body["Resources"]["Workstation"]
+    disks = [m["Ebs"] for m in instance["Properties"].get("BlockDeviceMappings", []) if "Ebs" in m]
+    if (instance["Type"] != "AWS::EC2::Instance" or not disks or
+            any(d.get("DeleteOnTermination") is not True for d in disks) or
+            any(r["Type"] not in ("AWS::EC2::Instance", "AWS::EC2::SecurityGroup")
+                for r in body["Resources"].values())):
+        raise ValueError("Expected one disposable workstation without separate disk resources")
+    now = utc_now or (lambda: dt.datetime.now(dt.timezone.utc))
+    expiry = now().replace(microsecond=0) + dt.timedelta(minutes=minutes)
+    identity = safety(aws_call, region, stack, create=True)
+    token, role = identity["token"], identity["role"]
+    scheduler = Scheduler(aws_call, region)
+    initial = guard._schedule("studio-expiry-" + token, guard.DELETE_STACK,
+                              {"StackName": stack}, expiry, role)
+    scheduler.create_schedule(**initial)
+    guard._verify_schedule(scheduler, initial)
+    tags = [{"Key": "StudioStack", "Value": stack}, {"Key": "StudioCleanupToken", "Value": token}]
+    for resource in body["Resources"].values():
+        resource["Properties"].setdefault("Tags", []).extend(tags)
+    Path(template).write_text(json.dumps(body))
     cf_params = ["ParameterKey=" + k + ",ParameterValue=" + v for k, v in
                  (p.split("=", 1) for p in parameters)]
-    response = aws_call(region, "cloudformation", "create-stack",
-                        "--stack-name", stack, "--template-body", "file://" + str(template),
-                        "--parameters", *cf_params,
-                        "--tags", "Key=StudioStack,Value=" + stack,
-                        "Key=StudioCleanupToken,Value=" + token,
-                        "--disable-rollback")
-    stack_id = response.get("StackId")
-    if not stack_id or not stack_id.startswith(
-            "arn:aws:cloudformation:us-east-1:401233741942:stack/" + stack + "/"):
-        raise RuntimeError("Unrecognized StackId from CreateStack; investigate manually")
-    iid = None
-    stack_owned = False
+    response = aws_call(region, "cloudformation", "create-stack", "--stack-name", stack,
+                        "--template-body", "file://" + str(template), "--parameters", *cf_params,
+                        "--tags", "Key=StudioStack,Value=" + stack, "Key=StudioCleanupToken,Value=" + token,
+                        "Key=StudioManaged,Value=true", "Key=StudioProfile,Value=gpu",
+                        "Key=StudioSafetyStack,Value=" + identity["arn"], "--on-failure", "DELETE")
+    stack_id = response.get("StackId", "")
+    if not stack_id.startswith("arn:aws:cloudformation:us-east-1:401233741942:stack/" + stack + "/"):
+        raise RuntimeError("Unrecognized stack identity; native expiry remains armed")
+    iid, stack_owned = None, False
     started = clock()
-    now = utc_now or (lambda: dt.datetime.now(dt.timezone.utc))
     try:
         while clock() - started <= MAX_DISCOVERY_SECONDS:
-            stacks = aws_call(region, "cloudformation", "describe-stacks",
-                              "--stack-name", stack_id)["Stacks"]
-            if (len(stacks) != 1 or stacks[0].get("StackId") != stack_id or
-                    stacks[0].get("StackName") != stack or
-                    not _tags_match(stacks[0], stack, token)):
-                raise RuntimeError("CloudFormation stack identity or ownership changed")
+            records = aws_call(region, "cloudformation", "describe-stacks", "--stack-name", stack_id)["Stacks"]
+            if len(records) != 1 or records[0].get("StackId") != stack_id or not _tags_match(records[0], stack, token):
+                raise RuntimeError("CloudFormation ownership changed")
             stack_owned = True
-            state = stacks[0]["StackStatus"]
+            state = records[0]["StackStatus"]
             if state not in ("CREATE_IN_PROGRESS", "CREATE_COMPLETE"):
-                raise RuntimeError("CloudFormation failed before guard was armed: " + state)
-            summaries = aws_call(region, "cloudformation", "list-stack-resources",
-                                 "--stack-name", stack_id)["StackResourceSummaries"]
-            if any(x.get("ResourceType") not in (
-                    "AWS::EC2::Instance", "AWS::EC2::SecurityGroup", "AWS::EC2::LaunchTemplate")
-                   for x in summaries):
-                raise RuntimeError("Unexpected CloudFormation resource type")
-            found = [x["PhysicalResourceId"] for x in summaries
-                     if x.get("LogicalResourceId") == "Workstation" and x.get("PhysicalResourceId")]
+                raise RuntimeError("CloudFormation creation failed: " + state)
+            resources = aws_call(region, "cloudformation", "list-stack-resources", "--stack-name", stack_id)["StackResourceSummaries"]
+            if any(r.get("ResourceType") not in ("AWS::EC2::Instance", "AWS::EC2::SecurityGroup") for r in resources):
+                raise RuntimeError("Unexpected workstation resource type")
+            found = [r["PhysicalResourceId"] for r in resources if r.get("LogicalResourceId") == "Workstation" and r.get("PhysicalResourceId")]
             if len(found) > 1 or (iid and found and found[0] != iid):
-                raise RuntimeError("Multiple or changing instance identities")
+                raise RuntimeError("Changing instance identity")
             if found:
                 iid = found[0]
                 vm = _one_instance(aws_call, region, iid)
-                if not _tags_match(vm, stack, token):
-                    raise RuntimeError("EC2 instance ownership mismatch")
-                mappings = [m for m in vm.get("BlockDeviceMappings", []) if m.get("DeviceName") == "/dev/sda1"]
-                if len(mappings) == 1 and mappings[0].get("Ebs", {}).get("VolumeId"):
-                    vid = mappings[0]["Ebs"]["VolumeId"]
-                    vols = aws_call(region, "ec2", "describe-volumes",
-                                    "--volume-ids", vid).get("Volumes", [])
-                    if len(vols) != 1 or vols[0].get("VolumeId") != vid:
-                        raise RuntimeError("Root EBS inventory mismatch")
-                    if not _tags_match(vols[0], stack, token):
-                        raise RuntimeError("Retained EBS ownership mismatch")
-                    if vols[0].get("State") == "in-use":
-                        proposal = guard.plan(vm, vols[0], stack, token, now(),
-                                              minutes=minutes,
-                                              volume_delay_minutes=volume_delay_minutes)
-                        activated = guard.arm(Scheduler(aws_call, region), EC2(aws_call, region), proposal)
-                        return {"stack_id": stack_id, "cloudformation_status": state,
-                                "guard": activated, "terminate_at": proposal["terminate_at"],
-                                "volume_cleanup_at": proposal["volume_cleanup_at"],
-                                "manual_ebs_audit_required": True}
+                if vm.get("BlockDeviceMappings"):
+                    proposal = guard.plan(vm, stack, token, now(), minutes=minutes, role=role,
+                                          stack_id=stack_id, terminate_at=expiry)
+                    activated = guard.arm(scheduler, EC2(aws_call, region), proposal)
+                    return {"stack_id": stack_id, "safety_stack": identity["arn"], "guard": activated,
+                            "terminate_at": expiry.isoformat(), "cloudformation_status": state}
             sleep(POLL_SECONDS)
-        raise RuntimeError("Timed out discovering instance and retained root EBS")
+        raise RuntimeError("Timed out discovering workstation")
     except BaseException as exc:
         problems = _emergency(aws_call, region, stack_id, stack, token, iid, stack_owned)
-        raise RuntimeError(
-            "GPU guard NOT verified; emergency termination/stack deletion requested. "
-            "Check CloudFormation, exact instance, SG, launch template, and retained EBS manually. "
-            "Instance=" + str(iid) + " StackId=" + stack_id +
-            "; failure: " + str(exc)[:240] +
-            ("; cleanup warnings: " + "; ".join(problems) if problems else "")
-        ) from exc
+        raise RuntimeError("Creation failed; verify native teardown. Stack=" + stack_id +
+                           "; expiry safety stack=" + identity["arn"] + "; warnings=" + str(problems)) from exc

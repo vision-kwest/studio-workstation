@@ -1,135 +1,86 @@
 # Studio Workstation
 
-A standalone AWS Ubuntu 24.04 workstation using **EC2**, **CloudFormation**, **Amazon DCV**, **Systems Manager**, and the adapted **AWS Research and Engineering Studio (RES) 2026.06** bootstrap. CPU and GPU workstation images are separate; the full RES control plane is not required.
+Named, disposable Ubuntu 24.04 workstations on AWS: CPU, NVIDIA GPU and an isolated
+software publisher. Uses CloudFormation, EC2, Amazon DCV, Systems Manager and the
+pinned RES 2026.06 standalone bootstrap—not the full RES control plane.
 
-![Studio Workstation architecture](docs/images/system-architecture.svg)
+## Current development status
 
-## Status after merged PR #65
-
-| Capability | Verified outcome |
-|---|---|
-| CPU desktop | Ubuntu 24.04 + DCV, local login and stop/start tested |
-| CPU Image Builder | Staged CPU GDM-first recipe 0.5.0 validated |
-| GPU AMI | Image Builder recipe 0.1.11/1 validated; AMI `ami-027c98f85b155c2ac` in `us-east-1` |
-| GPU desktop | Tesla T4, hardware-accelerated OpenGL 4.6, Xorg, GDM, RES bootstrap and real DCV login verified |
-| GPU CLI lifecycle | **Live create, user DCV login, stop/start, saved-file checksum persistence, and test-resource cleanup passed** in [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46) |
-| PR #65 | **Merged into `main`** |
-| GPU Image Builder pipeline | Still disabled and pointing to older recipe 0.1.10; successful 0.1.11/1 image was built separately |
-| Production access/security | Trusted public TLS and secure access from changing networks remain separate hardening work ([Issue #62](https://github.com/vision-kwest/studio-workstation/issues/62)) |
-
-**Important distinction:** Successful one-off GPU CLI acceptance does **not** make this a general-purpose, unlimited GPU launcher. The current code restricts GPU creation to the previously approved `studio-gpu-cli-accept65` stack and its exact cleanup token, and a dedicated IAM role authorizes expiration for that same scope. The test resources were deleted afterward; the role remains. See [GPU-specific requirements and limitations](docs/studio-cli.md#gpu-workstation-tested-acceptance-scope).
+Issue #98 integrates multiple named workstations, explicit hostname assignment,
+and one native compute/disk lifecycle. This branch is under review and unmerged.
+Source/offline checks are not authenticated browser acceptance. See the implementation
+PR and Issue #98 for measured test evidence, AWS experiments and remaining gates.
+The previously accepted single-GPU RES/T4/DCV behavior remains the provisioning
+baseline; no new installer or GPU bootstrap architecture is introduced.
 
 ## Quick start
-
-Run from AWS CloudShell in the authorized account and `us-east-1`:
 
 ```bash
 git clone https://github.com/vision-kwest/studio-workstation.git
 cd studio-workstation
+# During review, use the integration branch rather than assuming main has it:
+git fetch origin feature/issue98-unified-lifecycle
+git checkout feature/issue98-unified-lifecycle
 python3 -m pip install -r requirements.txt
-python3 studio workstation --help
+python3 studio workstation profiles
+python3 studio workstation create --profile gpu --name art --dry-run
+python3 studio workstation create --profile gpu --name art --expires-in 150m
+python3 studio workstation list
+python3 studio workstation connect art
 ```
 
-The repository command is **`python3 studio workstation ...`**; `studio` is a local Python entry point, not a separately installed executable. You also need AWS CLI v2, AWS permissions, and the existing AMI, release bucket, VPC/subnet and workstation instance profile.
+Use the authorized account and `us-east-1`. Create is billable without `--dry-run`.
+Omit `--name` for a generated name. No user cleanup token or disk-cleanup delay.
+Default DCV TCP/8443 is public, with a warning; restrict it using
+`--client-cidr YOUR_PUBLIC_IP/32`. No SSH ingress is needed. Run CLI endpoint checks
+from a network allowed by that CIDR.
 
-**Preview a CPU workstation without deploying anything:**
+New desktops need a unique Linux password set interactively:
 
 ```bash
-python3 studio workstation create \
-  --stack studio-workstation-cpu-review \
-  --profile cpu --dry-run
+python3 studio workstation connect art --ssm
+sudo passwd workstation
 ```
 
-**Create a CPU workstation** (billable; select a trusted DCV client IP):
+Open the URL from `connect art` and log in as `workstation`, not with AWS credentials.
+Raw-IP HTTPS has an expected certificate warning; unreachable DCV is not success.
+
+## Daily operations
 
 ```bash
-python3 studio workstation create \
-  --stack studio-workstation-cpu-review \
-  --profile cpu --client-cidr YOUR_PUBLIC_IP/32
+python3 studio workstation status art
+python3 studio workstation stop art
+python3 studio workstation start art
+python3 studio workstation hostname status
+python3 studio workstation hostname assign art
+python3 studio workstation hostname release
+python3 studio workstation destroy art --delete-stack
 ```
 
-**GPU acceptance example:** The validated GPU path is limited to the exact PR #65 acceptance stack/token and time-bounded cleanup safeguards. On draft PR #69, `create --profile gpu` accepts `--expires-in 180m` (60–240m, default 150m) and `--volume-cleanup-delay 45m` (30–120m, default 45m). Do **not** treat this as a general production GPU launcher. See [Studio CLI — GPU workstation](docs/studio-cli.md#gpu-workstation-tested-acceptance-scope) for required parameters and cleanup limitations.
+Create/start never steals `dcv.kwesidavis.com`. Assignment moves the existing shared
+EIP and prepares trusted TLS, checking both affected desktops. A former owner gets
+an auto-assigned public IP, with bounded stop/start recovery if needed. No extra EIP
+or CPU-return subsystem. The owner needs only one reachable endpoint.
 
-For a **currently existing, exact scoped GPU workstation only**, draft PR #69 also supports direct extension of both independently verified expiration schedules:
+EC2 and all attached local EBS are one disposable workstation. Stop/start preserves
+them; CloudFormation destroy or expiration terminates compute and natively deletes
+the disks. Durable data belongs outside the workstation. Shared EFS, EIP, DNS, ACM
+certificate and pre-existing profiles/client security groups remain independent.
+There is no volume-only schedule or deletion controller. Native workstation expiry
+uses a scoped stack-deletion schedule and an exact-instance termination fallback.
 
-```bash
-python3 studio workstation extend-expiration \
-  --stack studio-gpu-cli-accept65 \
-  --additional-minutes 60
-```
+Publisher uses the same named lifecycle, its dedicated IAM profile and existing
+EFS/Rez build/promotion workflow. It has no DCV desktop. See the full
+[Studio CLI guide](docs/studio-cli.md) for publisher creation, readiness, run/result,
+explicit promotion, expiry extension, recovery, security and cost implications.
 
-Supplying `--additional-minutes` is authorization; this command **modifies AWS schedules immediately**, with no `--execute` or preview step. The CLI requires at least 15 minutes before the existing termination deadline and limits the new termination to 80–240 minutes from the current time. [Full operating rules](docs/studio-cli.md#gpu-workstation-tested-acceptance-scope).
+## Engineering and historical records
 
-To inspect, connect, or stop an existing stack:
-
-```bash
-python3 studio workstation status --stack STACK_NAME
-python3 studio workstation connect --stack STACK_NAME
-python3 studio workstation stop --stack STACK_NAME
-python3 studio workstation start --stack STACK_NAME
-```
-
-The CLI **does not require** `--yes`, `--confirm-stack`, or `--confirm-instance`. `create` performs the action unless `--dry-run` is specified. `destroy --stack STACK_NAME --delete-stack` performs guarded cleanup of the approved GPU and non-anchor CPU stacks; the original shared-hostname CPU is protected. Unexpected partial failures require operator review. See [Studio CLI daily operations](docs/studio-cli.md#daily-operation-and-safe-cleanup).
-
-After provisioning, set a unique local `workstation` password interactively via SSM (`sudo passwd workstation`); DCV uses **Linux system credentials**, not AWS console credentials. Login through the DCV URL printed by `connect`.
-
-## Trusted DCV HTTPS — Issue #43 (PR #67 merged)
-
-The approved CPU workstation `studio-workstation-cpu-v013` has a dedicated
-Elastic IP `54.159.180.104` and permanent Route 53 hostname
-`dcv.kwesidavis.com`. AWS ACM manages the exportable trusted certificate,
-and AWS Workload Credentials Provider v3.1.2 delivers it to Amazon DCV.
-The user confirmed **browser login without certificate warnings**, and
-certificate refresh, console recovery and saved-file persistence passed a
-supervised EC2 stop/start test. The CPU is now **stopped**; the EIP, DNS and
-ACM certificate remain allocated and billable.
-
-Connect when that CPU is running using:
-`https://dcv.kwesidavis.com:8443` and your existing Linux `workstation`
-account. The revised no-op refresh and bounded-generation retention hook
-from PR #67 has now **also been installed and accepted on the CPU**: a
-real AWS agent refresh left DCV's PID and current certificate unchanged,
-and retained two validated generations. The draft PR #67
-`status --hostname` and `connect` commands subsequently passed unmocked
-from an authorized CloudShell session. The restricted guest role intentionally
-cannot discover CloudFormation stacks; do not widen its rights for CLI access.
-
-**The supervised CPU/GPU shared-hostname acceptance passed on the draft branch.**
-The same EIP and ACM certificate were used for the CPU and a separately guarded
-GPU. User-confirmed warning-free GNOME login, trusted TLS, explicit guarded
-GPU handoff, stop/return and exact-resource destroy all passed. A stop/start
-persistence test preserved the GPU's test file. A late restart previously started
-EC2 before rejecting an unsafe hostname handoff. **The draft CLI now checks
-the exact PR #65 expiration safeguards before starting the GPU**, requiring at
-least 80 minutes remaining (60 minutes of handoff margin plus 20 minutes for
-startup). This pre-start fix passed offline tests; it has **not** been live
-retested. Configurable expiration is separately tracked in
-[Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68).
-This is not a general-purpose production GPU launcher. PR #67 was
-merged; Issue #68's configurable expiration changes remain in **draft PR #69**.
-
-The read-only `hostname-plan`, `hostname-iam`, and `hostname-return-plan`
-commands inspect the handoff. `hostname-handoff --execute` and
-`hostname-return --execute` are privileged, guarded AWS-writing operations.
-[Shared CPU/GPU hostname runbook](docs/issue43-shared-cpu-gpu-handoff.md).
-
-See [the Issue #43 acceptance, operations and rollback runbook](docs/issue43-acm-dcv.md)
-and [the Studio CLI instructions](docs/studio-cli.md#trusted-dcv-hostname--issue-43-draft-pr-67).
-[Draft PR #67](https://github.com/vision-kwest/studio-workstation/pull/67)
-is deliberately unmerged; the older custom Lambda/DDNS/Certbot architecture
-has been retired. Public TCP 8443 hardening remains separate Issue #62.
-
-## Security and operating costs
-
-- No inbound SSH is needed. Use Systems Manager for maintenance and Amazon DCV for the graphical desktop.
-- The CPU CLI's historical default is public TCP 8443 (`0.0.0.0/0`); **supply `--client-cidr` to restrict it**. In the scoped GPU CLI, public DCV is permitted only with explicit `--allow-public-dcv`. Public exposure is **not** a private network; prefer a trusted CIDR or future identity-aware private access for long-lived deployments.
-- Treat the self-signed DCV TLS certificate as untrusted until you verify its fingerprint or install a trusted certificate. Use a strong, unique local password. Do not put passwords, private keys, tokens or NVIDIA driver binaries in the repository or CloudFormation user data.
-- Stopping an instance stops running-instance compute charges, **not EBS charges**. Without a dedicated Elastic IP, restarting an instance can change its public IP; Issue #43's assigned CPU Elastic IP persists. Retained GPU root EBS volumes use `DeleteOnTermination=false`.
-- The tested GPU acceptance schedules were one-time safeguards (instance termination and a subsequent **best-effort** EBS deletion attempt), not a reusable production lifecycle service. The completed acceptance test's instance, volume, SG, launch template and schedules were verified removed; the scoped expiration IAM role remains.
-- The GPU source AMI snapshot is unencrypted; the validated GPU test launched with an explicitly encrypted root EBS volume. Re-evaluate AMI/snapshot encryption before wider use.
-
-## Documentation and historical reports
-
-Start with the [documentation index](docs/INDEX.md), [Studio CLI / daily operations](docs/studio-cli.md), [GPU profile](docs/gpu-workstation-profile.md), [runtime/release provenance](runtime/README.md), and [lifecycle diagram](docs/workstation-lifecycle-visual.md). Earlier Gate 1–4, Image Builder and PR #65 preflight documents preserve historical observations rather than today's deployment instructions.
-
-The original RES runtime sources remain pinned to [`aws/res` tag `2026.06`](https://github.com/aws/res/tree/2026.06); see [compatibility evidence](docs/RES_COMPATIBILITY.md) and [deviation register](docs/DEVIATIONS.md).
+[Documentation index](docs/INDEX.md), [engineering charter](AGENTS.md),
+[minimum-change playbook](ENGINEERING_PLAYBOOK.md),
+[RES compatibility](docs/RES_COMPATIBILITY.md), and
+[deviations](docs/DEVIATIONS.md) distinguish current operations from dated evidence.
+Original upstream sources stay pinned to `aws/res` tag `2026.06`.
+Historical fixed-name CPU/GPU handoff and Lambda/DynamoDB cleanup proposals are
+retired, not parallel supported implementations. Their previous source remains in
+Git history. GPU Image Builder work is unchanged by this lifecycle integration.

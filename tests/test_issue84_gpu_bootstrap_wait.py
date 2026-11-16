@@ -7,7 +7,7 @@ from scripts import studio_workstation_cli as cli
 class GpuBootstrapWaitTests(unittest.TestCase):
     def test_eventually_ready_after_previous_twelve_attempt_window(self):
         checks = []
-        def ready(stack, region):
+        def ready(stack, region, **kwargs):
             checks.append((stack, region))
             if len(checks) < 16:
                 raise ValueError("GPU readiness failed: RES still bootstrapping")
@@ -18,7 +18,7 @@ class GpuBootstrapWaitTests(unittest.TestCase):
 
     def test_terminal_failure_fails_closed_without_retry(self):
         checks = []
-        def ready(stack, region):
+        def ready(stack, region, **kwargs):
             checks.append(True)
             raise ValueError("GPU ownership mismatch")
         with patch.object(cli, "gpu_ready", side_effect=ready):
@@ -30,7 +30,7 @@ class GpuBootstrapWaitTests(unittest.TestCase):
     def test_timeout_remains_bounded(self):
         with patch.object(cli, "gpu_ready",
                           side_effect=ValueError("GPU readiness failed")) as ready:
-            with self.assertRaisesRegex(RuntimeError, "expiry schedules remain armed"):
+            with self.assertRaisesRegex(RuntimeError, "workstation expiry remains armed"):
                 cli.wait_gpu_bootstrap("studio-gpu-cli-accept65", "us-east-1",
                                        attempts=3, sleep=lambda _: None)
         self.assertEqual(ready.call_count, 3)

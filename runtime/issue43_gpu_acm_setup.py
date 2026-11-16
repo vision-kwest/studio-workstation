@@ -1,8 +1,4 @@
-"""Issue #43 GPU ACM enrollment: exact-scoped IAM + pinned AWCP, no secrets in SSM.
-
-Intentionally a separate explicit CLI operation until Task 3 wires lifecycle.
-No EC2 launch, EIP/DNS mutation, or changes to RES bootstrap.
-"""
+"""Exact current-owner/destination certificate grants; reuse pinned AWCP, never log keys."""
 import json
 import re
 import subprocess
@@ -13,10 +9,10 @@ from runtime import issue43_hostname_handoff as handoff
 BASE_ROLE = "StudioWorkstationSSMRole"
 EXPORT_NAME = "studio-issue43-dcv-acm-export"
 CPU_POLICY = "StudioIssue43ExactInstanceAssume"
-GPU_POLICY = "StudioIssue43GpuExactInstanceAssume"
+GPU_POLICY = "StudioIssue43GpuExactInstanceAssume"  # Retired policy names, reconciled during explicit assignment.
+POLICY_PREFIX = "StudioDcv-"
 SOURCE_ARN = "arn:aws:iam::" + handoff.ACCOUNT + ":role/" + BASE_ROLE
 SOURCE_ID = handoff.BASE_ROLE_ID
-CPU_SESSION = SOURCE_ID + ":" + handoff.CPU_ID
 PIN = "d5f1799098b7224a8645fa1815fb6deb52fb1ef6"
 AWCP_SHA256 = "1480c04bddfdea241f9b67fedd15f1006e53d33d234b5aca3f8eec6e563f420a"
 ARTIFACTS = {
@@ -51,94 +47,97 @@ def _statement(session):
 
 
 def _policy(session):
-    statement = {"Effect": "Allow", "Action": "sts:AssumeRole",
-                 "Resource": handoff.EXPORT_ROLE,
-                 "Condition": {"StringEquals": {"aws:userid": session}}}
-    if session == CPU_SESSION:
-        # Preserve the already-live CPU policy verbatim, including its Sid.
-        statement["Sid"] = "AssumeOnlyIssue43ExportRoleFromExactCpuEc2Session"
-    return {"Version": "2012-10-17", "Statement": [statement]}
+    return {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "sts:AssumeRole",
+            "Resource": handoff.EXPORT_ROLE, "Condition": {"StringEquals": {"aws:userid": session}}}]}
+
+
+def _grants(aws, repair_id=None):
+    """Only exact EC2 sessions; permit a retryable partial write for the selected ID only."""
+    base = _iam(aws, "get-role", "--role-name", BASE_ROLE)["Role"]
+    export = _iam(aws, "get-role", "--role-name", EXPORT_NAME)["Role"]
+    if base.get("RoleId") != SOURCE_ID or base.get("Arn") != SOURCE_ARN or export.get("Arn") != handoff.EXPORT_ROLE:
+        raise ValueError("Certificate IAM role identity changed")
+    scoped = _doc(_iam(aws, "get-role-policy", "--role-name", EXPORT_NAME,
+                       "--policy-name", "StudioIssue43ExactAcMExport")["PolicyDocument"])
+    if scoped != {"Version": "2012-10-17", "Statement": [{"Sid": "ExportOnlyOneDcvCertificate",
+                  "Effect": "Allow", "Action": "acm:ExportCertificate", "Resource": handoff.CERT_ARN}]}:
+        raise ValueError("ACM export is not restricted to the configured certificate")
+    if (_iam(aws, "list-role-policies", "--role-name", EXPORT_NAME)["PolicyNames"] != ["StudioIssue43ExactAcMExport"] or
+            _iam(aws, "list-attached-role-policies", "--role-name", EXPORT_NAME).get("AttachedPolicies")):
+        raise ValueError("Unexpected export-role policies")
+    trust = _doc(export["AssumeRolePolicyDocument"])
+    statements = trust.get("Statement", [])
+    denied = [{"Effect": "Deny", "Principal": {"AWS": SOURCE_ARN}, "Action": "sts:AssumeRole"}]
+    sessions = set()
+    for statement in ([] if statements == denied else statements):
+        session = statement.get("Condition", {}).get("StringEquals", {}).get("aws:userid", "")
+        if not re.fullmatch(SOURCE_ID + r":i-[0-9a-f]{8,17}", session) or statement != _statement(session):
+            raise ValueError("Unexpected certificate trust; no grant may cover the entire role")
+        sessions.add(session.split(":", 1)[1])
+    if trust.get("Version") != "2012-10-17" or len(sessions) > 2:
+        raise ValueError("Only hostname owner and pending destination may export the certificate")
+    policies = {}
+    for name in _iam(aws, "list-role-policies", "--role-name", BASE_ROLE)["PolicyNames"]:
+        if name not in (CPU_POLICY, GPU_POLICY) and not name.startswith(POLICY_PREFIX):
+            continue
+        doc = _doc(_iam(aws, "get-role-policy", "--role-name", BASE_ROLE, "--policy-name", name)["PolicyDocument"])
+        if len(doc.get("Statement", [])) != 1:
+            raise ValueError("Unexpected hostname assume policy")
+        statement = dict(doc["Statement"][0])
+        sid = statement.pop("Sid", None)
+        session = statement.get("Condition", {}).get("StringEquals", {}).get("aws:userid", "")
+        if (sid not in (None, "AssumeOnlyIssue43ExportRoleFromExactCpuEc2Session") or
+                not re.fullmatch(SOURCE_ID + r":i-[0-9a-f]{8,17}", session) or
+                {**doc, "Statement": [statement]} != _policy(session)):
+            raise ValueError("Unexpected managed certificate permission")
+        iid = session.split(":", 1)[1]
+        if iid in policies or (name.startswith(POLICY_PREFIX) and name != POLICY_PREFIX + iid):
+            raise ValueError("Duplicate or mismatched certificate policy identity")
+        policies[iid] = name
+    if (sessions ^ set(policies)) - {repair_id}:
+        raise ValueError("Unrelated partial certificate authorization; manual reconciliation required")
+    return sessions, policies
 
 
 def _get_role_state(aws, gpu_id):
-    if not re.fullmatch(r"i-[0-9a-f]{8,17}", gpu_id or ""):
-        raise ValueError("Expected exact GPU instance ID")
-    gpu_session = SOURCE_ID + ":" + gpu_id
-    base = _iam(aws, "get-role", "--role-name", BASE_ROLE)["Role"]
-    export = _iam(aws, "get-role", "--role-name", EXPORT_NAME)["Role"]
-    if base.get("RoleId") != SOURCE_ID or base.get("Arn") != SOURCE_ARN:
-        raise ValueError("Base IAM role identity changed")
-    if export.get("Arn") != handoff.EXPORT_ROLE:
-        raise ValueError("ACM export IAM role changed")
-    cpu = _doc(_iam(aws, "get-role-policy", "--role-name", BASE_ROLE,
-                    "--policy-name", CPU_POLICY)["PolicyDocument"])
-    if cpu != _policy(CPU_SESSION):
-        raise ValueError("Existing CPU certificate authorization differs")
-    scoped = _doc(_iam(aws, "get-role-policy", "--role-name", EXPORT_NAME,
-                       "--policy-name", "StudioIssue43ExactAcMExport")["PolicyDocument"])
-    if scoped != {"Version": "2012-10-17", "Statement": [{
-            "Sid": "ExportOnlyOneDcvCertificate", "Effect": "Allow",
-            "Action": "acm:ExportCertificate", "Resource": handoff.CERT_ARN}]}:
-        raise ValueError("ACM export role no longer restricted to one certificate")
-    trust = _doc(export["AssumeRolePolicyDocument"])
-    if trust.get("Version") != "2012-10-17":
-        raise ValueError("Unexpected export trust document version")
-    statements = trust.get("Statement", [])
-    if statements not in ([_statement(CPU_SESSION)],
-                          [_statement(CPU_SESSION), _statement(gpu_session)]):
-        raise ValueError("Unexpected ACM export trust; refuses to overwrite other grants")
-    names = _iam(aws, "list-role-policies", "--role-name", BASE_ROLE)["PolicyNames"]
-    present = GPU_POLICY in names
-    if present:
-        existing = _doc(_iam(aws, "get-role-policy", "--role-name", BASE_ROLE,
-                            "--policy-name", GPU_POLICY)["PolicyDocument"])
-        if existing != _policy(gpu_session):
-            raise ValueError("GPU policy belongs to a different session")
-    if present != (len(statements) == 2):
-        raise ValueError("GPU IAM partial state; manual reconciliation required")
-    return present
+    sessions, policies = _grants(aws)
+    return gpu_id in sessions and gpu_id in policies
 
 
-def _role_update(aws, statements):
+def _role_update(aws, instances):
+    statements = [_statement(SOURCE_ID + ":" + iid) for iid in sorted(instances)]
+    if not statements:
+        statements = [{"Effect": "Deny", "Principal": {"AWS": SOURCE_ARN}, "Action": "sts:AssumeRole"}]
     _iam(aws, "update-assume-role-policy", "--role-name", EXPORT_NAME,
-         "--policy-document", json.dumps({"Version": "2012-10-17",
-                                           "Statement": statements}))
+         "--policy-document", json.dumps({"Version": "2012-10-17", "Statement": statements}))
 
 
 def _install_grant(aws, gpu_id):
-    """Add exactly this EC2 session, keeping the existing CPU session."""
-    if _get_role_state(aws, gpu_id):
-        return False  # Already authorized, safe retry
-    gpu_session = SOURCE_ID + ":" + gpu_id
+    if not re.fullmatch(r"i-[0-9a-f]{8,17}", gpu_id or ""):
+        raise ValueError("Exact workstation instance ID required")
+    sessions, policies = _grants(aws, repair_id=gpu_id)
+    if gpu_id in sessions and gpu_id in policies:
+        return False
+    if len(sessions | set(policies) | {gpu_id}) > 2:
+        raise ValueError("Reconcile stale hostname grants before adding a destination")
     _iam(aws, "put-role-policy", "--role-name", BASE_ROLE,
-         "--policy-name", GPU_POLICY,
-         "--policy-document", json.dumps(_policy(gpu_session)))
-    try:
-        _role_update(aws, [_statement(CPU_SESSION), _statement(gpu_session)])
-    except BaseException:
-        # A write may have succeeded before the API error: fail closed if
-        # rollback is not verified. No EIP is transferred by this function.
-        try:
-            _role_update(aws, [_statement(CPU_SESSION)])
-            _iam(aws, "delete-role-policy", "--role-name", BASE_ROLE,
-                 "--policy-name", GPU_POLICY)
-        except BaseException as exc:
-            raise RuntimeError("GPU IAM setup failed; rollback unverified") from exc
-        raise
+         "--policy-name", policies.get(gpu_id, POLICY_PREFIX + gpu_id),
+         "--policy-document", json.dumps(_policy(SOURCE_ID + ":" + gpu_id)))
+    _role_update(aws, sessions | {gpu_id})
     if not _get_role_state(aws, gpu_id):
-        raise RuntimeError("New GPU authorization was not verified")
+        raise RuntimeError("Destination certificate authorization not verified")
     return True
 
 
 def _revoke_grant(aws, gpu_id):
-    if not _get_role_state(aws, gpu_id):
+    sessions, policies = _grants(aws, repair_id=gpu_id)
+    if gpu_id not in sessions and gpu_id not in policies:
         return False
-    # Remove the trust BEFORE dropping the inline session policy.
-    _role_update(aws, [_statement(CPU_SESSION)])
-    _iam(aws, "delete-role-policy", "--role-name", BASE_ROLE,
-         "--policy-name", GPU_POLICY)
+    _role_update(aws, sessions - {gpu_id})  # Remove trust before the session policy.
+    if gpu_id in policies:
+        _iam(aws, "delete-role-policy", "--role-name", BASE_ROLE, "--policy-name", policies[gpu_id])
     if _get_role_state(aws, gpu_id):
-        raise RuntimeError("GPU IAM revocation readback failed")
+        raise RuntimeError("Certificate revocation readback failed")
     return True
 
 
@@ -229,59 +228,59 @@ def _ssm(aws, gpu_id, commands, *, sleep=time.sleep):
     raise RuntimeError("GPU ACM enrollment timed out")
 
 
-def prepare_gpu(aws, *, sleep=time.sleep, independent=False):
-    """Exact guarded instance; install narrowly-scoped export permission and ACM guest agent."""
-    from runtime import independent_eip
-    preview_fn = independent_eip.gpu_preview if independent else handoff.gpu_preview
-    preview = preview_fn(aws)
-    gpu_id = preview["to"]
-    created = _install_grant(aws, gpu_id)
+
+def _refresh_script():
+    """Restart the already-pinned provider after renewal access is restored; no reinstall."""
+    expected = {"/usr/local/sbin/studio-dcv-acm-activate": ARTIFACTS["activate.py"][1],
+                "/etc/aws-workload-credentials-provider/config.toml": ARTIFACTS["awcp.toml"][1]}
+    return ["set -eu", "python3 - <<'PY'", "import hashlib,pathlib",
+            "for name,sha in " + repr(expected) + ".items():",
+            " b=pathlib.Path(name).read_bytes()",
+            " assert hashlib.sha1(b'blob '+str(len(b)).encode()+b'\\0'+b).hexdigest()==sha", "PY",
+            "test \"$(sha256sum /opt/aws/workload-credentials-provider/bin/aws-workload-credentials-provider | cut -d' ' -f1)\" = '" + AWCP_SHA256 + "'",
+            "systemctl restart aws-workload-credentials-provider-acm.service",
+            "for i in $(seq 1 18); do openssl x509 -in /var/lib/studio/dcv-acm/fullchain.pem -noout -checkend 172800 >/dev/null 2>&1 && break; sleep 2; done",
+            "/usr/local/sbin/studio-dcv-acm-activate", "echo " + MARKER]
+
+def prepare_gpu(aws, gpu_id, *, sleep=time.sleep):
+    """Explicit hostname destination only; reuse the pinned AWCP/activation installer."""
+    from runtime.workstation_inventory import context
+    vm = handoff._items(aws, gpu_id)[gpu_id]
+    selected = context(aws, handoff.REGION, handoff._tags(vm)["aws:cloudformation:stack-id"])
+    if selected["instance"] != gpu_id or selected["profile"] not in ("cpu", "gpu") or selected["state"] != "running":
+        raise ValueError("Certificate destination is not an owned running desktop")
+    owner = handoff._eip(aws).get("InstanceId")
+    sessions, policies = _grants(aws, repair_id=gpu_id)
+    for stale in (sessions | set(policies)) - {owner, gpu_id}:
+        try:
+            previous = handoff._items(aws, stale)[stale]
+            context(aws, handoff.REGION, handoff._tags(previous)["aws:cloudformation:stack-id"])
+        except subprocess.CalledProcessError as exc:
+            if "InvalidInstanceID.NotFound" not in (exc.stderr or ""):
+                raise
+        _revoke_grant(aws, stale)
+    existing = gpu_id in sessions and gpu_id in policies
     try:
-        # A retry after successful preparation needs no guest modifications.
+        _install_grant(aws, gpu_id)
         try:
             handoff.check_gpu_tls(aws, gpu_id, sleep=sleep)
         except RuntimeError:
-            _ssm(aws, gpu_id, _guest_script(), sleep=sleep)
-        # A final end-to-end independent guest trust check.
+            try:
+                _ssm(aws, gpu_id, _refresh_script(), sleep=sleep)
+            except RuntimeError:
+                _ssm(aws, gpu_id, _guest_script(), sleep=sleep)
         handoff.check_gpu_tls(aws, gpu_id, sleep=sleep)
-        preview_fn(aws)  # Guard and source may have changed during installation.
+        if handoff._eip(aws).get("InstanceId") != owner:
+            raise RuntimeError("Hostname owner changed during certificate preparation")
         return {"instance_id": gpu_id, "acm": "verified", "hostname": handoff.HOST}
     except BaseException:
-        if created:
-            try:
-                # EIP has NOT been handed off, so undo any newly-granted access.
-                if handoff._eip(aws).get("InstanceId") != preview.get("from", handoff.CPU_ID):
-                    raise RuntimeError("EIP owner changed; cannot safely revoke")
-                _revoke_grant(aws, gpu_id)
-            except BaseException as e:
-                raise RuntimeError("GPU enrollment failed; new IAM grant rollback unverified") from e
+        if not existing and handoff._eip(aws).get("InstanceId") != gpu_id:
+            _revoke_grant(aws, gpu_id)
         raise
 
 
-def revoke_gpu(aws, gpu_id, *, independent=False):
-    """Revoke only the matching GPU session, after EIP has returned to CPU."""
-    eip = handoff._eip(aws)
-    if independent:
-        from runtime import independent_eip
-        independent_eip._cpu_owner(aws, eip)
-    elif (eip.get("InstanceId") != handoff.CPU_ID or
-            handoff._tags(eip).get("StudioDcvInstanceId") != handoff.CPU_ID):
-        raise ValueError("Return EIP and ownership tag to CPU before revoking GPU ACM")
-    # An active GPU must not lose its certificate-renewal permission.
-    try:
-        response = aws(handoff.REGION, 'ec2', 'describe-instances', '--instance-ids', gpu_id)
-        matches = [i for r in response.get('Reservations', []) for i in r.get('Instances', [])]
-        if len(matches) > 1 or (matches and matches[0].get('InstanceId') != gpu_id):
-            raise ValueError('GPU identity mismatch')
-        vm = matches[0] if matches else None
-    except subprocess.CalledProcessError as e:
-        if "InvalidInstanceID.NotFound" not in (e.stderr or ""):
-            raise
-    else:
-        if vm is not None and vm.get("State", {}).get("Name") not in ("stopped", "terminated"):
-            raise ValueError("Stop/terminate GPU before revoking certificate access")
-        if vm is not None and (handoff._tags(vm).get("StudioStack") != handoff.GPU_STACK or
-                handoff._tags(vm).get("StudioCleanupToken") != handoff.GPU_TOKEN):
-            raise ValueError("GPU instance ownership differs")
-    revoked = _revoke_grant(aws, gpu_id)
-    return {"instance_id": gpu_id, "revoked": revoked, "cpu_certificate_access": "preserved"}
+def revoke_gpu(aws, gpu_id):
+    """A non-owner may keep its valid certificate, but cannot renew/export it."""
+    if handoff._eip(aws).get("InstanceId") == gpu_id:
+        raise ValueError("Cannot revoke certificate renewal from the current hostname owner")
+    return {"instance_id": gpu_id, "revoked": _revoke_grant(aws, gpu_id)}

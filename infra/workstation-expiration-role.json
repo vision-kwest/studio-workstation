@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Independent per-workstation expiration identity; no EC2, schedules or shared-resource changes.",
+  "Description": "Native workstation expiration: stack deletion and instance fallback; no disk deletion.",
   "Parameters": {
     "WorkstationStack": {
       "Type": "String",
@@ -29,7 +29,7 @@
           }]
         },
         "Policies": [{
-          "PolicyName": "StudioPr65ExactTaggedExpiry",
+          "PolicyName": "StudioWorkstationExpiry",
           "PolicyDocument": {
             "Version": "2012-10-17",
             "Statement": [{
@@ -42,12 +42,26 @@
               }}
             }, {
               "Effect": "Allow",
-              "Action": "ec2:DeleteVolume",
-              "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/*"},
+              "Action": "ec2:DeleteSecurityGroup",
+              "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*"},
               "Condition": {"StringEquals": {
                 "ec2:ResourceTag/StudioStack": {"Ref": "WorkstationStack"},
                 "ec2:ResourceTag/StudioCleanupToken": {"Fn::Select": [2, {"Fn::Split": ["/", {"Ref": "AWS::StackId"}]}]}
               }}
+            }, {
+              "Effect": "Allow",
+              "Action": "cloudformation:DeleteStack",
+              "Resource": {"Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${WorkstationStack}/*"},
+              "Condition": {"StringEquals": {
+                "aws:ResourceTag/StudioCleanupToken": {"Fn::Select": [2, {"Fn::Split": ["/", {"Ref": "AWS::StackId"}]}]}
+              }}
+            }, {
+              "Effect": "Allow",
+              "Action": ["ec2:DescribeInstances", "ec2:DescribeInstanceAttribute",
+                         "ec2:DescribeSecurityGroups", "ec2:DescribeNetworkInterfaces",
+                         "ec2:DescribeVolumes", "ec2:DescribeTags", "ec2:DescribeInstanceCreditSpecifications",
+                         "ec2:DescribeLaunchTemplates", "ssm:DescribeAssociation", "ssm:ListAssociations"],
+              "Resource": "*"
             }]
           }
         }]

@@ -1,55 +1,15 @@
-"""Issue #88: hostname plan must use independent EIP ownership."""
-import io
+"""Read-only hostname status no longer depends on a historical CPU anchor."""
 import json
-import unittest
-from contextlib import redirect_stdout
-from unittest.mock import patch
-from scripts import studio_workstation_cli as cli
+from test_issue43_cli_lifecycle import CliFixture
 
+class HostnameStatusTests(CliFixture):
+    def test_unassociated_status_does_not_create_or_start_anything(self):
+        result=json.loads(self.invoke('hostname','status'))
+        self.assertIsNone(result['owner'])
+        self.assertEqual(self.aws.writes,[])
 
-class HostnamePlanTests(unittest.TestCase):
-    def test_gpu_plan_uses_replacement_cpu_preview(self):
-        preview = {"from": "i-replacement", "to": "i-gpu", "guard": {"ok": True}}
-        with patch("runtime.independent_eip.gpu_preview", return_value=preview) as independent:
-            with patch("runtime.issue43_hostname_handoff.gpu_preview",
-                       side_effect=AssertionError("legacy preview must not be called")):
-                with redirect_stdout(io.StringIO()) as output:
-                    cli.main(["hostname-plan", "--stack", cli.GPU_ACCEPTANCE_STACK])
-        self.assertEqual(json.loads(output.getvalue()), preview)
-        independent.assert_called_once()
-
-    def test_reject_other_stack_before_preview(self):
-        with patch("runtime.independent_eip.gpu_preview") as preview:
-            with self.assertRaisesRegex(ValueError, "guarded acceptance stack"):
-                cli.main(["hostname-plan", "--stack", "studio-other"])
-        preview.assert_not_called()
-
-
-    def test_acm_prepare_uses_independent_owner(self):
-        with patch("runtime.issue43_gpu_acm_setup.prepare_gpu",
-                   return_value={"acm": "verified"}) as prepare:
-            with redirect_stdout(io.StringIO()):
-                cli.main(["hostname-acm-prepare", "--execute"])
-        prepare.assert_called_once()
-        self.assertTrue(prepare.call_args.kwargs["independent"])
-
-    def test_handoff_uses_independent_implementation(self):
-        with patch("runtime.independent_eip.handoff_gpu",
-                   return_value={"owner": "i-gpu"}) as handoff:
-            with patch("runtime.issue43_hostname_handoff.handoff_gpu",
-                       side_effect=AssertionError("legacy handoff called")):
-                with redirect_stdout(io.StringIO()):
-                    cli.main(["hostname-handoff", "--execute"])
-        handoff.assert_called_once()
-
-    def test_return_uses_independent_implementation(self):
-        with patch("runtime.independent_eip.restore_cpu",
-                   return_value={"owner": "i-cpu"}) as restore:
-            with redirect_stdout(io.StringIO()):
-                cli.main(["hostname-return", "--gpu-instance-id",
-                          "i-0baaf4feb21862d94", "--execute"])
-        restore.assert_called_once()
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_status_reports_selected_owner_without_a_return_cpu(self):
+        a=self.create('gpu','art');self.invoke('hostname','assign','art');self.aws.calls=[]
+        result=json.loads(self.invoke('hostname','status'))
+        self.assertEqual(result['owner'],a['stack'])
+        self.assertEqual(self.aws.writes,[])

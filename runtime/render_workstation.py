@@ -103,8 +103,6 @@ def main():
     p.add_argument("--rez-version-id")
     p.add_argument("--rez-sha256")
     p.add_argument("--lifecycle",choices=["temporary","persistent"],default="temporary",help="GPU only; persistent enables stop/start")
-    p.add_argument("--cleanup-token",default=None)
-    p.add_argument("--test-stack",default=None)
     p.add_argument("--bucket",required=True)
     p.add_argument("--prefix",required=True)
     p.add_argument("--user",default="workstation")
@@ -128,39 +126,13 @@ def main():
             instance["InstanceInitiatedShutdownBehavior"] = "stop"
         else:
             instance["Tags"].extend([{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}])
-        if a.cleanup_token:
-            if a.lifecycle != "persistent" or not a.test_stack or not re.fullmatch(r"[a-z0-9-]{12,64}", a.cleanup_token):
-                raise ValueError("cleanup scope requires persistent GPU and exact test stack")
-            tags = [{"Key":"StudioCleanupToken","Value":a.cleanup_token},
-                    {"Key":"StudioStack","Value":a.test_stack}]
-            instance["Tags"].extend(tags)
-            template["Resources"]["WorkstationSG"]["Properties"]["Tags"] = list(tags)
-            # EC2 instance tags do NOT automatically tag its root EBS volume.
-            # Launch-time volume TagSpecifications persist even if EC2 terminates
-            # before the first independent cleanup invocation.
-            template["Resources"]["CleanupVolumeTagLaunchTemplate"] = {
-                "Type": "AWS::EC2::LaunchTemplate",
-                "Properties": {
-                    "LaunchTemplateData": {
-                        "TagSpecifications": [{
-                            "ResourceType": "volume",
-                            "Tags": list(tags),
-                        }]
-                    },
-                    "TagSpecifications": [{
-                        "ResourceType": "launch-template",
-                        "Tags": list(tags),
-                    }],
-                },
-            }
-            instance["LaunchTemplate"] = {
-                "LaunchTemplateId": {"Ref": "CleanupVolumeTagLaunchTemplate"},
-                "Version": {"Fn::GetAtt": ["CleanupVolumeTagLaunchTemplate", "LatestVersionNumber"]},
-            }
-    elif a.cleanup_token:
-        raise ValueError("cleanup scope only supported for GPU")
     elif a.lifecycle != "temporary":
         raise ValueError("persistent lifecycle is only supported for GPU")
+    props = template["Resources"]["Workstation"]["Properties"]
+    props["PropagateTagsToVolumeOnCreation"] = True
+    props["Tags"][0]["Value"] = {"Ref": "AWS::StackName"}
+    props["Tags"].extend([{"Key": "StudioStackId", "Value": {"Ref": "AWS::StackId"}},
+                          {"Key": "StudioProfile", "Value": a.profile}])
     template["Resources"]["Workstation"]["Properties"]["UserData"]={"Fn::Base64":{"Fn::Sub":render(a.bucket,a.prefix,a.user,a.profile,a.rez_version_id,a.rez_sha256)}}
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(template,indent=2)+"\n")

@@ -11,7 +11,7 @@ from scripts import studio_workstation_cli as cli
 
 IID = "i-0123456789abcdef0"
 STATE = {"stack": "studio-gpu-art", "instance": IID, "state": "running",
-         "public_ip": "203.0.113.12", "dcv_url": "https://203.0.113.99:8443"}
+         "public_ip": "203.0.113.12", "dcv_url": "https://203.0.113.99:8443", "profile": "gpu"}
 
 
 class EndpointTests(unittest.TestCase):
@@ -25,7 +25,7 @@ class EndpointTests(unittest.TestCase):
         self.address = {"InstanceId": IID, "Tags": [{"Key": "StudioDcvInstanceId", "Value": IID}]}
 
     def test_every_name_including_legacy_names_can_use_its_current_ip(self):
-        for name in ("studio-gpu-art", cli.DEFAULT_STACK, cli.GPU_ACCEPTANCE_STACK):
+        for name in ("studio-gpu-art", "studio-workstation-cpu-v013", "studio-gpu-cli-accept65"):
             result = self.resolve(dict(STATE, stack=name))
             self.assertEqual(result, {"url": "https://203.0.113.12:8443",
                                       "trusted": False, "reachable": True})
@@ -75,7 +75,7 @@ class EndpointTests(unittest.TestCase):
             self.resolve()
 
     def test_connect_never_reports_missing_public_ip_as_success(self):
-        with (mock.patch.object(cli, "describe", return_value=dict(STATE, public_ip=None)),
+        with (mock.patch("runtime.workstation_inventory.context", return_value=dict(STATE, public_ip=None)),
               mock.patch.object(cli, "run") as run,
               contextlib.redirect_stdout(io.StringIO()) as out,
               contextlib.redirect_stderr(io.StringIO())):
@@ -86,7 +86,7 @@ class EndpointTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_ssm_escape_hatch_remains_explicit_and_skips_web_probe(self):
-        with (mock.patch.object(cli, "describe", return_value=STATE),
+        with (mock.patch("runtime.workstation_inventory.context", return_value=STATE),
               mock.patch.object(cli, "interactive_ssm") as ssm,
               mock.patch.object(endpoint, "_probe") as probe):
             cli.main(["connect", STATE["stack"], "--ssm"])

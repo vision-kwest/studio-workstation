@@ -5,5 +5,5 @@ from scripts.studio_workstation_cli import main
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] != "workstation":
-        raise SystemExit("Usage: python3 studio workstation {create,status,start,stop,connect,destroy} [options]")
+        raise SystemExit("Usage: python3 studio workstation {profiles,profile,create,list,status,start,stop,connect,hostname,destroy,run,result} [options]")
     main(sys.argv[2:])

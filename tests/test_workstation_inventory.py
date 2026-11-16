@@ -122,7 +122,7 @@ class NamedCliTests(unittest.TestCase):
             cli.main(args)
 
     def test_named_actions_and_stack_alias_reuse_existing_dispatch(self):
-        for action in ("start", "stop", "status", "connect", "destroy", "check-ready", "hostname-assign", "extend-expiration"):
+        for action in ("start", "stop", "status", "connect", "destroy", "check-ready", "extend-expiration"):
             extra = ["--additional-minutes", "30"] if action == "extend-expiration" else []
             for selector in (["studio-cpu-art"], ["--stack", "studio-cpu-art"], ["--name", "studio-cpu-art"]):
                 with self.subTest(action=action, selector=selector), mock.patch.object(cli, "command") as command:
@@ -151,34 +151,9 @@ class NamedCliTests(unittest.TestCase):
         self.assertRegex(first, r"^studio-cpu-[a-f0-9]{12}$")
         self.assertNotEqual(first, second)
 
-    def test_gpu_restriction_is_not_bypassed_by_cpu_default(self):
-        with mock.patch.object(cli, "command") as command, self.assertRaises(SystemExit):
-            self.invoke(["create", "--profile", "gpu"])
-        command.assert_not_called()
 
     def test_list_dispatch_is_read_only(self):
         with mock.patch.object(inventory, "list_workstations", return_value=[]) as listing, mock.patch.object(cli, "run") as run:
             self.invoke(["list"])
         listing.assert_called_once_with(cli.aws, cli.DEFAULT_REGION)
         run.assert_not_called()
-
-    def test_describe_pins_ec2_to_immutable_stack_id(self):
-        stack, vm, resource = fixture("studio-cpu-art", 1, "m7i.large")
-        for wrong in (False, True):
-            instance = copy.deepcopy(vm)
-            if wrong:
-                instance["Tags"][0]["Value"] += "-other"
-            with mock.patch.object(cli, "aws", side_effect=[{"StackResourceDetail": resource}, {"Reservations": [{"Instances": [instance]}]}]):
-                if wrong:
-                    with self.assertRaisesRegex(ValueError, "selected CloudFormation stack ID"):
-                        cli.describe(stack["StackName"], "us-east-1")
-                else:
-                    self.assertEqual(cli.describe(stack["StackName"], "us-east-1")["stack_id"], stack["StackId"])
-
-    def test_wrong_resource_type_fails_before_ec2(self):
-        stack, _, resource = fixture("studio-cpu-art", 1)
-        resource["ResourceType"] = "AWS::S3::Bucket"
-        with mock.patch.object(cli, "aws", return_value={"StackResourceDetail": resource}) as aws:
-            with self.assertRaisesRegex(ValueError, "identity mismatch"):
-                cli.describe(stack["StackName"], "us-east-1")
-        self.assertEqual(aws.call_count, 1)

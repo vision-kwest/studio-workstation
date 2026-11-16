@@ -1,512 +1,89 @@
-"""Offline-only tests for bounded PR65 GPU CreateStack guard integration."""
-import contextlib
-import datetime as dt
-import io
+"""Native safety identity and pre-billing schedule contracts, with fault injection."""
+import copy
 import json
 import unittest
-from copy import deepcopy
 from unittest.mock import patch
-
-from runtime import pr65_gpu_create as flow
-from runtime import pr65_one_shot_guard as guard
-from scripts import studio_workstation_cli as cli
-
-STACK = "studio-gpu-cli-review1"
-TOKEN = "unique-review-token-123"
-IID = "i-0123456789abcdef0"
-VID = "vol-0123456789abcdef0"
-ARN = "arn:aws:cloudformation:us-east-1:401233741942:stack/" + STACK + "/uniqueid"
-TAGS = [{"Key": "StudioStack", "Value": STACK}, {"Key": "StudioCleanupToken", "Value": TOKEN}]
-NOW = dt.datetime(2026, 11, 1, 18, tzinfo=dt.timezone.utc)
-REGION = "us-east-1"
-PARAMS = ["ImageId=ami-0d6dd9e8265d48906", "InstanceType=g4dn.xlarge",
-          "DiskSizeGiB=100", "ClientCidr=192.0.2.42/32"]
+from runtime import pr65_gpu_create as creator, pr65_one_shot_guard as guard
+from workstation_fake import AWS, NOW, h, ROOT, inventory, missing
 
 
-class FakeAWS:
-    def __init__(self):
-        self.calls = []
-        self.schedules = {}
-        self.instance = {"InstanceId": IID, "State": {"Name": "running"},
-                         "Tags": TAGS, "BlockDeviceMappings": [{"DeviceName": "/dev/sda1",
-                            "Ebs": {"VolumeId": VID, "DeleteOnTermination": True}}]}
-        self.volume = {"VolumeId": VID, "State": "in-use", "Tags": TAGS,
-                       "Attachments": [{"VolumeId": VID, "InstanceId": IID, "Device": "/dev/sda1"}]}
-        self.stack = {"StackName": STACK, "StackId": ARN, "StackStatus": "CREATE_IN_PROGRESS", "Tags": TAGS}
-        self.seen_instances = 0
-        self.status = "CREATE_IN_PROGRESS"
-        self.schedule_failure = False
-        self.wrong_ebs_readback_role = False
-        self.group_state = "ACTIVE"
-        self.role_policy_names = [flow.POLICY]
-        self.bad_trust = False
-        self.no_volume = False
-        self.no_instance = False
-        self.wrong_volume_tags = False
-        self.wrong_instance_tags = False
-        self.wrong_stack_tags = False
-        self.terminated = []
-        self.deleted = []
+class CreationTests(unittest.TestCase):
+    def test_two_names_have_independent_native_identity_and_no_shared_role_edits(self):
+        aws=AWS();a=aws.desktop('art');b=aws.desktop('ai')
+        self.assertNotEqual(a['token'],b['token']);self.assertNotEqual(a['safety_stack'],b['safety_stack'])
+        for selected in (a,b):guard.status(aws,selected,now=NOW)
+        self.assertEqual(len(aws.schedules),4)
+        self.assertFalse(any(c[0]=='iam' and c[1].startswith(('put-','update-','create-')) for c in aws.calls))
+        self.assertFalse(any(c[1]=='delete-volume' for c in aws.calls))
 
-    def __call__(self, region, *arguments):
-        self.calls.append((region, *arguments))
-        service, op, *rest = arguments
-        if service == "scheduler" and op == "get-schedule-group":
-            return {"Name": guard.GROUP, "State": self.group_state}
-        if service == "iam" and op == "get-role":
-            return {"Role": {"Arn": guard.ROLE, "AssumeRolePolicyDocument": {
-                "Statement": [{"Effect": "Allow", "Action": "sts:AssumeRole",
-                               "Principal": {"Service": "scheduler.amazonaws.com"},
-                               "Condition": {
-                                   "ArnEquals": {"aws:SourceArn":
-                                       ("arn:aws:scheduler:us-east-1:401233741942:"
-                                        "schedule-group/" + guard.GROUP)},
-                                   "StringEquals": {"aws:SourceAccount":
-                                       "wrong" if self.bad_trust else "401233741942"}}}]}}}
-        if service == "iam" and op == "get-role-policy":
-            return {"PolicyDocument": {"Statement": [
-                {"Effect": "Allow", "Action": "ec2:TerminateInstances",
-                 "Resource": "arn:aws:ec2:us-east-1:401233741942:instance/*",
-                 "Condition": {"StringEquals": {
-                     "ec2:ResourceTag/StudioStack": STACK,
-                     "ec2:ResourceTag/StudioCleanupToken": TOKEN}}},
-                {"Effect": "Allow", "Action": "ec2:DeleteVolume",
-                 "Resource": "arn:aws:ec2:us-east-1:401233741942:volume/*",
-                 "Condition": {"StringEquals": {
-                     "ec2:ResourceTag/StudioStack": STACK,
-                     "ec2:ResourceTag/StudioCleanupToken": TOKEN}}}]}}
-        if service == "iam" and op == "list-role-policies":
-            return {"PolicyNames": self.role_policy_names}
-        if service == "iam" and op == "list-attached-role-policies":
-            return {"AttachedPolicies": []}
-        if service == "cloudformation" and op == "create-stack":
-            assert "--disable-rollback" in arguments
-            assert "ParameterKey=ImageId,ParameterValue=ami-0d6dd9e8265d48906" in arguments
-            return {"StackId": ARN}
-        if service == "cloudformation" and op == "describe-stacks":
-            s = dict(self.stack, StackStatus=self.status)
-            if self.wrong_stack_tags:
-                s["Tags"] = []
-            return {"Stacks": [s]}
-        if service == "cloudformation" and op == "list-stack-resources":
-            if self.no_instance:
-                return {"StackResourceSummaries": []}
-            return {"StackResourceSummaries": [
-                {"LogicalResourceId": "Workstation", "ResourceType": "AWS::EC2::Instance",
-                 "PhysicalResourceId": IID}]}
-        if service == "ec2" and op == "describe-instances":
-            self.seen_instances += 1
-            inst = dict(self.instance)
-            if self.no_volume:
-                inst["BlockDeviceMappings"] = []
-            if self.wrong_instance_tags:
-                inst["Tags"] = []
-            return {"Reservations": [{"Instances": [inst]}]}
-        if service == "ec2" and op == "describe-volumes":
-            vol = dict(self.volume)
-            if self.wrong_volume_tags:
-                vol["Tags"] = []
-            return {"Volumes": [vol]}
-        if service == "scheduler" and op == "create-schedule":
-            if self.schedule_failure:
-                raise PermissionError("Scheduler rejected request")
-            spec = __import__("json").loads(rest[rest.index("--cli-input-json") + 1])
-            self.schedules[spec["Name"]] = spec
-            return {"ScheduleArn": "arn:aws:scheduler:us-east-1:401233741942:schedule/default/" + spec["Name"]}
-        if service == "scheduler" and op == "get-schedule":
-            name = rest[rest.index("--name") + 1]
-            schedule = deepcopy(self.schedules[name])
-            if self.wrong_ebs_readback_role and name.startswith("studio-pr65-v-"):
-                schedule["Target"]["RoleArn"] = "arn:aws:iam::401233741942:role/foreign"
-            return schedule
-        if service == "ec2" and op == "terminate-instances":
-            self.terminated.extend(rest[rest.index("--instance-ids") + 1:])
-            return {"TerminatingInstances": []}
-        if service == "cloudformation" and op == "delete-stack":
-            self.deleted.append(rest[rest.index("--stack-name") + 1])
-            return {}
-        raise AssertionError("Unexpected AWS call: " + str(arguments))
+    def test_primary_is_armed_and_read_back_before_workload_creation(self):
+        aws=AWS();selected=aws.desktop();calls=aws.calls
+        creates=[i for i,c in enumerate(calls) if c[:2]==('cloudformation','create-stack')]
+        scheduled=next(i for i,c in enumerate(calls) if c[:2]==('scheduler','create-schedule'))
+        read=next(i for i,c in enumerate(calls) if c[:2]==('scheduler','get-schedule'))
+        self.assertLess(creates[0],scheduled);self.assertLess(scheduled,read);self.assertLess(read,creates[1])
+        primary=aws.schedules['studio-expiry-'+selected['token']]
+        self.assertEqual(json.loads(primary['Target']['Input']),{'StackName':selected['stack_id']})
 
+    def test_invalid_role_prevents_any_billable_stack(self):
+        aws=AWS()
+        def corrupt(service,action,args,result):
+            if (service,action)==('iam','get-role-policy') and args[args.index('--policy-name')+1]==creator.POLICY:
+                result['PolicyDocument']['Statement'][0]['Resource']='*'
+        aws.after=corrupt
+        with self.assertRaisesRegex(ValueError,'permissions'):aws.desktop()
+        self.assertFalse(aws.vms);self.assertFalse(aws.schedules)
 
-def fake_clock(*values):
-    values = iter(values)
-    return lambda: next(values)
+    def test_failure_before_primary_readback_never_creates_compute(self):
+        for action in ('create-schedule','get-schedule'):
+            aws=AWS()
+            def fail(service,op,args):
+                if service=='scheduler' and op==action:raise RuntimeError('injected guard failure')
+            aws.before=fail
+            with self.subTest(action=action),self.assertRaises(RuntimeError):aws.desktop()
+            self.assertFalse(aws.vms)
 
+    def test_failure_after_workload_creation_requests_native_teardown(self):
+        aws=AWS()
+        def fail(service,action,args):
+            if service=='scheduler' and action=='update-schedule':raise RuntimeError('injected pin failure')
+        aws.before=fail
+        with self.assertRaisesRegex(RuntimeError,'Creation failed'):aws.desktop()
+        self.assertTrue(aws.vms)
+        self.assertTrue(all(vm['State']['Name']=='terminated' for vm in aws.vms.values()))
+        self.assertFalse(aws.volumes)
+        self.assertTrue(any(c[:2]==('cloudformation','delete-stack') for c in aws.calls))
+        self.assertTrue(aws.schedules)  # Do not disarm protection on uncertain creation.
 
-class GuardedCreateTests(unittest.TestCase):
-    def launch(self, fake, **kwargs):
-        return flow.create_guarded(fake, REGION, STACK, TOKEN,
-                                   "/tmp/reviewed-template.json", PARAMS,
-                                   clock=kwargs.pop("clock", fake_clock(0, 0)),
-                                   sleep=kwargs.pop("sleep", lambda seconds: None),
-                                   utc_now=lambda: NOW, **kwargs)
+    def test_scope_permissions_are_exact_and_volume_delete_is_absent(self):
+        template=json.loads((ROOT/'infra/workstation-expiration-role.json').read_text())
+        self.assertNotIn('deletevolume',json.dumps(template).lower())
+        aws=AWS();s=aws.desktop();identity=creator.safety(aws,h.REGION,s['stack'])
+        role=identity['role'].rsplit('/',1)[1]
+        original=copy.deepcopy(aws.policies[role])
+        for change in ('scope','trust','extra-policy','managed-policy','wrong-role'):
+            with self.subTest(change=change):
+                aws.policies[role]=copy.deepcopy(original)
+                if change=='scope':aws.policies[role][creator.POLICY]['Statement'][0]['Condition']['StringEquals']['ec2:ResourceTag/StudioCleanupToken']='foreign'
+                if change=='extra-policy':aws.policies[role]['Extra']={}
+                expected=identity['role']
+                def change_read(service,action,args,result):
+                    if change=='trust' and (service,action)==('iam','get-role'):
+                        result['Role']=copy.deepcopy(result['Role']);result['Role']['AssumeRolePolicyDocument']['Statement'][0]['Condition']['StringEquals']['aws:SourceAccount']='foreign'
+                    if change=='managed-policy' and action=='list-attached-role-policies':result['AttachedPolicies']=[{'PolicyArn':'foreign'}]
+                    if change=='wrong-role' and action=='get-role':result['Role']={**result['Role'],'Arn':'foreign'}
+                aws.after=change_read
+                with self.assertRaises(ValueError):creator.preflight(aws,h.REGION,s['stack'],s['token'],role_arn=expected)
+        aws.after=None
 
-    def test_success_creates_async_then_arms_two_schedules(self):
-        f = FakeAWS()
-        result = self.launch(f)
-        self.assertTrue(result["guard"]["guard_armed"])
-        self.assertEqual(set(result["guard"]["schedules"]), set(f.schedules))
-        self.assertEqual(len(f.schedules), 2)
-        self.assertEqual(result["guard"]["volume_id"], VID)
-        self.assertEqual(result["stack_id"], ARN)
-        self.assertTrue(result["manual_ebs_audit_required"])
-        self.assertEqual(f.deleted, [])
-        self.assertEqual(f.terminated, [])
-        self.assertTrue(any(c[1:3] == ("cloudformation", "create-stack") for c in f.calls))
-        self.assertFalse(any(c[1:3] == ("cloudformation", "deploy") for c in f.calls))
+    def test_recreated_name_receives_new_identity(self):
+        aws=AWS();a=aws.desktop();aws(h.REGION,'cloudformation','delete-stack','--stack-name',a['stack_id'])
+        aws(h.REGION,'cloudformation','delete-stack','--stack-name',a['safety_stack'])
+        b=aws.desktop()
+        self.assertNotEqual(a['token'],b['token']);self.assertNotEqual(a['stack_id'],b['stack_id'])
 
-
-    def test_custom_durations_arm_exact_termination_and_retained_ebs_schedules(self):
-        f = FakeAWS()
-        result = self.launch(f, minutes=180, volume_delay_minutes=60)
-        self.assertTrue(result["guard"]["guard_armed"])
-        self.assertEqual(result["terminate_at"], (NOW + dt.timedelta(minutes=180)).isoformat())
-        self.assertEqual(result["volume_cleanup_at"], (NOW + dt.timedelta(minutes=240)).isoformat())
-        self.assertEqual(len(f.schedules), 2)
-        termination = f.schedules["studio-pr65-i-" + IID]
-        cleanup = f.schedules["studio-pr65-v-" + VID]
-        self.assertEqual(termination["ScheduleExpression"], "at(2026-11-01T21:00:00)")
-        self.assertEqual(cleanup["ScheduleExpression"], "at(2026-11-01T22:00:00)")
-        self.assertEqual(termination["Target"]["Arn"], guard.TERMINATE)
-        self.assertEqual(cleanup["Target"]["Arn"], guard.DELETE_VOLUME)
-        self.assertEqual(json.loads(termination["Target"]["Input"]), {"InstanceIds": [IID]})
-        self.assertEqual(json.loads(cleanup["Target"]["Input"]), {"VolumeId": VID})
-        for schedule in (termination, cleanup):
-            self.assertEqual(schedule["GroupName"], guard.GROUP)
-            self.assertEqual(schedule["State"], "ENABLED")
-            self.assertEqual(schedule["Target"]["RoleArn"], guard.ROLE)
-            self.assertEqual(schedule["ActionAfterCompletion"], "DELETE")
-        self.assertEqual(len([c for c in f.calls if c[1:3] ==
-                              ("scheduler", "get-schedule")]), 2)
-        self.assertEqual(f.terminated, [])
-        self.assertEqual(f.deleted, [])
-
-    def test_invalid_direct_duration_rejected_before_cloudformation(self):
-        for minutes, delay in ((59, 45), (241, 45), (150, 29), (150, 121),
-                               (True, 45), (150, "60")):
-            with self.subTest(minutes=minutes, delay=delay):
-                f = FakeAWS()
-                with self.assertRaisesRegex(ValueError, "bounds"):
-                    self.launch(f, minutes=minutes, volume_delay_minutes=delay)
-                self.assertEqual(f.calls, [])
-
-    def test_custom_ebs_schedule_readback_mismatch_requests_emergency_cleanup(self):
-        f = FakeAWS()
-        f.wrong_ebs_readback_role = True
-        with self.assertRaisesRegex(RuntimeError, "manual"):
-            self.launch(f, minutes=180, volume_delay_minutes=60)
-        self.assertIn(IID, f.terminated)
-        self.assertEqual(f.deleted, [ARN])
-        self.assertEqual(len(f.schedules), 2)  # Written, but never claimed verified.
-
-    def test_role_trust_mismatch_prevents_stack_creation(self):
-        f = FakeAWS()
-        f.bad_trust = True
-        with self.assertRaisesRegex(ValueError, "trust"):
-            self.launch(f)
-        self.assertFalse(any(c[1:3] == ("cloudformation", "create-stack") for c in f.calls))
-
-    def test_missing_guard_role_permissions_prevents_stack_creation(self):
-        f = FakeAWS()
-        f.role_policy_names = []
-        with self.assertRaisesRegex(ValueError, "inline policies"):
-            self.launch(f)
-        self.assertFalse(any(c[1:3] == ("cloudformation", "create-stack") for c in f.calls))
-
-    def test_mismatched_volume_tags_fail_and_request_stack_delete(self):
-        f = FakeAWS()
-        f.wrong_volume_tags = True
-        with self.assertRaisesRegex(RuntimeError, "manual"):
-            self.launch(f)
-        self.assertEqual(f.deleted, [ARN])
-        self.assertIn(IID, f.terminated)
-        self.assertFalse(f.schedules)
-
-    def test_mismatched_instance_tags_fail_closed(self):
-        f = FakeAWS()
-        f.wrong_instance_tags = True
-        with self.assertRaisesRegex(RuntimeError, "manual"):
-            self.launch(f)
-        self.assertEqual(f.deleted, [ARN])
-        self.assertFalse(f.schedules)
-        self.assertEqual(f.terminated, [])  # never terminate an unverified instance
-
-    def test_stack_ownership_mismatch_fails_closed(self):
-        f = FakeAWS()
-        f.wrong_stack_tags = True
-        with self.assertRaisesRegex(RuntimeError, "stack ownership not verified"):
-            self.launch(f)
-        self.assertEqual(f.deleted, [])  # do not delete a stack with unverified tags
-        self.assertFalse(f.schedules)
-
-    def test_stack_failure_while_creating_requests_delete(self):
-        f = FakeAWS()
-        f.status = "CREATE_FAILED"
-        with self.assertRaisesRegex(RuntimeError, "manual"):
-            self.launch(f)
-        self.assertEqual(f.deleted, [ARN])
-        self.assertFalse(f.schedules)
-
-    def test_no_resource_discovered_before_deadline_fails_closed(self):
-        f = FakeAWS()
-        f.no_instance = True
-        with self.assertRaisesRegex(RuntimeError, "manual"):
-            self.launch(f, clock=fake_clock(0, 0, 121))
-        self.assertEqual(f.deleted, [ARN])
-        self.assertEqual(f.terminated, [])
-        self.assertFalse(f.schedules)
-
-    def test_root_ebs_never_appears_terminates_instance(self):
-        f = FakeAWS()
-        f.no_volume = True
-        with self.assertRaisesRegex(RuntimeError, "manual"):
-            self.launch(f, clock=fake_clock(0, 0, 121))
-        self.assertEqual(f.deleted, [ARN])
-        self.assertIn(IID, f.terminated)
-
-    def test_scheduler_failure_requests_termination_and_stack_delete(self):
-        f = FakeAWS()
-        f.schedule_failure = True
-        with self.assertRaisesRegex(RuntimeError, "manual"):
-            self.launch(f)
-        self.assertIn(IID, f.terminated)
-        self.assertEqual(f.deleted, [ARN])
-        self.assertFalse(f.schedules)
-
-    def test_missing_active_schedule_group_does_not_create_ec2(self):
-        f = FakeAWS()
-        f.group_state = "DELETING"
-        with self.assertRaisesRegex(ValueError, "ACTIVE"):
-            self.launch(f)
-        self.assertFalse(any(c[1:3] == ("cloudformation", "create-stack") for c in f.calls))
-
-    def test_unguarded_gpu_create_denied_before_any_aws(self):
-        with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
-            with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-                cli.main(["create", "--stack", STACK, "--profile", "gpu",
-                          "--client-cidr", "192.0.2.42/32", "--cleanup-token", TOKEN])
-            run.assert_not_called()
-            aws.assert_not_called()
-
-    def test_approved_gpu_scope_reaches_guarded_creator_without_real_aws(self):
-        from unittest.mock import Mock
-        from subprocess import CalledProcessError
-        self.assertTrue(cli.GPU_ACCEPTANCE_LIVE_ENABLED)
-        with patch.object(cli, "run") as render, patch.object(
-                cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
-                cli, "gpu_release_preflight") as release, patch.object(
-                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID},
-                    "terminate_at": "2026-11-01T20:30:00+00:00",
-                    "volume_cleanup_at": "2026-11-01T21:15:00+00:00"}) as guarded, patch.object(
-                cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup, patch.object(
-                cli, "shared_gpu_source_ready") as source:
-            with contextlib.redirect_stdout(io.StringIO()):
-                cli.main([
-                    "create", "--stack", cli.GPU_ACCEPTANCE_STACK, "--profile", "gpu",
-                    "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
-                    "--client-cidr", "8.8.8.8/32",
-                ])
-        guarded.assert_called_once()
-        setup.assert_called_once_with(cli.GPU_ACCEPTANCE_STACK, "us-east-1", IID)
-        source.assert_called_once_with()
-        self.assertEqual(guarded.call_args.args[2:4],
-                         (cli.GPU_ACCEPTANCE_STACK, cli.GPU_ACCEPTANCE_TOKEN))
-        self.assertFalse(any("deploy" in str(c.args[0]) for c in render.call_args_list))
-        release.assert_called_once()
-        aws.assert_called_once()
-
-    def test_unapproved_scoped_gpu_create_refuses_before_aws(self):
-        for stack, token in (
-                ("studio-gpu-cli-review1", cli.GPU_ACCEPTANCE_TOKEN),
-                (cli.GPU_ACCEPTANCE_STACK, "other-unique-token-123")):
-            with self.subTest(stack=stack, token=token):
-                with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
-                    with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-                        cli.main([
-                            "create", "--stack", stack, "--profile", "gpu",
-                            "--cleanup-token", token, "--client-cidr", "8.8.8.8/32",
-                        ])
-                    run.assert_not_called()
-                    aws.assert_not_called()
-
-    def test_scoped_gpu_requires_public_single_ip_and_reviewed_storage(self):
-        for extra in (["--client-cidr", "10.0.0.1/32"],
-                      ["--client-cidr", "8.8.8.0/24"],
-                      ["--client-cidr", "8.8.8.8/32", "--disk-size", "200"]):
-            with self.subTest(extra=extra):
-                with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
-                    with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-                        cli.main([
-                            "create", "--stack", cli.GPU_ACCEPTANCE_STACK, "--profile", "gpu",
-                            "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN, *extra,
-                        ])
-                    run.assert_not_called()
-                    aws.assert_not_called()
-
-
-    def test_public_dcv_requires_explicit_opt_in_before_any_aws(self):
-        with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
-            with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-                cli.main(["create", "--profile", "gpu", "--stack", cli.GPU_ACCEPTANCE_STACK,
-                          "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
-                          "--client-cidr", "0.0.0.0/0"])
-            run.assert_not_called()
-            aws.assert_not_called()
-
-    def test_public_dcv_opt_in_reaches_guarded_creator(self):
-        from subprocess import CalledProcessError
-        with patch.object(cli, "run") as render, patch.object(
-                cli, "aws", side_effect=CalledProcessError(255, "aws", stderr="Stack with id does not exist")) as aws, patch.object(
-                cli, "gpu_release_preflight") as release, patch.object(
-                flow, "create_guarded", return_value={"guard": {"guard_armed": True, "instance_id": IID},
-                    "terminate_at": "2026-11-01T20:30:00+00:00",
-                    "volume_cleanup_at": "2026-11-01T21:15:00+00:00"}) as guarded, patch.object(
-                cli, "complete_gpu_setup", return_value="https://dcv.kwesidavis.com:8443") as setup, patch.object(
-                cli, "shared_gpu_source_ready") as source:
-            with contextlib.redirect_stdout(io.StringIO()):
-                cli.main(["create", "--profile", "gpu", "--stack", cli.GPU_ACCEPTANCE_STACK,
-                          "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN,
-                          "--client-cidr", "0.0.0.0/0", "--allow-public-dcv"])
-        guarded.assert_called_once()
-        setup.assert_called_once_with(cli.GPU_ACCEPTANCE_STACK, "us-east-1", IID)
-        source.assert_called_once_with()
-        self.assertIn("ClientCidr=0.0.0.0/0", guarded.call_args.args[5])
-        release.assert_called_once()
-        aws.assert_called_once()
-
-    def test_public_dcv_opt_in_cannot_override_scope(self):
-        for stack, token in (
-            ("studio-gpu-cli-wrong", cli.GPU_ACCEPTANCE_TOKEN),
-            (cli.GPU_ACCEPTANCE_STACK, "different-scope-token-123"),
-        ):
-            with self.subTest(stack=stack, token=token):
-                with patch.object(cli, "run") as render, patch.object(cli, "aws") as aws:
-                    with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-                        cli.main(["create", "--profile", "gpu", "--stack", stack,
-                                  "--cleanup-token", token, "--client-cidr", "0.0.0.0/0",
-                                  "--allow-public-dcv"])
-                    render.assert_not_called()
-                    aws.assert_not_called()
-
-    def test_gpu_without_token_denied_before_any_aws(self):
-        with patch.object(cli, "run") as run, patch.object(cli, "aws") as aws:
-            with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
-                cli.main(["create", "--stack", STACK, "--profile", "gpu"])
-            run.assert_not_called()
-            aws.assert_not_called()
-
-
-
-class NativeExpirationIdentityTests(unittest.TestCase):
-    """Evaluate only the native intrinsics used here; AWS validation is separate."""
-    def setUp(self):
-        from pathlib import Path
-        self.template = json.loads((Path(__file__).resolve().parents[1] /
-                                    "infra/workstation-expiration-role.json").read_text())
-        self.role_arn = "arn:aws:iam::401233741942:role/studio-expiry-A-ExpirationRole-abc123"
-        self.deployment = "11111111-2222-3333-4444-555555555555"
-
-    def resolve(self, value, *, deployment=None, stack="studio-gpu-art"):
-        import re
-        params = {"WorkstationStack": stack, "ScheduleGroup": guard.GROUP,
-                  "AWS::Partition": "aws", "AWS::Region": REGION,
-                  "AWS::AccountId": "401233741942",
-                  "AWS::StackId": "arn:aws:cloudformation:us-east-1:401233741942:stack/expiry/" +
-                                  (deployment or self.deployment)}
-        def walk(v):
-            if isinstance(v, list):
-                return [walk(item) for item in v]
-            if not isinstance(v, dict):
-                return v
-            if set(v) == {"Ref"}:
-                return params[v["Ref"]]
-            if set(v) == {"Fn::Sub"}:
-                return re.sub(r"\$\{([^}]+)\}", lambda m: params[m[1]], v["Fn::Sub"])
-            if set(v) == {"Fn::Split"}:
-                separator, text = walk(v["Fn::Split"])
-                return text.split(separator)
-            if set(v) == {"Fn::Select"}:
-                index, items = walk(v["Fn::Select"])
-                return items[index]
-            return {key: walk(item) for key, item in v.items()}
-        return walk(value)
-
-    def manager(self, *, deployment=None, stack="studio-gpu-art", trust=None, extra_policy=False):
-        props = self.resolve(self.template["Resources"]["ExpirationRole"]["Properties"],
-                             deployment=deployment, stack=stack)
-        def call(region, service, operation, *args):
-            self.assertEqual(region, REGION)
-            if service == "scheduler":
-                self.assertEqual(operation, "get-schedule-group")
-                return {"State": "ACTIVE"}
-            self.assertEqual(service, "iam")
-            self.assertEqual(args[args.index("--role-name") + 1], self.role_arn.rsplit("/", 1)[1])
-            if operation == "get-role":
-                return {"Role": {"Arn": self.role_arn, "AssumeRolePolicyDocument":
-                                 props["AssumeRolePolicyDocument"] if trust is None else trust}}
-            if operation == "get-role-policy":
-                return {"PolicyDocument": props["Policies"][0]["PolicyDocument"]}
-            if operation == "list-role-policies":
-                return {"PolicyNames": [flow.POLICY] + (["Unexpected"] if extra_policy else [])}
-            if operation == "list-attached-role-policies":
-                return {"AttachedPolicies": []}
-            raise AssertionError((service, operation, args))
-        return call
-
-    def test_native_role_passes_existing_strict_preflight(self):
-        flow.preflight(self.manager(), REGION, "studio-gpu-art", self.deployment,
-                       role_arn=self.role_arn)
-
-    def test_other_workstation_or_token_is_rejected(self):
-        for stack, token in (("studio-gpu-other", self.deployment), ("studio-gpu-art", TOKEN)):
-            with self.subTest(stack=stack, token=token), self.assertRaisesRegex(ValueError, "scope"):
-                flow.preflight(self.manager(), REGION, stack, token, role_arn=self.role_arn)
-
-    def test_reusing_workstation_name_does_not_reuse_cleanup_identity(self):
-        output = self.template["Outputs"]["CleanupToken"]["Value"]
-        other = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        self.assertEqual(self.resolve(output), self.deployment)
-        self.assertEqual(self.resolve(output, deployment=other), other)
-        self.assertNotEqual(self.resolve(output), self.resolve(output, deployment=other))
-        self.assertRegex(self.resolve(output), r"^[a-z0-9-]{12,64}$")
-        with self.assertRaisesRegex(ValueError, "scope"):
-            flow.preflight(self.manager(deployment=other), REGION, "studio-gpu-art",
-                           self.deployment, role_arn=self.role_arn)
-
-    def test_no_user_cleanup_token_or_shared_role_mutation(self):
-        self.assertEqual(set(self.template["Parameters"]), {"WorkstationStack", "ScheduleGroup"})
-        self.assertEqual(set(self.template["Resources"]), {"ExpirationRole"})
-        resource = self.template["Resources"]["ExpirationRole"]
-        self.assertEqual(resource["Type"], "AWS::IAM::Role")
-        self.assertNotIn("DeletionPolicy", resource)
-        self.assertEqual(set(resource["Properties"]), {"AssumeRolePolicyDocument", "Policies"})
-        self.assertEqual(self.template["Outputs"]["ExpirationRoleArn"]["Value"],
-                         {"Fn::GetAtt": ["ExpirationRole", "Arn"]})
-
-    def test_wrong_account_or_schedule_group_trust_rejected(self):
-        props = self.resolve(self.template["Resources"]["ExpirationRole"]["Properties"])
-        for operator, key in (("StringEquals", "aws:SourceAccount"), ("ArnEquals", "aws:SourceArn")):
-            trust = deepcopy(props["AssumeRolePolicyDocument"])
-            trust["Statement"][0]["Condition"][operator][key] = "foreign"
-            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "trust"):
-                flow.preflight(self.manager(trust=trust), REGION, "studio-gpu-art",
-                               self.deployment, role_arn=self.role_arn)
-
-    def test_unexpected_policy_rejected(self):
-        with self.assertRaisesRegex(ValueError, "inline policies"):
-            flow.preflight(self.manager(extra_policy=True), REGION, "studio-gpu-art",
-                           self.deployment, role_arn=self.role_arn)
-
-    def test_selected_role_must_match_iam_readback(self):
-        call = self.manager()
-        def changed(*args):
-            response = call(*args)
-            if args[2] == "get-role":
-                response["Role"]["Arn"] = guard.ROLE
-            return response
-        with self.assertRaisesRegex(ValueError, "Unexpected expiration role"):
-            flow.preflight(changed, REGION, "studio-gpu-art", self.deployment,
-                           role_arn=self.role_arn)
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_duplicate_name_never_updates_existing_stack(self):
+        aws=AWS();first=aws.desktop();before=copy.deepcopy(aws.vms)
+        with self.assertRaises(Exception):aws.desktop()
+        self.assertEqual(aws.vms,before)
+        self.assertFalse(any(c[1]=='update-stack' for c in aws.calls))
