@@ -26,6 +26,11 @@ The command is **`python3 studio workstation`**. It is not an installed system-l
 
 ## Command behavior — no redundant confirmations
 
+For optional desktop software, see the [VS Code Rez package guide](../software/vscode/README.md).
+It uses `publisher-run --operation build` with a pinned recipe commit and the existing
+promotion commands. Promotion versions accept numeric dotted forms such as `26.05`
+and `1.146.0`.
+
 | Command | Behavior |
 |---|---|
 | `create --stack NAME --profile cpu` | **Creates** a CPU CloudFormation stack and EC2 instance; incurs charges |

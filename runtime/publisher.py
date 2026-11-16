@@ -85,7 +85,7 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
                     "test -f " + args.recipe_path,
                     "STUDIO_PACKAGE_ROOT=/opt/studio/packages bash " + args.recipe_path]
     else:
-        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", args.name) or not re.fullmatch(r"[0-9]+\.[0-9]+", args.version):
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", args.name) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)+", args.version):
             raise ValueError("Invalid package name/version")
         src, dst = ("dev", "test") if args.operation == "promote-test" else ("test", "prod")
         commands = ["set -eu", "test -x /opt/studio/rez/scripts/studio-rez-promote-package",
