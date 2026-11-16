@@ -41,7 +41,7 @@ class GpuProfileContracts(unittest.TestCase):
             t = json.loads(out.read_text())
             p = t["Resources"]["Workstation"]["Properties"]
             self.assertEqual(p["InstanceInitiatedShutdownBehavior"], "stop")
-            self.assertFalse(p["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
+            self.assertTrue(p["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
             self.assertTrue(p["BlockDeviceMappings"][0]["Ebs"]["Encrypted"])
             self.assertEqual(t["Parameters"]["InstanceType"]["AllowedValues"], ["g4dn.xlarge"])
             self.assertNotIn("Task7", {tag["Key"] for tag in p["Tags"]})
@@ -74,7 +74,7 @@ class GpuProfileContracts(unittest.TestCase):
                               if x["Key"] in expected}, expected)
             self.assertEqual(instance["LaunchTemplate"]["LaunchTemplateId"],
                              {"Ref": "CleanupVolumeTagLaunchTemplate"})
-            self.assertFalse(instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
+            self.assertTrue(instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
 
     def test_unscoped_gpu_does_not_add_launch_template(self):
         with tempfile.TemporaryDirectory() as d:

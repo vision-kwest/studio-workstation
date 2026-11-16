@@ -126,7 +126,6 @@ def main():
         template["Resources"]["Workstation"]["Properties"]["Tags"][0]["Value"] = "studio-workstation-res-gpu"
         if a.lifecycle == "persistent":
             instance["InstanceInitiatedShutdownBehavior"] = "stop"
-            instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"] = False
         else:
             instance["Tags"].extend([{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}])
         if a.cleanup_token:

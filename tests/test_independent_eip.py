@@ -73,6 +73,18 @@ class IndependentEipTests(unittest.TestCase):
         guard.assert_called_once()
         preflight.assert_called_once()
 
+    def test_free_owner_and_unassociated_handoff(self):
+        h, gpu = independent_eip.legacy, "i-bbbbbbbbbbbbbbbbb"
+        self.assertIsNone(independent_eip._cpu_owner(lambda *a: self.fail("unexpected AWS read"), {"Tags": []}))
+        plan = {"from": None, "to": gpu, "cpu": None, "old_association": None, "gpu_eni": "eni-gpu", "guard": {}}
+        after = {"InstanceId": gpu, "NetworkInterfaceId": "eni-gpu", "AssociationId": "eipassoc-gpu",
+                 "Tags": [{"Key": "StudioDcvInstanceId", "Value": gpu}]}
+        aws = unittest.mock.Mock(return_value={"AssociationId": "eipassoc-gpu"})
+        with (patch.object(independent_eip, "gpu_preview", return_value=plan),
+              patch.object(independent_eip, "_address", side_effect=[{"Tags": []}, after])):
+            self.assertEqual(independent_eip.handoff_gpu(aws, lambda *a: None, check_guest=lambda *a: None)["owner"], gpu)
+        self.assertEqual([c.args[2] for c in aws.call_args_list], ["associate-address", "create-tags"])
+
     def test_restore_refuses_missing_cpu_return_tag(self):
         with patch.object(independent_eip, "_address", return_value={
             "InstanceId": "i-bbbbbbbbbbbbbbbbb",
