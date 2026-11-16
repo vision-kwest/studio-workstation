@@ -30,9 +30,8 @@ jobs:
       - name: Focused regression suite
         run: |
           python3 - <<'PY'
-          import pathlib,re,unittest
-          workflows=['.github/workflows/studio-cli.yml','.github/workflows/issue43-offline.yml']
-          patterns=sorted({p for f in workflows for p in re.findall(r'-p (test_[a-z0-9_]+\.py)',pathlib.Path(f).read_text())})
+          import unittest
+          patterns='test_dcv_endpoint.py test_gpu_cli_guard_infra.py test_gpu_cli_test_cleanup.py test_gpu_profile_contract.py test_independent_eip.py test_issue43_acm_dcv.py test_issue43_cli_lifecycle.py test_issue43_cpu_destroy.py test_issue43_destroy.py test_issue43_e2e_offline.py test_issue43_gpu_acm_setup.py test_issue43_hostname_handoff.py test_issue68_expiration_extension.py test_pr65_gpu_create.py test_pr65_one_shot_guard.py test_studio_software_offline.py test_studio_workstation_cli.py test_workstation_inventory.py'.split()
           suite=unittest.TestSuite(unittest.defaultTestLoader.discover('tests',pattern=p) for p in patterns)
           assert suite.countTestCases()==360, suite.countTestCases()
           result=unittest.TextTestRunner(verbosity=2).run(suite)
