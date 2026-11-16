@@ -1,0 +1,27 @@
+name: Issue 98 source transfer
+on:
+  push:
+    branches: [feature/issue98-unified-lifecycle]
+    paths: [.github/workflows/issue98-transfer.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 1e3efa077f141aabd7adfc936a947f51621873e4
+          persist-credentials: false
+      - run: |
+          git archive --format=tar.gz HEAD > /tmp/source.tar.gz
+          git rev-parse HEAD HEAD^{tree} > /tmp/identity.txt
+          sha256sum /tmp/source.tar.gz > /tmp/source.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue98-integration-baseline
+          path: |
+            /tmp/source.tar.gz
+            /tmp/identity.txt
+            /tmp/source.sha256
+          retention-days: 1
