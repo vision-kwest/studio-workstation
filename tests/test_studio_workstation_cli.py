@@ -213,5 +213,28 @@ class StudioCliTests(unittest.TestCase):
 
 
 
+    @mock.patch.object(cli, "instance_id", return_value=INSTANCE)
+    @mock.patch.object(cli, "aws")
+    @mock.patch("time.sleep")
+    def test_readiness_failure_reports_last_native_check_and_ssm_identity(self, sleep, aws, iid):
+        aws.side_effect = [
+            {"Command": {"CommandId": "readiness-command"}},
+            {"Status": "Failed", "StandardOutputContent":
+             "Checking GDM and DCV services\ninactive\nactive\n",
+             "StandardErrorContent": "service check failed"},
+        ]
+        with self.assertRaises(ValueError) as raised:
+            cli.gpu_ready(STACK, "us-east-1")
+        message = str(raised.exception)
+        for expected in (INSTANCE, "readiness-command", "Checking GDM", "inactive", "service check failed"):
+            self.assertIn(expected, message)
+        args = aws.call_args_list[0].args
+        import json
+        checks = json.loads(args[args.index("--parameters") + 1])["commands"]
+        self.assertIn("echo 'Checking RES desktop readiness marker'", checks)
+        self.assertIn("dcv describe-session console", checks)
+        self.assertFalse(any("systemctl restart" in check or "touch " in check for check in checks))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -156,12 +156,16 @@ def gpu_ready(stack, region, *, gpu=True):
     iid = instance_id(stack, region)
     commands = [
         "set -e",
+        "echo 'Checking RES desktop readiness marker'",
         "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
+        "echo 'Checking GDM and DCV services'",
         "systemctl is-active gdm3 dcvserver",
+        "echo 'Checking DCV console session'",
         "dcv describe-session console",
     ]
     if gpu:
         commands += [
+        "echo 'Checking NVIDIA T4 and Xorg OpenGL'",
         "nvidia-smi -L | grep -q 'Tesla T4'",
         "pgrep -x Xorg",
         "DISPLAY=:0 XAUTHORITY=/run/user/119/gdm/Xauthority __GLX_VENDOR_LIBRARY_NAME=nvidia glxinfo -B | grep -q 'OpenGL renderer string: Tesla T4'",
@@ -184,7 +188,9 @@ def gpu_ready(stack, region, *, gpu=True):
             print("READY: RES, GDM and DCV" + (", Xorg and Tesla T4 OpenGL" if gpu else ""))
             return
         if result["Status"] in ("Failed", "Cancelled", "TimedOut"):
-            raise ValueError("GPU readiness failed: " + result.get("StandardErrorContent", "")[-1200:])
+            details = "\n".join(result.get(key, "") for key in
+                                ("StandardOutputContent", "StandardErrorContent"))
+            raise ValueError(f"GPU readiness failed: instance={iid} SSM command={cid}\n" + details[-1600:])
     raise ValueError("GPU readiness timed out; inspect SSM and RES bootstrap logs")
 
 
