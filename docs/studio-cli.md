@@ -16,19 +16,44 @@ Use a repository checkout in AWS CloudShell or another machine with:
 ```bash
 cd ~/studio-workstation
 git fetch origin
-git switch feature/issue-43-letsencrypt-dynamic-dns
-# PR #67 is draft; these commands are not yet available on main
+git switch main
+# For an unmerged PR, check out its reviewed feature branch instead.
 python3 -m pip install -r requirements.txt
 python3 studio workstation --help
 ```
 
 The command is **`python3 studio workstation`**. It is not an installed system-level `studio` binary.
 
+## Names and discovery
+
+```bash
+python3 studio workstation list
+python3 studio workstation status studio-cpu-art
+python3 studio workstation stop studio-cpu-art
+python3 studio workstation start studio-cpu-art
+python3 studio workstation connect studio-cpu-art
+python3 studio workstation destroy studio-cpu-art --delete-stack
+```
+
+Use an exact CloudFormation stack name from `list`; no separate name registry exists.
+`--stack NAME` remains supported and `--name NAME` is an alias. Do not combine selectors.
+Targeted commands require a name and no longer fall back to the deleted historical CPU.
+`list` queries AWS in the selected account/`--region`, includes failed/missing-instance
+stacks, and reports current EC2 addressing rather than cached CloudFormation IP outputs.
+Its URLs are candidates (`dcv_verified: false`), not proof of a successful browser login.
+
+CPU `create --profile cpu` generates a unique `studio-cpu-*` name when omitted;
+`--name studio-cpu-art` overrides it. Existing-name collisions are rejected before deploy.
+**GPU generated names and internal cleanup identity are not enabled by this increment:**
+the exact legacy GPU stack/token and all expiration checks still apply until the
+per-deployment guard changes and live acceptance in Issue #98 are complete.
+Publisher commands remain unchanged.
+
 ## Command behavior — no redundant confirmations
 
 | Command | Behavior |
 |---|---|
-| `create --stack NAME --profile cpu` | **Creates** a CPU CloudFormation stack and EC2 instance; incurs charges |
+| `create --profile cpu [--name NAME]` | **Creates** a CPU CloudFormation stack and EC2 instance; generates a name if omitted; incurs charges |
 | `create --stack NAME --profile gpu` | **Creates** only if the exact GPU acceptance stack/token and guard checks pass |
 | `create ... --dry-run` | Renders and calls CloudFormation ValidateTemplate; **no EC2 launch** |
 | `status --stack NAME` | Reads EC2 state and DCV URL; for the exact GPU, verifies both Scheduler safeguards and displays termination/cleanup UTC, remaining minutes and expiry warnings |
