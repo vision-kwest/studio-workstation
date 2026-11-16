@@ -37,6 +37,12 @@ def patch_post_reboot_dpms(raw):
     """
     old = b'      /bin/bash "${SCRIPT_DIR}/../../dcv/linux/dcv_server.sh" -o $BASE_OS -g $GPU_FAMILY -s "${SCRIPT_DIR}/.."'
     fix = b"""      if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
+        if [[ "${GPU_FAMILY}" == "NVIDIA" ]]; then
+          command -v nvidia-smi >/dev/null && modinfo -k "$(uname -r)" nvidia >/dev/null || {
+            echo "RES NVIDIA driver missing for active kernel" >&2
+            exit 1
+          }
+        fi
         # The base AMI may contain a malformed DPMS file even when DCV install is skipped.
         mkdir -p /etc/X11/xorg.conf.d
         printf '%s\\n' 'Section "Extensions"' '    Option "DPMS" "Disable"' 'EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf
@@ -45,6 +51,15 @@ def patch_post_reboot_dpms(raw):
         raise ValueError("Pinned RES post-reboot DCV install anchor changed")
     return raw.replace(old, old + b"\n" + fix)
 
+
+def patch_gpu_driver_checksum(raw):
+    """Retain RES's original signed S3 command; verify its exact GRID payload."""
+    old = b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive $NVIDIA_S3_BUCKET_PATH .'
+    check = (b"\n  echo 'cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156  "
+             b"NVIDIA-Linux-x86_64-595.91.07-grid-aws.run' | sha256sum -c - || return $?")
+    if raw.count(old) != 1:
+        raise ValueError("Pinned RES GPU download source anchor changed")
+    return raw.replace(old, old + check)
 
 def patch_xserver_dcv_access(raw):
     """Grant only the local DCV service user, only in standalone mode."""
@@ -137,9 +152,12 @@ def main():
             if len(post)!=1:
                 raise ValueError("Cannot locate unique RES post-reboot installer")
             post_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==post[0])).read()
+            drivers="scripts/dcv/linux/gpu_drivers.sh"
+            gpu_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==drivers)).read()
         output=rewrite(raw,mapping,replacements={
             matches[0]:patch_dcv_dpms(original),
             post[0]:patch_post_reboot_dpms(post_raw),
+            drivers:patch_gpu_driver_checksum(gpu_raw),
         })
     else:
         with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as tf:

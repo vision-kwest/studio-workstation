@@ -16,6 +16,7 @@ EXPECTED={
         "scripts/virtual-desktop-host/linux/install.sh",
         "scripts/common/linux/install_app.sh",
         "scripts/dcv/linux/debian/dcv_server.sh",
+        "scripts/dcv/linux/gpu_drivers.sh",
         "scripts/virtual-desktop-host/linux/install_post_reboot.sh",
     },
     "virtual-desktop.tar.gz":{
@@ -44,6 +45,9 @@ def run(directory):
             assert required <= modified.keys()
             if filename=="installation-scripts.tar.gz":
                 assert original.keys()==modified.keys()
+                for name in required:
+                    if name.endswith(".sh"):
+                        subprocess.run(["bash", "-n"], input=modified[name], check=True)
                 for name in original:
                     if name not in required:
                         assert original[name]==modified[name],name
@@ -58,6 +62,14 @@ def run(directory):
                 assert b"install_post_reboot.sh" in modified["scripts/virtual-desktop-host/linux/install.sh"]
                 assert b"printf" in modified["scripts/dcv/linux/debian/dcv_server.sh"]
                 assert b"STUDIO_STANDALONE" in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
+                assert b'modinfo -k "$(uname -r)" nvidia' in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
+                driver=modified["scripts/dcv/linux/gpu_drivers.sh"]
+                upstream=original["scripts/dcv/linux/gpu_drivers.sh"]
+                signed=b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive $NVIDIA_S3_BUCKET_PATH .'
+                assert upstream.count(signed)==driver.count(signed)==1
+                assert b"--no-sign-request" not in driver
+                assert b"sha256sum -c -" in driver
+                assert b"cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156" in driver
             else:
                 assert original.keys()==modified.keys()
                 for name in original:
