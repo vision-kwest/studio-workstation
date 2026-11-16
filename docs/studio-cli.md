@@ -250,3 +250,24 @@ Task 5 regressions used mocked AWS interfaces; the supervised Task 6 live accept
 - [CPU acceptance history](cpu-acceptance-lifecycle-tls.md)
 - [Architecture](visual-architecture.md) and [lifecycle diagram](workstation-lifecycle-visual.md)
 - [Optional future secure access-from-anywhere](https://github.com/vision-kwest/studio-workstation/issues/62)
+
+### Checking the current DCV endpoint (Issue #98, second increment)
+
+`python3 studio workstation connect NAME` now checks the selected running
+workstation's current public address, rather than assuming a historical GPU/CPU
+name always owns the shared hostname. A non-owner uses its current raw-IP HTTPS
+URL, with a prominent certificate warning. The hostname owner must pass the
+existing EIP ownership, DNS and trusted-certificate checks; a failed trusted
+check is never silently downgraded to an unverified connection.
+
+The command also requests the HTTPS root page with a five-second socket timeout.
+A missing IP, blocked TCP 8443, failed handshake or non-HTML/non-200 response fails
+the command; none is treated as merely a certificate warning. This sends no login
+credentials and does not prove successful desktop authentication. Run it from a
+network allowed by the workstation's `--client-cidr`. `connect NAME --ssm` remains
+an explicit administrative alternative, not evidence of working web access.
+
+This read-only increment does not yet change create/start's legacy automatic GPU
+handoff, implement automatic recovery of a former owner's public address, or
+remove the single-GPU IAM/ACM restriction. Those remain #98 acceptance gates;
+these PRs must not be represented as completed multi-GPU hostname orchestration.

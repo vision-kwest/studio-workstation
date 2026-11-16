@@ -10,7 +10,7 @@ from unittest import mock
 
 from scripts import studio_workstation_cli as cli
 from runtime import issue43_destroy
-from runtime import independent_eip
+from runtime import independent_eip, dcv_endpoint
 
 
 CPU = cli.DEFAULT_STACK
@@ -67,6 +67,7 @@ class OfflineLifecycleJourney(unittest.TestCase):
               mock.patch.object(independent_eip, "release", side_effect=release) as released,
               mock.patch.object(cli, "wait_cpu_https", return_value=TLS),
               mock.patch.object(cli, "trusted_url", return_value=TLS),
+              mock.patch.object(dcv_endpoint, "resolve", return_value={"url": TLS, "trusted": True}),
               mock.patch.object(issue43_destroy, "destroy_cpu",
                                 return_value={"state": "DELETE_COMPLETE"}) as destroy):
             self.invoke("create", "--stack", "studio-workstation-cpu-review",
@@ -113,6 +114,7 @@ class OfflineLifecycleJourney(unittest.TestCase):
               mock.patch.object(cli, "complete_gpu_setup", return_value=TLS) as setup,
               mock.patch.object(cli, "complete_gpu_stop", return_value={"revoked": True}) as stop,
               mock.patch.object(cli, "trusted_url", return_value=TLS),
+              mock.patch.object(dcv_endpoint, "resolve", return_value={"url": TLS, "trusted": True}),
               mock.patch.object(handoff, "_eip", return_value={
                   "InstanceId": GPU_ID,
                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": GPU_ID}]}),
