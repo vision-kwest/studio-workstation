@@ -1,28 +1,54 @@
-name: Issue 98 pinned source export
+name: Issue 98 verified identity patch
 on:
   push:
     branches: [feature/issue98-gpu-identity]
     paths: [.github/workflows/issue98-source-export.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  export:
+  apply:
     runs-on: ubuntu-24.04
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 44759cdfdd045569c221d93aa1c0af7c84c88e13
-          fetch-depth: 1
-          persist-credentials: false
-      - run: |
-          git archive --format=tar.gz -o /tmp/source.tar.gz HEAD
-          git rev-parse HEAD HEAD^{tree} > /tmp/source-identity.txt
-          sha256sum /tmp/source.tar.gz > /tmp/source.sha256
-      - uses: actions/upload-artifact@v4
-        with:
-          name: issue98-pinned-source
-          path: |
-            /tmp/source.tar.gz
-            /tmp/source-identity.txt
-            /tmp/source.sha256
-          retention-days: 1
+          fetch-depth: 0
+      - name: Verify exact source and patch
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 44759cdfdd045569c221d93aa1c0af7c84c88e13 HEAD
+          python3 - <<'PY'
+          import subprocess
+          changed=set(subprocess.check_output(['git','diff','--name-only','44759cdfdd045569c221d93aa1c0af7c84c88e13','HEAD'],text=True).splitlines())
+          assert changed=={'.github/issue98-identity.patch','.github/workflows/issue98-source-export.yml'}, changed
+          PY
+          echo 'dbaf1c8925e797dd5692a7c3e00b0d7a942c74fa88a71b8caf4627f909aa1af8  .github/issue98-identity.patch' | sha256sum -c -
+          git apply --check .github/issue98-identity.patch
+          git apply .github/issue98-identity.patch
+      - run: python3 -m pip install 'jinja2>=3,<4'
+      - name: Focused regression suite
+        run: |
+          python3 - <<'PY'
+          import pathlib,re,unittest
+          workflows=['.github/workflows/studio-cli.yml','.github/workflows/issue43-offline.yml']
+          patterns=sorted({p for f in workflows for p in re.findall(r'-p (test_[a-z0-9_]+\.py)',pathlib.Path(f).read_text())})
+          suite=unittest.TestSuite(unittest.defaultTestLoader.discover('tests',pattern=p) for p in patterns)
+          assert suite.countTestCases()==360, suite.countTestCases()
+          result=unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
+          git diff --check
+          python3 -m json.tool infra/workstation-expiration-role.json >/dev/null
+      - name: Publish only exact tested tree
+        run: |
+          set -euo pipefail
+          git rm .github/issue98-identity.patch .github/workflows/issue98-source-export.yml
+          git add .github/workflows/studio-cli.yml docs/studio-cli.md infra/workstation-expiration-role.json runtime/pr65_gpu_create.py tests/test_pr65_gpu_create.py
+          test "$(git write-tree)" = '45257ff03aad64245f466d9188791b2d2b4e959d'
+          git diff --cached --check
+          git diff --cached --numstat 44759cdfdd045569c221d93aa1c0af7c84c88e13
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(#98): native per-workstation expiration identity with scoped preflight'
+          git push origin HEAD:feature/issue98-gpu-identity
