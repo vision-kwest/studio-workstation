@@ -1,0 +1,32 @@
+name: Issue 98 baseline audit
+on:
+  push:
+    branches: [work/issue98-baseline-tests]
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive tracked baseline source
+        run: git archive --format=tar HEAD > /tmp/issue98-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue98-source
+          path: /tmp/issue98-source.tar
+          retention-days: 1
+      - run: python3 -m pip install 'jinja2>=3,<4'
+      - name: Run offline baseline
+        run: |
+          set -o pipefail
+          python3 -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee /tmp/issue98-baseline.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue98-baseline-results
+          path: /tmp/issue98-baseline.log
+          retention-days: 1
