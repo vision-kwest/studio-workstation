@@ -1,0 +1,28 @@
+name: Issue 98 pinned source export
+on:
+  push:
+    branches: [feature/issue98-gpu-identity]
+    paths: [.github/workflows/issue98-source-export.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 44759cdfdd045569c221d93aa1c0af7c84c88e13
+          fetch-depth: 1
+          persist-credentials: false
+      - run: |
+          git archive --format=tar.gz -o /tmp/source.tar.gz HEAD
+          git rev-parse HEAD HEAD^{tree} > /tmp/source-identity.txt
+          sha256sum /tmp/source.tar.gz > /tmp/source.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue98-pinned-source
+          path: |
+            /tmp/source.tar.gz
+            /tmp/source-identity.txt
+            /tmp/source.sha256
+          retention-days: 1
