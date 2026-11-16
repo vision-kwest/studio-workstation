@@ -100,8 +100,7 @@ class FakeCleanup(IAMFake):
             self.stack["StackStatus"] = "DELETE_COMPLETE"
             self.gpu["State"]["Name"] = "terminated"
             if not self.stuck_volume:
-                self.volume["State"] = "available"
-                self.volume["Attachments"] = []
+                self.deleted_volume = True
             self.deleted_sg = True
             self.deleted_lt = True
         elif "stack-delete-complete" in cmd:
@@ -170,13 +169,20 @@ class ScopedDestroyTests(unittest.TestCase):
         self.assertLess(actions.index("ec2 stop-instances"), actions.index("eip-detach"))
         self.assertLess(actions.index("eip-return"), actions.index("iam-revoke"))
         self.assertLess(actions.index("iam-revoke"), actions.index("cloudformation delete-stack"))
-        self.assertLess(actions.index("ec2 delete-volume"), actions.index("scheduler delete-schedule"))
+        self.assertNotIn("ec2 delete-volume", actions)
 
     def test_previously_stopped_gpu_and_cpu_owned_eip_still_clean(self):
         self.fake.gpu["State"]["Name"] = "stopped"
         self.destroy()
         self.assertNotIn("ec2 stop-instances", self.fake.events)
         self.assertNotIn("eip-detach", self.fake.events)
+        self.assertFalse(self.fake.schedules)
+
+    def test_destroy_without_cpu_preserves_free_eip(self):
+        self.fake.eip.update(InstanceId=None, AssociationId=None, NetworkInterfaceId=None)
+        self.fake.eip["Tags"] = [t for t in self.fake.eip["Tags"] if t["Key"] != "StudioDcvInstanceId"]
+        result = destroy.destroy_gpu(self.fake, self.fake.run, h.GPU_STACK, h.REGION, sleep=lambda _: None)
+        self.assertIsNone(result["eip_owner"])
         self.assertFalse(self.fake.schedules)
 
     def test_wrong_volume_tag_fails_before_any_mutation(self):
@@ -212,7 +218,7 @@ class ScopedDestroyTests(unittest.TestCase):
 
     def test_retained_volume_still_in_use_prevents_schedule_deletion(self):
         self.fake.stuck_volume = True
-        with self.assertRaisesRegex(RuntimeError, "Retained EBS not detached"):
+        with self.assertRaisesRegex(RuntimeError, "Retained GPU EBS deletion not independently verified"):
             self.destroy()
         self.assertEqual(len(self.fake.schedules), 2)
         self.assertFalse(self.fake.deleted_volume)

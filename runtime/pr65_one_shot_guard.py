@@ -41,8 +41,8 @@ def verify_ownership(instance, volume, stack, token):
     matches = [m for m in instance.get("BlockDeviceMappings", []) if m.get("DeviceName") == "/dev/sda1"]
     if len(matches) != 1 or matches[0].get("Ebs", {}).get("VolumeId") != vid:
         raise ValueError("Root EBS ID not confirmed from instance")
-    if matches[0]["Ebs"].get("DeleteOnTermination") is not False:
-        raise ValueError("Expected retained root EBS volume")
+    if matches[0]["Ebs"].get("DeleteOnTermination") is not True:
+        raise ValueError("Expected CloudFormation-managed root EBS deletion")
     if volume.get("State") != "in-use" or not any(
         a.get("InstanceId") == iid and a.get("VolumeId") == vid and a.get("Device") == "/dev/sda1"
         for a in volume.get("Attachments", [])

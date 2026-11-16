@@ -420,7 +420,7 @@ def complete_gpu_stop(stack, instance, *, manager=aws):
     tagged = independent_eip.legacy._tags(address).get("StudioDcvInstanceId")
     if owner == instance or (owner is None and tagged == instance):
         independent_eip.restore_cpu(manager, instance)
-    elif owner is not None and tagged == owner:
+    elif tagged == owner:
         independent_eip._cpu_owner(manager, address)
     else:
         raise ValueError("Unexpected EIP owner; refusing GPU cleanup")
@@ -672,6 +672,9 @@ def command(args):
         return
     if args.action in ("start", "stop"):
         desired = "stopped" if args.action == "start" else "running"
+        if args.action == "stop" and args.stack == GPU_ACCEPTANCE_STACK and state["state"] == "stopped":
+            print(json.dumps(complete_gpu_stop(args.stack, iid), indent=2))
+            return
         if state["state"] != desired:
             raise ValueError(f"Expected {desired} before {args.action}, got {state['state']}")
         if args.action == "start" and args.stack == DEFAULT_STACK:
@@ -686,20 +689,6 @@ def command(args):
         if args.action == "start" and args.stack == GPU_ACCEPTANCE_STACK:
             shared_gpu_source_ready()  # CPU/EIP must be safe before billing.
             gpu_restart_preflight(args.stack, iid, args.region)  # Guard + deadline before EC2.
-        if args.action == "stop" and args.stack == GPU_ACCEPTANCE_STACK:
-            from runtime import issue43_hostname_handoff as handoff
-            address = handoff._eip(aws)
-            owner = address.get("InstanceId")
-            tagged = handoff._tags(address).get("StudioDcvInstanceId")
-            from runtime import independent_eip
-            if owner == iid and tagged == iid:
-                pass
-            elif owner is None and tagged == iid:
-                pass
-            elif owner and tagged == owner:
-                independent_eip._cpu_owner(aws, address)
-            else:
-                raise ValueError("Unexpected EIP ownership; refusing GPU stop orchestration")
         run(["aws", "ec2", f"{args.action}-instances", "--instance-ids", iid,
              "--region", args.region], capture=False)
         waiter = "instance-status-ok" if args.action == "start" else "instance-stopped"

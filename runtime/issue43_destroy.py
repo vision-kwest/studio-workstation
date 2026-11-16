@@ -114,8 +114,8 @@ def _preflight(aws):
         raise ValueError("GPU instance state not safe for teardown")
     block = [x for x in vm.get("BlockDeviceMappings", [])
              if x.get("DeviceName") == ROOT]
-    if (len(block) != 1 or block[0].get("Ebs", {}).get("DeleteOnTermination") is not False):
-        raise ValueError("Retained GPU root EBS identity not verified")
+    if (len(block) != 1 or block[0].get("Ebs", {}).get("DeleteOnTermination") is not True):
+        raise ValueError("Delete-on-termination GPU root EBS identity not verified")
     vid = block[0]["Ebs"].get("VolumeId")
     if not re.fullmatch(r"vol-[0-9a-f]{8,17}", vid or ""):
         raise ValueError("Unexpected retained GPU volume ID")
@@ -150,12 +150,12 @@ def _preflight(aws):
     owner = eip.get("InstanceId")
     tagged = h._tags(eip).get("StudioDcvInstanceId")
     if owner == iid and tagged == iid:
-        if not eip.get("AssociationId") or not h._tags(eip).get("StudioDcvReturnStack"):
+        if not eip.get("AssociationId"):
             raise ValueError("GPU EIP return stack not verified")
     elif owner is None and tagged == iid:
         if not h._tags(eip).get("StudioDcvReturnStack"):
             raise ValueError("GPU EIP return stack missing")
-    elif owner and tagged == owner:
+    elif tagged == owner:
         independent_eip._cpu_owner(aws, eip)
     else:
         raise ValueError("Unexpected EIP owner")
@@ -230,14 +230,6 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
     _gone(aws, "sg", "ec2", "describe-security-groups", "--group-ids", ids["sg"])
     _gone(aws, "lt", "ec2", "describe-launch-templates",
           "--launch-template-ids", ids["lt"])
-    vol = _absent(lambda: _one(aws, "ec2", "describe-volumes",
-                               "--volume-ids", ids["vid"]), MISSING["volume"])
-    if vol is not None:
-        _owned(vol)
-        if vol["VolumeId"] != ids["vid"] or vol["State"] != "available" or vol.get("Attachments"):
-            raise RuntimeError("Retained EBS not detached; do not delete other volumes")
-        run(["aws", "ec2", "delete-volume", "--volume-id", ids["vid"],
-             "--region", region], capture=False)
     for attempt in range(12):
         if _absent(lambda: _one(aws, "ec2", "describe-volumes",
                                 "--volume-ids", ids["vid"]), MISSING["volume"]) is None:
@@ -268,7 +260,7 @@ def destroy_gpu(aws, run, stack, region, *, sleep=time.sleep):
         raise RuntimeError("GPU ACM permission remained after cleanup")
     return {"stack": stack, "state": "DELETE_COMPLETE", "instance": iid,
             "volume_removed": ids["vid"], "schedules_removed": ids["schedules"],
-            "eip_owner": verified_cpu["instance"], "cpu_certificate_access": "preserved"}
+            "eip_owner": verified_cpu["instance"] if verified_cpu else None, "cpu_certificate_access": "preserved"}
 
 
 def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
@@ -319,7 +311,7 @@ def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
             h._tags(group).get("aws:cloudformation:stack-id") != arn):
         raise ValueError("CPU security group does not belong to stack")
     block = [x for x in vm.get("BlockDeviceMappings", []) if x.get("DeviceName") == ROOT]
-    if len(block) != 1:
+    if len(block) != 1 or block[0].get("Ebs", {}).get("DeleteOnTermination") is not True:
         raise ValueError("Expected exactly one CPU root block mapping")
     disk = block[0].get("Ebs", {})
     vid = disk.get("VolumeId")
@@ -357,14 +349,6 @@ def destroy_cpu(aws, run, stack, region, *, sleep=time.sleep):
         raise RuntimeError("CPU CloudFormation deletion not independently verified")
     _gone(aws, "instance", "ec2", "describe-instances", "--instance-ids", iid)
     _gone(aws, "sg", "ec2", "describe-security-groups", "--group-ids", sg)
-    leftover = _absent(lambda: _one(aws, "ec2", "describe-volumes",
-                                    "--volume-ids", vid), MISSING["volume"])
-    if leftover is not None:
-        if (leftover.get("VolumeId") != vid or leftover.get("State") != "available" or
-                leftover.get("Attachments") or not leftover.get("Encrypted")):
-            raise RuntimeError("CPU retained EBS not safely detached")
-        run(["aws", "ec2", "delete-volume", "--volume-id", vid,
-             "--region", region], capture=False)
     for attempt in range(12):
         if _absent(lambda: _one(aws, "ec2", "describe-volumes",
                                 "--volume-ids", vid), MISSING["volume"]) is None:

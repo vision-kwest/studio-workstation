@@ -34,7 +34,7 @@ class CpuAWS(FakeAWS):
                             {"Key": "aws:cloudformation:stack-id", "Value": ARN}],
                    "BlockDeviceMappings": [{"DeviceName": "/dev/sda1",
                                             "Ebs": {"VolumeId": VOL,
-                                                    "DeleteOnTermination": False}}]}
+                                                    "DeleteOnTermination": True}}]}
         self.disk = {"VolumeId": VOL, "Encrypted": True, "State": "in-use",
                      "Attachments": [{"VolumeId": VOL, "InstanceId": CPU,
                                       "Device": "/dev/sda1"}]}
@@ -71,8 +71,7 @@ class CpuAWS(FakeAWS):
             self.vm["State"]["Name"] = "terminated"
             self.deleted_sg = True
             if not self.stuck_volume:
-                self.disk["State"] = "available"
-                self.disk["Attachments"] = []
+                self.deleted_volume = True
         elif "delete-volume" in args:
             assert self.disk["State"] == "available"
             self.deleted_volume = True
@@ -94,8 +93,7 @@ class CpuDestroyTests(unittest.TestCase):
         self.assertTrue(self.cloud.deleted_volume)
         self.assertTrue(self.cloud.deleted_sg)
         self.assertEqual(self.cloud.eip["InstanceId"], h.CPU_ID)
-        self.assertLess(self.cloud.moves.index("cloudformation delete-stack"),
-                        self.cloud.moves.index("ec2 delete-volume"))
+        self.assertNotIn("ec2 delete-volume", self.cloud.moves)
 
     def test_cpu_delete_does_not_touch_foreign_or_non_encrypted_volume(self):
         self.cloud.disk["Encrypted"] = False
@@ -111,7 +109,7 @@ class CpuDestroyTests(unittest.TestCase):
 
     def test_cpu_delete_never_leaves_in_use_volume_unreported(self):
         self.cloud.stuck_volume = True
-        with self.assertRaisesRegex(RuntimeError, "not safely detached"):
+        with self.assertRaisesRegex(RuntimeError, "retained volume deletion not verified"):
             self.invoke()
         self.assertFalse(self.cloud.deleted_volume)
 

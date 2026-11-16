@@ -29,7 +29,7 @@ class FakeAWS:
         self.schedules = {}
         self.instance = {"InstanceId": IID, "State": {"Name": "running"},
                          "Tags": TAGS, "BlockDeviceMappings": [{"DeviceName": "/dev/sda1",
-                            "Ebs": {"VolumeId": VID, "DeleteOnTermination": False}}]}
+                            "Ebs": {"VolumeId": VID, "DeleteOnTermination": True}}]}
         self.volume = {"VolumeId": VID, "State": "in-use", "Tags": TAGS,
                        "Attachments": [{"VolumeId": VID, "InstanceId": IID, "Device": "/dev/sda1"}]}
         self.stack = {"StackName": STACK, "StackId": ARN, "StackStatus": "CREATE_IN_PROGRESS", "Tags": TAGS}
