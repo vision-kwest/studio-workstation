@@ -36,13 +36,13 @@ class EC2:
                              "--instance-ids", *keys["InstanceIds"])
 
 
-def preflight(aws_call, region, stack, token):
+def preflight(aws_call, region, stack, token, *, role_arn=guard.ROLE):
     """Verify independent schedule destination and exact scoped role BEFORE create."""
     group = aws_call(region, "scheduler", "get-schedule-group", "--name", guard.GROUP)
     if group.get("State") != "ACTIVE":
         raise ValueError("Expiration Scheduler group is not ACTIVE")
-    role = aws_call(region, "iam", "get-role", "--role-name", guard.ROLE.rsplit("/", 1)[-1])["Role"]
-    if role.get("Arn") != guard.ROLE:
+    role = aws_call(region, "iam", "get-role", "--role-name", role_arn.rsplit("/", 1)[-1])["Role"]
+    if role.get("Arn") != role_arn:
         raise ValueError("Unexpected expiration role")
     trust = role.get("AssumeRolePolicyDocument", {})
     statements = trust.get("Statement", [])
@@ -55,7 +55,7 @@ def preflight(aws_call, region, stack, token):
                for s in statements):
         raise ValueError("Expiration role scheduler trust mismatch")
     doc = aws_call(region, "iam", "get-role-policy",
-                   "--role-name", guard.ROLE.rsplit("/", 1)[-1],
+                   "--role-name", role_arn.rsplit("/", 1)[-1],
                    "--policy-name", POLICY)["PolicyDocument"]
     if isinstance(doc, str):
         doc = json.loads(doc)
@@ -77,11 +77,11 @@ def preflight(aws_call, region, stack, token):
         ):
             raise ValueError("Expiration role permissions do not match exact test scope")
     policies = aws_call(region, "iam", "list-role-policies",
-                        "--role-name", guard.ROLE.rsplit("/", 1)[-1])
+                        "--role-name", role_arn.rsplit("/", 1)[-1])
     if policies.get("PolicyNames") != [POLICY] or policies.get("IsTruncated", False):
         raise ValueError("Unexpected inline policies on expiration role")
     attached = aws_call(region, "iam", "list-attached-role-policies",
-                        "--role-name", guard.ROLE.rsplit("/", 1)[-1])
+                        "--role-name", role_arn.rsplit("/", 1)[-1])
     if attached.get("AttachedPolicies") or attached.get("IsTruncated", False):
         raise ValueError("Unexpected managed policies on expiration role")
 

@@ -396,5 +396,117 @@ class GuardedCreateTests(unittest.TestCase):
             aws.assert_not_called()
 
 
+
+class NativeExpirationIdentityTests(unittest.TestCase):
+    """Evaluate only the native intrinsics used here; AWS validation is separate."""
+    def setUp(self):
+        from pathlib import Path
+        self.template = json.loads((Path(__file__).resolve().parents[1] /
+                                    "infra/workstation-expiration-role.json").read_text())
+        self.role_arn = "arn:aws:iam::401233741942:role/studio-expiry-A-ExpirationRole-abc123"
+        self.deployment = "11111111-2222-3333-4444-555555555555"
+
+    def resolve(self, value, *, deployment=None, stack="studio-gpu-art"):
+        import re
+        params = {"WorkstationStack": stack, "ScheduleGroup": guard.GROUP,
+                  "AWS::Partition": "aws", "AWS::Region": REGION,
+                  "AWS::AccountId": "401233741942",
+                  "AWS::StackId": "arn:aws:cloudformation:us-east-1:401233741942:stack/expiry/" +
+                                  (deployment or self.deployment)}
+        def walk(v):
+            if isinstance(v, list):
+                return [walk(item) for item in v]
+            if not isinstance(v, dict):
+                return v
+            if set(v) == {"Ref"}:
+                return params[v["Ref"]]
+            if set(v) == {"Fn::Sub"}:
+                return re.sub(r"\$\{([^}]+)\}", lambda m: params[m[1]], v["Fn::Sub"])
+            if set(v) == {"Fn::Split"}:
+                separator, text = walk(v["Fn::Split"])
+                return text.split(separator)
+            if set(v) == {"Fn::Select"}:
+                index, items = walk(v["Fn::Select"])
+                return items[index]
+            return {key: walk(item) for key, item in v.items()}
+        return walk(value)
+
+    def manager(self, *, deployment=None, stack="studio-gpu-art", trust=None, extra_policy=False):
+        props = self.resolve(self.template["Resources"]["ExpirationRole"]["Properties"],
+                             deployment=deployment, stack=stack)
+        def call(region, service, operation, *args):
+            self.assertEqual(region, REGION)
+            if service == "scheduler":
+                self.assertEqual(operation, "get-schedule-group")
+                return {"State": "ACTIVE"}
+            self.assertEqual(service, "iam")
+            self.assertEqual(args[args.index("--role-name") + 1], self.role_arn.rsplit("/", 1)[1])
+            if operation == "get-role":
+                return {"Role": {"Arn": self.role_arn, "AssumeRolePolicyDocument":
+                                 props["AssumeRolePolicyDocument"] if trust is None else trust}}
+            if operation == "get-role-policy":
+                return {"PolicyDocument": props["Policies"][0]["PolicyDocument"]}
+            if operation == "list-role-policies":
+                return {"PolicyNames": [flow.POLICY] + (["Unexpected"] if extra_policy else [])}
+            if operation == "list-attached-role-policies":
+                return {"AttachedPolicies": []}
+            raise AssertionError((service, operation, args))
+        return call
+
+    def test_native_role_passes_existing_strict_preflight(self):
+        flow.preflight(self.manager(), REGION, "studio-gpu-art", self.deployment,
+                       role_arn=self.role_arn)
+
+    def test_other_workstation_or_token_is_rejected(self):
+        for stack, token in (("studio-gpu-other", self.deployment), ("studio-gpu-art", TOKEN)):
+            with self.subTest(stack=stack, token=token), self.assertRaisesRegex(ValueError, "scope"):
+                flow.preflight(self.manager(), REGION, stack, token, role_arn=self.role_arn)
+
+    def test_reusing_workstation_name_does_not_reuse_cleanup_identity(self):
+        output = self.template["Outputs"]["CleanupToken"]["Value"]
+        other = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        self.assertEqual(self.resolve(output), self.deployment)
+        self.assertEqual(self.resolve(output, deployment=other), other)
+        self.assertNotEqual(self.resolve(output), self.resolve(output, deployment=other))
+        self.assertRegex(self.resolve(output), r"^[a-z0-9-]{12,64}$")
+        with self.assertRaisesRegex(ValueError, "scope"):
+            flow.preflight(self.manager(deployment=other), REGION, "studio-gpu-art",
+                           self.deployment, role_arn=self.role_arn)
+
+    def test_no_user_cleanup_token_or_shared_role_mutation(self):
+        self.assertEqual(set(self.template["Parameters"]), {"WorkstationStack", "ScheduleGroup"})
+        self.assertEqual(set(self.template["Resources"]), {"ExpirationRole"})
+        resource = self.template["Resources"]["ExpirationRole"]
+        self.assertEqual(resource["Type"], "AWS::IAM::Role")
+        self.assertNotIn("DeletionPolicy", resource)
+        self.assertEqual(set(resource["Properties"]), {"AssumeRolePolicyDocument", "Policies"})
+        self.assertEqual(self.template["Outputs"]["ExpirationRoleArn"]["Value"],
+                         {"Fn::GetAtt": ["ExpirationRole", "Arn"]})
+
+    def test_wrong_account_or_schedule_group_trust_rejected(self):
+        props = self.resolve(self.template["Resources"]["ExpirationRole"]["Properties"])
+        for operator, key in (("StringEquals", "aws:SourceAccount"), ("ArnEquals", "aws:SourceArn")):
+            trust = deepcopy(props["AssumeRolePolicyDocument"])
+            trust["Statement"][0]["Condition"][operator][key] = "foreign"
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "trust"):
+                flow.preflight(self.manager(trust=trust), REGION, "studio-gpu-art",
+                               self.deployment, role_arn=self.role_arn)
+
+    def test_unexpected_policy_rejected(self):
+        with self.assertRaisesRegex(ValueError, "inline policies"):
+            flow.preflight(self.manager(extra_policy=True), REGION, "studio-gpu-art",
+                           self.deployment, role_arn=self.role_arn)
+
+    def test_selected_role_must_match_iam_readback(self):
+        call = self.manager()
+        def changed(*args):
+            response = call(*args)
+            if args[2] == "get-role":
+                response["Role"]["Arn"] = guard.ROLE
+            return response
+        with self.assertRaisesRegex(ValueError, "Unexpected expiration role"):
+            flow.preflight(changed, REGION, "studio-gpu-art", self.deployment,
+                           role_arn=self.role_arn)
+
 if __name__ == "__main__":
     unittest.main()
