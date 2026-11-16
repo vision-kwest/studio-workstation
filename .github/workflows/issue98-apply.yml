@@ -1,0 +1,34 @@
+name: Apply tested issue 98 patch
+on:
+  push:
+    branches: [feature/issue98-named-discovery]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/feature/issue98-named-discovery'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and apply exact locally tested patch
+        run: |
+          echo '59d1d9520a7dce78f7bc38ef6445848d2feff8c93e2f3eeaa378daf5cace4eea  .issue98.patch.gz' | sha256sum --check
+          gzip --decompress --stdout .issue98.patch.gz > /tmp/issue98.patch
+          echo '0b9545e93816362a0984200ab8077041148feb5f7d0eb5a09e1da25d7342cde3  /tmp/issue98.patch' | sha256sum --check
+          git apply --index /tmp/issue98.patch
+          git rm .issue98.patch.gz .github/workflows/issue98-apply.yml
+          git diff --cached --check
+      - run: python3 -m pip install 'jinja2>=3,<4'
+      - name: Run lifecycle regression suites
+        run: |
+          for suite in studio_workstation_cli workstation_inventory pr65_gpu_create pr65_one_shot_guard independent_eip issue43_cli_lifecycle issue43_hostname_handoff issue43_gpu_acm_setup issue43_destroy issue43_cpu_destroy issue68_expiration_extension issue43_e2e_offline gpu_profile_contract gpu_cli_test_cleanup gpu_cli_guard_infra; do
+            python3 -m unittest discover -s tests -p "test_${suite}.py" -v || exit 1
+          done
+          python3 -m py_compile scripts/studio_workstation_cli.py runtime/workstation_inventory.py
+      - name: Commit only tested source changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(issue98): named workstation discovery and verified stack identity'
+          git push origin HEAD:feature/issue98-named-discovery
