@@ -16,8 +16,11 @@ BASE_ROLE_ID = "AROAV223FBB3JOQHYPKDX"
 CERT_ARN = "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243"
 EXPORT_ROLE = "arn:aws:iam::401233741942:role/studio-issue43-dcv-acm-export"
 
-def _items(aws, *args):
+def _items(aws, *args, allow_missing=False):
     data = aws(REGION, "ec2", "describe-instances", "--instance-ids", *args)
+    # Only stale-reference reconciliation may accept a single absent instance.
+    if allow_missing and len(args) == 1 and data.get("Reservations") == []:
+        return {}
     items = [i for r in data.get("Reservations", []) for i in r.get("Instances", [])]
     if len(items) != len(args) or {i.get("InstanceId") for i in items} != set(args):
         raise ValueError("Unexpected EC2 identity, duplicate, or missing instance")

@@ -253,8 +253,9 @@ def prepare_gpu(aws, gpu_id, *, sleep=time.sleep):
     sessions, policies = _grants(aws, repair_id=gpu_id)
     for stale in (sessions | set(policies)) - {owner, gpu_id}:
         try:
-            previous = handoff._items(aws, stale)[stale]
-            context(aws, handoff.REGION, handoff._tags(previous)["aws:cloudformation:stack-id"])
+            previous = handoff._items(aws, stale, allow_missing=True).get(stale)
+            if previous is not None:
+                context(aws, handoff.REGION, handoff._tags(previous)["aws:cloudformation:stack-id"])
         except subprocess.CalledProcessError as exc:
             if "InvalidInstanceID.NotFound" not in (exc.stderr or ""):
                 raise

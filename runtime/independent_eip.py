@@ -118,16 +118,17 @@ def _change(aws, destination, check_tls, *, destroying=False):
         if any(_fingerprint(before)):
             raise ValueError("Unknown association; stale-owner recovery refused")
         try:
-            vm = legacy._items(aws, stale)[stale]
+            vm = legacy._items(aws, stale, allow_missing=True).get(stale)
         except subprocess.CalledProcessError as exc:
             if "InvalidInstanceID.NotFound" not in (exc.stderr or ""):
                 raise
         else:
-            selected = context(aws, legacy.REGION, legacy._tags(vm)["aws:cloudformation:stack-id"])
-            if selected["instance"] != stale:
-                raise ValueError("Stale hostname metadata refers to a replaced instance")
-            if selected["state"] == "running" and not destroying:
-                _reachable(aws, selected, check_tls, restart=True)
+            if vm is not None:
+                selected = context(aws, legacy.REGION, legacy._tags(vm)["aws:cloudformation:stack-id"])
+                if selected["instance"] != stale:
+                    raise ValueError("Stale hostname metadata refers to a replaced instance")
+                if selected["state"] == "running" and not destroying:
+                    _reachable(aws, selected, check_tls, restart=True)
         acm.revoke_gpu(aws, stale)
         _move(aws, before, None)
         before = _address(aws)

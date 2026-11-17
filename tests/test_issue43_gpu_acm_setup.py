@@ -118,3 +118,60 @@ class GrantTests(unittest.TestCase):
             if action=='get-command-invocation':raise missing('AccessDenied',action)
         self.aws.before=denied
         with self.assertRaises(subprocess.CalledProcessError):setup._ssm(self.aws,self.iid,['safe'],sleep=lambda _:None)
+
+    def absent_response(self, iid, response):
+        """Model successful EC2 replies that differ from the NotFound fixture."""
+        def call(region, service, action, *args):
+            if (service, action) == ('ec2', 'describe-instances') and iid in args:
+                self.aws.calls.append((service, action, *args))
+                return copy.deepcopy(response)
+            return self.aws(region, service, action, *args)
+        return call
+
+    def test_old_cpu_empty_response_reconciles_only_its_exact_grant(self):
+        old = 'i-0bbfbdc878d3a2320'
+        setup._install_grant(self.aws, old)
+        unrelated = copy.deepcopy(self.aws.policies[setup.BASE_ROLE]['UnrelatedEfsRead'])
+        before = copy.deepcopy(self.aws.address)
+        call = self.absent_response(old, {'Reservations': []})
+        with patch.object(h, 'check_gpu_tls'):
+            setup.prepare_gpu(call, self.iid, sleep=lambda _: None)
+        self.assertEqual(setup._grants(self.aws)[0], {self.iid})
+        self.assertNotIn(setup.POLICY_PREFIX + old, self.aws.policies[setup.BASE_ROLE])
+        self.assertEqual(self.aws.policies[setup.BASE_ROLE]['UnrelatedEfsRead'], unrelated)
+        self.assertEqual(self.aws.address, before)
+
+    def test_missing_destination_still_fails_before_any_write(self):
+        call = self.absent_response(self.iid, {'Reservations': []})
+        self.aws.calls.clear()
+        with self.assertRaisesRegex(ValueError, 'EC2 identity'):
+            setup.prepare_gpu(call, self.iid, sleep=lambda _: None)
+        self.assertFalse(self.aws.writes)
+
+    def test_empty_result_requires_explicit_single_stale_id_opt_in(self):
+        call = self.absent_response(self.iid, {'Reservations': []})
+        self.assertEqual(h._items(call, self.iid, allow_missing=True), {})
+        for ids, options in (((self.iid,), {}),
+                             ((self.iid, self.other), {'allow_missing': True})):
+            with self.subTest(ids=ids), self.assertRaisesRegex(ValueError, 'EC2 identity'):
+                h._items(call, *ids, **options)
+
+    def test_missing_opt_in_never_accepts_malformed_duplicate_or_foreign_results(self):
+        matching = {'InstanceId': self.iid}
+        for response in ({}, {'Reservations': [{'Instances': []}]},
+                         {'Reservations': [{'Instances': [matching, matching]}]},
+                         {'Reservations': [{'Instances': [{'InstanceId': self.other}]}]}):
+            with self.subTest(response=response), self.assertRaisesRegex(ValueError, 'EC2 identity'):
+                h._items(self.absent_response(self.iid, response), self.iid, allow_missing=True)
+
+    def test_absent_detached_owner_metadata_can_be_released(self):
+        from runtime import independent_eip
+        old = 'i-0bbfbdc878d3a2320'
+        setup._install_grant(self.aws, old)
+        self.aws.address['Tags'].append({'Key': 'StudioDcvInstanceId', 'Value': old})
+        call = self.absent_response(old, {'Reservations': []})
+        result = independent_eip.release(call)
+        self.assertIsNone(result['owner'])
+        self.assertEqual(setup._grants(self.aws)[0], set())
+        self.assertNotIn('StudioDcvInstanceId', h._tags(self.aws.address))
+        self.assertEqual(self.aws.address['AllocationId'], h.EIP_ID)
