@@ -194,8 +194,8 @@ def gpu_ready(stack, region, *, gpu=True):
     raise ValueError("GPU readiness timed out; inspect SSM and RES bootstrap logs")
 
 
-def wait_gpu_bootstrap(stack, region, *, attempts=48, sleep=time.sleep, gpu=True):
-    """Allow up to ~12 minutes for RES reboots, retaining fail-closed readiness.\n\n    The native workstation expiry and exact-instance fallback remain armed throughout.\n    """
+def wait_gpu_bootstrap(stack, region, *, attempts=96, sleep=time.sleep, gpu=True):
+    """Bound retries across native RES installation and reboots; keep fail-closed readiness.\n\n    The native workstation expiry and exact-instance fallback remain armed throughout.\n    """
     for attempt in range(attempts):
         try:
             gpu_ready(stack, region, gpu=gpu)
@@ -211,10 +211,11 @@ def wait_gpu_bootstrap(stack, region, *, attempts=48, sleep=time.sleep, gpu=True
             if not any(message in str(exc) for message in
                        ("GPU readiness failed", "GPU readiness timed out")):
                 raise
+            failure = str(exc)
         if attempt + 1 < attempts:
             sleep(15)
-    raise RuntimeError("GPU RES/DCV bootstrap did not become ready; "
-                       "native workstation expiry remains armed")
+    raise RuntimeError("RES/DCV bootstrap did not become ready; "
+                       "native workstation expiry remains armed; last check: " + failure)
 
 
 def verify_software_bootstrap_source(source):
