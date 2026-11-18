@@ -1,10 +1,10 @@
-# Project brief — shared writable Studio storage
+# Project brief — shared Studio application menus
 
-**Current approved scope (November 18, 2026):** [Issue #96](https://github.com/vision-kwest/studio-workstation/issues/96), ordinary shared writes at `/studio`, independent of Rez and a dedicated publisher. The sole operator explicitly relaxed the earlier read-only software constraints. New desktop accounts and `/opt/studio/packages/shared` use UID/GID 2000; `/studio` is a stable alias to that EFS subtree.
+**Current approved scope (November 18, 2026):** [Issue #121](https://github.com/vision-kwest/studio-workstation/issues/121), shared native application launchers and MenuLibre. This builds on merged [PR #120](https://github.com/vision-kwest/studio-workstation/pull/120) / [Issue #96](https://github.com/vision-kwest/studio-workstation/issues/96): ordinary writable `/studio`, shared UID/GID 2000, independent of Rez or a dedicated publisher.
 
-Reuse the existing EFS helper, post-DCV service and native mount. `--no-studio-software` skips Rez only. Preserve old package data and normal DCV availability. Application installation, desktop-menu integration and GPU resizing are outside this task.
+Reuse the asynchronous post-DCV service to link `~/.local/share/applications` to `/studio/share/applications` and install Ubuntu's MenuLibre/desktop-file-utils. Preserve original local launchers, existing shared files and DCV availability. See the [operator guide](docs/shared-applications.md). Application installation, initial application launchers, GPU resizing and desktop preference synchronization remain outside this task.
 
-Acceptance requires normal-user create/edit/delete, reboot persistence and access from a fresh workstation. Offline CPU/GPU contracts and live equivalent shared-storage tests must be distinguished; browser login is not implied by shell checks. Deployment and cleanup evidence belong to #96.
+Acceptance covers ordinary GUI launcher creation/editing and reuse from another workstation. Local shell/native GIO checks must be distinguished from live GNOME/DCV acceptance; no AWS run is part of this implementation/review pass. Existing storage acceptance remains recorded under #96.
 
 ## Historical software-delivery brief
 

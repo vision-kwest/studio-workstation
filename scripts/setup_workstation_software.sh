@@ -1,5 +1,5 @@
 #!/bin/bash
-# Nonblocking shared storage, followed by optional pinned Rez setup.
+# Nonblocking shared storage and application menus, followed by optional Rez.
 set -euo pipefail
 exec >>/var/log/studio-software-setup.log 2>&1
 for _ in $(seq 1 120); do
@@ -44,6 +44,27 @@ if test -e /studio || test -L /studio; then
   test "$(readlink /studio)" = "$shared" || { echo "Conflicting /studio path"; exit 1; }
 else
   ln -s "$shared" /studio
+fi
+# MenuLibre and GNOME use this native user directory; only launchers are shared.
+desktop_user=$(getent passwd 2000 | cut -d: -f1)
+runuser -u "$desktop_user" -- bash -se <<'STUDIO_APPLICATIONS'
+mkdir -p /studio/share/applications /studio/share/icons "$HOME/.local/share"
+applications="$HOME/.local/share/applications"
+if test -L "$applications"; then
+  test "$(readlink "$applications")" = /studio/share/applications || { echo "Conflicting applications link"; exit 1; }
+else
+  if test -d "$applications"; then
+    backup="$applications.before-studio"
+    test ! -e "$backup" && test ! -L "$backup" || { echo "Applications backup already exists"; exit 1; }
+    cp -an "$applications/." /studio/share/applications/
+    mv -T "$applications" "$backup"
+  fi
+  ln -s /studio/share/applications "$applications"
+fi
+STUDIO_APPLICATIONS
+if ! command -v menulibre >/dev/null || ! command -v desktop-file-validate >/dev/null; then
+  apt-get -o DPkg::Lock::Timeout=300 update
+  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends menulibre desktop-file-utils
 fi
 test -f /etc/studio-software-release.env || exit 0
 . /etc/studio-software-release.env

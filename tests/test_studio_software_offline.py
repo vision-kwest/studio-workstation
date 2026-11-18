@@ -118,12 +118,17 @@ findmnt() {
 mount() { printf '%s\\n' "$*" >> "$CALLS"; rm -f "$READ_ONLY"; }
 install() { printf '%s\\n' "$*" >> "$CALLS"; command install -d -m 0755 "${@: -1}"; }
 stat() { printf '2000:2000\\n'; }
+getent() { printf 'workstation:x:2000:2000::/home/workstation:/bin/bash\\n'; }
+runuser() { HOME="$TEST_HOME" bash -se; }
+menulibre() { :; }
+desktop-file-validate() { :; }
 aws() { echo 'Unexpected Rez download' >&2; return 99; }
 ''' + code
 
     def run_storage(self, code):
         return self.execute(code, NFS_READY=str(self.root / "nfs-ready"),
-                            READ_ONLY=str(self.root / "read-only"), CALLS=str(self.root / "calls"))
+                            READ_ONLY=str(self.root / "read-only"), CALLS=str(self.root / "calls"),
+                            TEST_HOME=str(self.root / "home"))
 
     def test_storage_retries_without_local_fallback_or_rez_download(self):
         code = self.storage_script()
