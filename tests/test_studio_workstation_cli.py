@@ -46,26 +46,27 @@ class StudioCliTests(unittest.TestCase):
         run.assert_not_called()
         aws.assert_not_called()
 
-    @mock.patch.object(cli, "run")
-    @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_connect_prints_url_without_aws_mutation(self, describe, run):
-        with mock.patch.object(cli, "trusted_url",
-                               return_value="https://dcv.kwesidavis.com:8443") as tls:
+    def test_connect_prints_checked_current_url_without_mutation(self):
+        from runtime import dcv_endpoint
+        with (mock.patch.object(cli, "describe", return_value=STATE),
+              mock.patch.object(cli, "run") as run,
+              mock.patch.object(dcv_endpoint, "resolve", return_value={
+                  "url": STATE["dcv_url"], "trusted": False}) as endpoint):
             self.invoke(["connect", "--stack", STACK])
-        tls.assert_called_once_with(STACK, INSTANCE)
+        endpoint.assert_called_once_with(STATE, cli.DEFAULT_REGION, cli.aws,
+                                        cli.verified_dcv_hostname, hostname=None)
         run.assert_not_called()
 
-    def test_trusted_hostname_connect_uses_verified_stack_identity(self):
+    def test_explicit_hostname_is_passed_to_endpoint_verifier(self):
+        from runtime import dcv_endpoint
         vm = dict(STATE, public_ip="54.159.180.104", state="running")
-        with mock.patch.object(cli, "describe", return_value=vm), \
-             mock.patch.object(cli, "trusted_url",
-                               return_value="https://dcv.kwesidavis.com:8443") as tls, \
-             mock.patch.object(cli, "run") as run, \
-             contextlib.redirect_stdout(io.StringIO()) as output:
-            cli.main(["connect", "--stack", STACK,
-                      "--hostname", "dcv.kwesidavis.com"])
-        tls.assert_called_once_with(STACK, INSTANCE)
-        self.assertIn("https://dcv.kwesidavis.com:8443", output.getvalue())
+        with (mock.patch.object(cli, "describe", return_value=vm),
+              mock.patch.object(dcv_endpoint, "resolve", return_value={
+                  "url": "https://dcv.kwesidavis.com:8443", "trusted": True}) as endpoint,
+              mock.patch.object(cli, "run") as run):
+            self.invoke(["connect", "--stack", STACK, "--hostname", "dcv.kwesidavis.com"])
+        endpoint.assert_called_once_with(vm, cli.DEFAULT_REGION, cli.aws,
+                                        cli.verified_dcv_hostname, hostname="dcv.kwesidavis.com")
         run.assert_not_called()
 
     def test_trusted_hostname_rejected_when_stopped(self):

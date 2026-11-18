@@ -12,7 +12,7 @@ from unittest import mock
 from scripts import studio_workstation_cli as cli
 from runtime import issue43_hostname_handoff as handoff
 from runtime import issue43_gpu_acm_setup as acm
-from runtime import independent_eip
+from runtime import independent_eip, dcv_endpoint
 
 GPU = "i-0123456789abcdef0"
 CPU = handoff.CPU_ID
@@ -297,23 +297,26 @@ class LifecycleTests(unittest.TestCase):
                 cli.main(["start", "--stack", CPU_STACK])
         run.assert_not_called()
 
-    def test_connect_auto_uses_trusted_url_for_approved_gpu(self):
+    def test_connect_uses_verified_endpoint_for_legacy_gpu(self):
         vm = {"stack": GPU_STACK, "instance": GPU, "state": "running"}
         with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(cli, "trusted_url", return_value=TRUSTED) as tls,
+              mock.patch.object(dcv_endpoint, "resolve", return_value={
+                  "url": TRUSTED, "trusted": True}) as endpoint,
               mock.patch.object(cli, "run") as run):
             out = self.command(["connect", "--stack", GPU_STACK])
         self.assertIn(TRUSTED, out)
-        tls.assert_called_once_with(GPU_STACK, GPU)
+        endpoint.assert_called_once()
         run.assert_not_called()
 
-    def test_unapproved_stack_connect_retains_original_raw_ip_behavior(self):
-        vm = {"stack": "other-cpu", "instance": "i-others", "state": "running",
+    def test_named_cpu_connect_checks_ip_page_without_trusted_hostname(self):
+        vm = {"stack": "studio-other-cpu", "instance": "i-others", "state": "running",
               "public_ip": "198.51.100.10", "dcv_url": "https://198.51.100.10:8443"}
         with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(cli, "trusted_url") as trusted):
-            out = self.command(["connect", "--stack", "other-cpu"])
+              mock.patch.object(cli, "trusted_url") as trusted,
+              mock.patch.object(dcv_endpoint, "_probe") as probe):
+            out = self.command(["connect", "--stack", "studio-other-cpu"])
         self.assertIn("https://198.51.100.10:8443", out)
+        probe.assert_called_once_with("198.51.100.10", False)
         trusted.assert_not_called()
 
     def test_readiness_retries_bootstrap_failure_but_not_permission_denial(self):

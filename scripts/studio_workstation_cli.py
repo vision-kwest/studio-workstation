@@ -686,15 +686,12 @@ def command(args):
             raise ValueError("Instance is not running")
         if args.ssm:
             interactive_ssm(iid, args.region)
-        elif args.stack in (DEFAULT_STACK, GPU_ACCEPTANCE_STACK):
-            print(trusted_url(args.stack, iid))
-            print("Trusted HTTPS verified; log in with the local workstation account.")
-        elif args.hostname:
-            print(verified_dcv_hostname(args.hostname, state["public_ip"]))
-            print("DNS and certificate validated; log in with the local workstation account.")
         else:
-            print(state["dcv_url"] or "No public IPv4 address. Use --ssm for administrative access.")
-            print("Use the local workstation account; browser certificate trust is not yet configured.")
+            from runtime.dcv_endpoint import resolve
+            endpoint = resolve(state, args.region, aws, verified_dcv_hostname, hostname=args.hostname)
+            print(endpoint["url"])
+            print("Reachable HTTPS login page; " + ("trusted certificate verified."
+                  if endpoint["trusted"] else "IP certificate warning expected; identity is not TLS-verified."))
         return
     if args.action in ("start", "stop"):
         desired = "stopped" if args.action == "start" else "running"
