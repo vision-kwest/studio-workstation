@@ -34,7 +34,8 @@ jobs:
           assert 'STUDIO_GPU_FAMILIES=g4dn,g5,g6' in u
           assert 'source /etc/studio-standalone.env' in u
           assert 'install.sh -p false' in u and '-g NONE' in u
-          assert 'useradd --create-home' in u and 'passwd -l workstation' in u
+          assert 'groupadd --gid 2000 workstation' in u
+          assert 'useradd --uid 2000 --gid 2000 --create-home' in u and 'passwd -l workstation' in u
           assert 'pre_install_finished.lock' in u
           # Guard against accidentally disabling the escaping logic.
           assert '${!PATH}' in u, "Original shell PATH was not escaped"

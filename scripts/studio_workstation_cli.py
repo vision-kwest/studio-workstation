@@ -383,9 +383,7 @@ def command(args):
             raise ValueError("--no-studio-software requires a desktop profile without Rez overrides")
         if args.profile != "publisher" and not (args.no_studio_software or explicit_pins):
             args.rez_version_id, args.rez_sha256 = DEFAULT_REZ_VERSION_ID, DEFAULT_REZ_SHA256
-        if (args.rez_version_id or args.rez_sha256) and args.vpc_id != DEFAULT_VPC:
-            raise ValueError("Software EFS client SG requires the reviewed VPC")
-        if args.rez_version_id or args.rez_sha256:
+        if args.profile != "publisher":
             verify_software_bootstrap_source(
                 (ROOT / "scripts/setup_workstation_software.sh").read_text())
         prefix = GPU_PREFIX if gpu else f"releases/{args.version}/res-2026.06"
@@ -414,8 +412,8 @@ def command(args):
                 f"DiskSizeGiB={args.disk_size}",
             ]
             if args.profile != "publisher":
-                progress.stage("Studio software disabled" if args.no_studio_software else
-                               "Studio software: Rez/EFS setup requested after DCV")
+                progress.stage("Shared /studio setup requested after DCV; Rez skipped" if args.no_studio_software else
+                               "Shared /studio and Rez setup requested after DCV")
             if args.profile != "publisher" and args.client_cidr == "0.0.0.0/0":
                 print("WARNING: DCV login will be publicly accessible on TCP 8443.", file=sys.stderr, flush=True)
             if args.dry_run:
@@ -466,7 +464,7 @@ def command(args):
                     progress.stage("Stopping EC2 after desktop readiness failure")
                     aws(args.region, "ec2", "stop-instances", "--instance-ids", selected["instance"])
                     raise
-            if args.rez_version_id:
+            if args.profile != "publisher":
                 try:
                     install_efs_client(instance_id(args.stack, args.region), args.region)
                 except (RuntimeError, subprocess.CalledProcessError) as exc:
@@ -567,7 +565,7 @@ def main(argv=None):
             s.add_argument("--rez-version-id")
             s.add_argument("--rez-sha256")
             s.add_argument("--no-studio-software", action="store_true",
-                           help="Desktop only: skip the default Rez setup and read-only EFS package mount")
+                           help="Skip optional Rez setup; shared writable /studio remains available")
             s.add_argument("--bucket", default=DEFAULT_BUCKET)
             s.add_argument("--image-id")
             s.add_argument("--vpc-id", default=DEFAULT_VPC)

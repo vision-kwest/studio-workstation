@@ -67,14 +67,14 @@ class NamedLifecycleTests(CliFixture):
                     if mode=='default':default_props=props
                     if mode=='pinned':self.assertEqual(props,default_props)
                     data=props['UserData']['Fn::Base64']['Fn::Sub']
-                    self.assertEqual('studio-software-setup.service' in data,pins is not None)
-                    self.assertEqual('sg-058f2babb18747976' in props['SecurityGroupIds'],pins is not None)
+                    self.assertIn('studio-software-setup.service',data)
+                    self.assertIn('sg-058f2babb18747976',props['SecurityGroupIds'])
+                    self.assertEqual('cat > /etc/studio-software-release.env' in data,pins is not None)
                     if pins:
                         for key,value in zip(('STUDIO_REZ_VERSION_ID','STUDIO_REZ_SHA256'),pins):
                             self.assertIn(key+'='+value+'\n',data)
-                        selected=inventory.context(self.aws,h.REGION,name)
-                        cli.install_efs_client.assert_called_once_with(selected['instance'],h.REGION)
-                    else:cli.install_efs_client.assert_not_called()
+                    selected=inventory.context(self.aws,h.REGION,name)
+                    cli.install_efs_client.assert_called_once_with(selected['instance'],h.REGION)
 
     def test_invalid_software_options_never_mutate_aws(self):
         cases=[['--rez-version-id','reviewed-v'],['--rez-sha256','a'*64],

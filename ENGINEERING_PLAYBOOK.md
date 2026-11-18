@@ -48,8 +48,8 @@ Avoid per-command approval requests for routine steps already covered by an exac
 
 ## Architecture and permissions lessons
 
-- Identify the **publisher** of software separately from its **consumers**. For this studio, historical SSH/NFS builds were proof of concept; the current goal is a dedicated CI writer plus read-only CPU/GPU consumers.
-- Cloud IAM EFS client permissions apply at the **filesystem** level; POSIX, access points (if justified), and workflow controls distinguish directories and stages. A client-side `ro` mount is not an enforceable IAM write boundary. Plan future writable projects/models separately.
+- Use the current owner-approved write model. This studio's #96 supersedes mandatory publisher-only writes with ordinary writable `/studio` storage; preserve existing data while replacing obsolete workflow constraints.
+- Cloud IAM EFS client permissions apply at the **filesystem** level; POSIX, access points (if justified), and workflow controls distinguish directories and stages. A client-side `ro` mount is not an enforceable IAM write boundary.
 - GitHub OIDC workflow credentials do not by themselves provide persistent IAM authorization to a running EC2 EFS mount. Verify the actual trusted runner identity, instance profile and continuous credential path.
 - Avoid mutable build inputs such as `:latest` for an approved release; verify source, dependency, artifacts and digests before live use.
 - Production promotion must be explicit. Assess whether current publisher tools perform an atomic operation; do not create a new publishing framework solely to preempt a hypothetical future requirement.

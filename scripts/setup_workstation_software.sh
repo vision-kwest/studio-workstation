@@ -1,5 +1,5 @@
 #!/bin/bash
-# Nonblocking, post-DCV setup. The bundle is an independently approved immutable release.
+# Nonblocking shared storage, followed by optional pinned Rez setup.
 set -euo pipefail
 exec >>/var/log/studio-software-setup.log 2>&1
 for _ in $(seq 1 120); do
@@ -7,22 +7,18 @@ for _ in $(seq 1 120); do
   sleep 5
 done
 test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock || { echo "DCV not ready"; exit 1; }
-. /etc/studio-software-release.env
-dir=$(mktemp -d)
-stage=""
-trap 'rm -rf -- "$dir"; if test -n "$stage"; then rm -rf -- "$stage"; fi' EXIT
-aws --region us-east-1 s3api get-object --bucket studio-workstation-releases-401233741942-us-east-1 --key software/rez/3.4.0/studio-rez-ubuntu2404.tar.gz --version-id "$STUDIO_REZ_VERSION_ID" "$dir/bundle.tgz" >/dev/null
-printf '%s  %s\n' "$STUDIO_REZ_SHA256" "$dir/bundle.tgz" | sha256sum -c -
-tar -xzf "$dir/bundle.tgz" -C "$dir"
 # The Studio CLI installs the official EFS client via AWS SSM Distributor.
 # The immutable Rez bundle intentionally does not contain a .deb package.
 # This service retries until the independently managed helper is available.
 command -v mount.efs >/dev/null || { echo "Waiting for Studio CLI EFS helper installation"; exit 1; }
 mountpoint=/opt/studio/packages
 fstab=/etc/fstab
-entry="fs-054fd0b72429f4569:/ $mountpoint efs _netdev,nofail,x-systemd.automount,ro,tls,iam 0 0"
+entry="fs-054fd0b72429f4569:/ $mountpoint efs _netdev,nofail,x-systemd.automount,rw,tls,iam 0 0"
+old_entry="${entry/,rw,/,ro,}"
 entries=$(awk -v p="$mountpoint" '$1 !~ /^#/ && ($2 == p || $2 == p"/") {print}' "$fstab")
-if test -n "$entries"; then
+if test "$entries" = "$old_entry"; then
+  sed -i "\|^$old_entry\$|s/,ro,/,rw,/" "$fstab"
+elif test -n "$entries"; then
   test "$entries" = "$entry" || { echo "Conflicting or duplicate EFS mount"; exit 1; }
 else
   if test -e "$mountpoint"; then
@@ -33,6 +29,30 @@ else
 fi
 systemctl daemon-reload
 systemctl start opt-studio-packages.automount
+systemctl start opt-studio-packages.mount
+findmnt -rn -t nfs4 --mountpoint "$mountpoint" >/dev/null
+if findmnt -rn -O ro --mountpoint "$mountpoint" >/dev/null; then
+  mount -o remount,rw "$mountpoint"
+fi
+shared=$mountpoint/shared
+test ! -L "$shared" || { echo "Shared directory must not be a symlink"; exit 1; }
+if ! test -e "$shared"; then
+  install -d -m 0755 -o 2000 -g 2000 "$shared"
+fi
+test -d "$shared" && test "$(stat -c '%u:%g' "$shared")" = 2000:2000 || { echo "Shared directory requires UID/GID 2000"; exit 1; }
+if test -e /studio || test -L /studio; then
+  test "$(readlink /studio)" = "$shared" || { echo "Conflicting /studio path"; exit 1; }
+else
+  ln -s "$shared" /studio
+fi
+test -f /etc/studio-software-release.env || exit 0
+. /etc/studio-software-release.env
+dir=$(mktemp -d)
+stage=""
+trap 'rm -rf -- "$dir"; if test -n "$stage"; then rm -rf -- "$stage"; fi' EXIT
+aws --region us-east-1 s3api get-object --bucket studio-workstation-releases-401233741942-us-east-1 --key software/rez/3.4.0/studio-rez-ubuntu2404.tar.gz --version-id "$STUDIO_REZ_VERSION_ID" "$dir/bundle.tgz" >/dev/null
+printf '%s  %s\n' "$STUDIO_REZ_SHA256" "$dir/bundle.tgz" | sha256sum -c -
+tar -xzf "$dir/bundle.tgz" -C "$dir"
 rez=/opt/studio/rez/3.4.0
 installing=/opt/studio/rez/.studio-rez-3.4.0-installing
 test ! -L "$rez" && test ! -L "$installing" || { echo "Unsafe Rez install path"; exit 1; }

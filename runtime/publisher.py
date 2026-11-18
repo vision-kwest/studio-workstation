@@ -22,6 +22,7 @@ mkdir -p /opt/studio/packages
 printf 'fs-054fd0b72429f4569:/ /opt/studio/packages efs _netdev,tls,iam,nofail,x-systemd.automount 0 0\n' >> /etc/fstab
 systemctl daemon-reload
 mount /opt/studio/packages
+ln -s /opt/studio/packages/shared /studio
 # Pin the tested public Rez publishing tools; never consume a moving branch.
 git clone https://github.com/vision-kwest/studio-rez.git /opt/studio/rez
 (cd /opt/studio/rez && git checkout --detach 2fee37e32a09c337d9486e00bcc2a16c3ff4b0fb)

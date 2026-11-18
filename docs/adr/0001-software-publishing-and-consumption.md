@@ -1,5 +1,17 @@
 # ADR-0001 — Publisher/consumer software delivery on Studio EFS
 
+## Current decision — November 18, 2026
+
+[Issue #96](https://github.com/vision-kwest/studio-workstation/issues/96) supersedes the read-only consumer and mandatory publisher/Rez constraints below. The sole operator approved ordinary writable shared storage: reuse the existing EFS root mount at `/opt/studio/packages`, with `/studio` pointing to its `shared` subtree. New desktop accounts and that subtree use UID/GID 2000; existing package ownership is preserved.
+
+Reuse the post-DCV setup service, native fstab/systemd automount and official EFS helper. Storage is independent of Rez pins, including with `--no-studio-software`. Workstation IAM permits the required shared writes; IAM rights remain filesystem-wide. A separate publisher, access point, or filesystem is unnecessary for this scope. Application installation and shared-menu integration are separate tasks.
+
+Live preflight found no custom EFS filesystem policy, no access points and no nonterminated workstations. The old review-only denial policy was not deployed at preflight. Source provenance, successful CPU write/restart/fresh-instance checks and verified cleanup are recorded in the [EFS setup guide](../efs-helper-install.md); this does not claim GPU or GUI acceptance.
+
+## Historical decision — November 5, 2026
+
+The following records the earlier design and its then-unverified assumptions; the current decision above takes precedence.
+
 **Date:** 2026-11-05  
 **Status:** Accepted design for bounded offline engineering; **not deployed or live accepted**  
 **Owners:** [workstation Issue #74](https://github.com/vision-kwest/studio-workstation/issues/74), [OpenUSD publisher Issue #8](https://github.com/vision-kwest/studio-openusd/issues/8). Later shared writable models/projects: [Issue #71](https://github.com/vision-kwest/studio-workstation/issues/71).

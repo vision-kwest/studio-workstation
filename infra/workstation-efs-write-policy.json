@@ -1,0 +1,10 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "StudioSharedEfsWrite",
+    "Effect": "Allow",
+    "Action": ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
+    "Resource": "arn:aws:elasticfilesystem:us-east-1:401233741942:file-system/fs-054fd0b72429f4569",
+    "Condition": {"Bool": {"aws:SecureTransport": "true", "elasticfilesystem:AccessedViaMountTarget": "true"}}
+  }]
+}

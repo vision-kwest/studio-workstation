@@ -33,7 +33,8 @@ def render(bucket,prefix,user,profile="cpu",rez_version_id=None,rez_sha256=None)
     boot="s3://"+bucket+"/"+prefix+"/installation-scripts.tar.gz"
     command="""set -e
 if ! id -u USERNAME >/dev/null 2>&1; then
-  useradd --create-home --shell /bin/bash USERNAME
+  groupadd --gid 2000 USERNAME
+  useradd --uid 2000 --gid 2000 --create-home --shell /bin/bash USERNAME
   passwd -l USERNAME
 fi
 cat > /etc/studio-standalone.env <<'CONFIG'
@@ -54,19 +55,20 @@ set +a
         "APP_VERSION_LINE", "STUDIO_APP_VERSION_ID="+GPU_ARCHIVES["virtual-desktop.tar.gz"][0] if pinned else "").replace(
         "APP_SHA_LINE", "STUDIO_APP_SHA256="+GPU_ARCHIVES["virtual-desktop.tar.gz"][1] if pinned else "")
     if rez_version_id:
-        script=(ROOT.parent/"scripts/setup_workstation_software.sh").read_text()
         command += f"""cat > /etc/studio-software-release.env <<'STUDIO_RELEASE'
 STUDIO_REZ_VERSION_ID={rez_version_id}
 STUDIO_REZ_SHA256={rez_sha256}
 STUDIO_RELEASE
 chmod 600 /etc/studio-software-release.env
-cat > /usr/local/sbin/studio-software-setup <<'STUDIO_SETUP'
+"""
+    script=(ROOT.parent/"scripts/setup_workstation_software.sh").read_text()
+    command += f"""cat > /usr/local/sbin/studio-software-setup <<'STUDIO_SETUP'
 {script}
 STUDIO_SETUP
 chmod 700 /usr/local/sbin/studio-software-setup
 cat > /etc/systemd/system/studio-software-setup.service <<'STUDIO_UNIT'
 [Unit]
-Description=Studio post-DCV Rez and EFS setup
+Description=Studio post-DCV shared storage and optional Rez setup
 After=network-online.target
 Wants=network-online.target
 
@@ -109,8 +111,7 @@ def main():
     p.add_argument("--output",type=Path,required=True)
     a=p.parse_args()
     template=json.loads((ROOT/"workstation-template.json").read_text())
-    if a.rez_version_id and a.rez_sha256:
-        template["Resources"]["Workstation"]["Properties"]["SecurityGroupIds"].append("sg-058f2babb18747976")
+    template["Resources"]["Workstation"]["Properties"]["SecurityGroupIds"].append("sg-058f2babb18747976")
     if a.profile == "gpu":
         template["Description"] = "GPU g4dn RES 2026.06 derived runtime; requires separately validated NVIDIA-capable AMI"
         # Task 7 temporary GPU test only: no open-by-default DCV and no orphan EBS.
