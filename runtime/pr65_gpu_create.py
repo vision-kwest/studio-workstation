@@ -7,6 +7,7 @@ import json
 import time
 
 from runtime import pr65_one_shot_guard as guard
+from runtime import cli_progress as progress
 
 POLICY = "StudioWorkstationExpiry"
 POLL_SECONDS = 3
@@ -86,10 +87,12 @@ def safety_name(stack):
 
 def safety(aws, region, stack, *, create=False, arn=None, cleanup=False):
     from runtime.workstation_inventory import stack_record
+    progress.stage("Checking expiration safeguards")
     if region != "us-east-1" or not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack):
         raise ValueError("Invalid safety-stack scope")
     name = safety_name(stack)
     if create:
+        progress.stage("Creating expiration safeguards")
         template = Path(__file__).resolve().parents[1] / "infra/workstation-expiration-role.json"
         aws(region, "cloudformation", "create-stack", "--stack-name", name,
             "--template-body", "file://" + str(template), "--capabilities", "CAPABILITY_IAM",
@@ -140,6 +143,7 @@ def _tags_match(item, stack, token):
 
 def _emergency(aws_call, region, stack_id, stack, token, iid, stack_owned):
     """Prefer native teardown. Fall back only to the exact owned EC2 instance."""
+    progress.stage("Requesting emergency teardown")
     problems = []
     if stack_owned:
         try:
@@ -174,6 +178,7 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
     expiry = now().replace(microsecond=0) + dt.timedelta(minutes=minutes)
     identity = safety(aws_call, region, stack, create=True)
     token, role = identity["token"], identity["role"]
+    progress.stage("Arming expiration safeguards")
     scheduler = Scheduler(aws_call, region)
     initial = guard._schedule("studio-expiry-" + token, guard.DELETE_STACK,
                               {"StackName": stack}, expiry, role)
@@ -185,6 +190,7 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
     Path(template).write_text(json.dumps(body))
     cf_params = ["ParameterKey=" + k + ",ParameterValue=" + v for k, v in
                  (p.split("=", 1) for p in parameters)]
+    progress.stage("Creating guarded workstation")
     response = aws_call(region, "cloudformation", "create-stack", "--stack-name", stack,
                         "--template-body", "file://" + str(template), "--parameters", *cf_params,
                         "--tags", "Key=StudioStack,Value=" + stack, "Key=StudioCleanupToken,Value=" + token,
@@ -195,6 +201,7 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
         raise RuntimeError("Unrecognized stack identity; native expiry remains armed")
     iid, stack_owned = None, False
     started = clock()
+    progress.stage("Discovering workstation instance")
     try:
         while clock() - started <= MAX_DISCOVERY_SECONDS:
             records = aws_call(region, "cloudformation", "describe-stacks", "--stack-name", stack_id)["Stacks"]
@@ -214,6 +221,7 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
                 iid = found[0]
                 vm = _one_instance(aws_call, region, iid)
                 if vm.get("BlockDeviceMappings"):
+                    progress.stage("Arming instance termination safeguard")
                     proposal = guard.plan(vm, stack, token, now(), minutes=minutes, role=role,
                                           stack_id=stack_id, terminate_at=expiry)
                     activated = guard.arm(scheduler, EC2(aws_call, region), proposal)

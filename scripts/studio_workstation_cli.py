@@ -17,6 +17,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from runtime import cli_progress as progress
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BUCKET = "studio-workstation-releases-401233741942-us-east-1"
@@ -75,18 +76,27 @@ def gpu_expiration_options(args):
 def run(args, *, capture=True):
     # AWS CLI v2 may open a full-screen pager in CloudShell. Never block
     # a guarded deployment while rendering read-only JSON output.
+    waiter = len(args) > 3 and args[0] == "aws" and args[2] == "wait"
+    if waiter:
+        progress.stage(f"Waiting for {args[1]} {args[3]}")
     if args and args[0] == "aws":
         args = [*args, "--no-cli-pager"]
     if capture:
-        return subprocess.check_output(args, text=True, stderr=subprocess.PIPE)
-    subprocess.check_call(args)
-    return ""
+        output = subprocess.check_output(args, text=True, stderr=subprocess.PIPE)
+    else:
+        subprocess.check_call(args)
+        output = ""
+    if waiter:
+        progress.stage(f"AWS waiter confirmed: {args[1]} {args[3]}")
+    return output
 
 def aws(region, *args):
     output = run(["aws", *args, "--region", region, "--output", "json"])
     # Several successful AWS writes (IAM policy, EC2 tags/EIP detach) emit no JSON.
     # Empty stdout is success only because run() already raises on nonzero exit.
-    return json.loads(output) if output.strip() else {}
+    result = json.loads(output) if output.strip() else {}
+    progress.observe(args[0], result)
+    return result
 
 def workstation_resource(stack, region):
     detail = aws(region, "cloudformation", "describe-stack-resource",
@@ -155,6 +165,7 @@ def gpu_release_preflight(args):
 
 def gpu_ready(stack, region, *, gpu=True):
     """Read-only guest readiness via bounded SSM diagnostics; no secrets."""
+    progress.stage("Checking RES and DCV readiness via SSM")
     import time
     iid = instance_id(stack, region)
     commands = [
@@ -188,7 +199,7 @@ def gpu_ready(stack, region, *, gpu=True):
                 raise
             continue
         if result["Status"] == "Success":
-            print("READY: RES, GDM and DCV" + (", Xorg and Tesla T4 OpenGL" if gpu else ""))
+            progress.stage("Ready: RES, GDM and DCV" + (", Xorg and Tesla T4 OpenGL" if gpu else ""))
             return
         if result["Status"] in ("Failed", "Cancelled", "TimedOut"):
             details = "\n".join(result.get(key, "") for key in
@@ -216,6 +227,7 @@ def wait_gpu_bootstrap(stack, region, *, attempts=96, sleep=time.sleep, gpu=True
                 raise
             failure = str(exc)
         if attempt + 1 < attempts:
+            progress.stage("Waiting for RES bootstrap or reboot before retrying readiness")
             sleep(15)
     raise RuntimeError("RES/DCV bootstrap did not become ready; "
                        "native workstation expiry remains armed; last check: " + failure)
@@ -236,6 +248,7 @@ def install_efs_client(instance, region, *, manager=aws, sleep=time.sleep):
     The pinned Rez bundle contains no amazon-efs-utils .deb. Installation is
     performed by the Studio CLI, never by unverified guest downloads.
     """
+    progress.stage("Installing official EFS mount helper via SSM")
     command = None
     for attempt in range(24):
         try:
@@ -289,6 +302,7 @@ def interactive_ssm(instance, region, *, attempts=8, sleep=time.sleep,
 
 def wait_dcv(stack, region, *, attempts=24, sleep=time.sleep):
     """Fresh IP/owner on every retry. No cached CloudFormation public addresses."""
+    progress.stage("Checking DCV HTTPS endpoint")
     from runtime.dcv_endpoint import resolve
     for attempt in range(attempts):
         state = describe(stack, region)
@@ -327,6 +341,7 @@ def command(args):
         print(json.dumps(result, indent=2))
         return
     if args.action == "extend-expiration":
+        progress.stage("Checking and extending expiration safeguards")
         from runtime import issue68_expiration_extension as extension
         print(json.dumps(extension.extend(aws, args.stack, args.region, args.additional_minutes), indent=2))
         return
@@ -383,12 +398,12 @@ def command(args):
                 render.extend(["--rez-version-id", args.rez_version_id or "", "--rez-sha256", args.rez_sha256 or ""])
             if gpu:
                 render.extend(["--profile", "gpu", "--lifecycle", "persistent"])
-            print("Rendering:", " ".join(render), flush=True)
+            progress.stage("Rendering and validating workstation template")
             if args.profile == "publisher":
                 from runtime import publisher
                 template.write_text(json.dumps(publisher.template(args)))
             else:
-                run(render, capture=False)
+                run(render)  # The renderer's informational stdout is not the CLI result.
             validate = ["aws", "cloudformation", "validate-template", "--template-body",
                         f"file://{template}", "--region", args.region]
             run(validate)
@@ -398,12 +413,11 @@ def command(args):
                 f"ClientCidr={args.client_cidr}", f"InstanceProfileName={args.instance_profile}",
                 f"DiskSizeGiB={args.disk_size}",
             ]
-            print("Stack:", args.stack, "Release:", args.version, "DCV ingress:", args.client_cidr, flush=True)
             if args.profile != "publisher":
-                print("Studio software: " + ("disabled" if args.no_studio_software else
-                      "Rez/EFS setup requested after DCV; VersionId=" + args.rez_version_id), flush=True)
+                progress.stage("Studio software disabled" if args.no_studio_software else
+                               "Studio software: Rez/EFS setup requested after DCV")
             if args.profile != "publisher" and args.client_cidr == "0.0.0.0/0":
-                print("WARNING: DCV login will be publicly accessible on TCP 8443.", flush=True)
+                print("WARNING: DCV login will be publicly accessible on TCP 8443.", file=sys.stderr, flush=True)
             if args.dry_run:
                 print("DRY RUN: validated template; deployment not executed.")
                 return
@@ -431,10 +445,10 @@ def command(args):
             if gpu:
                 gpu_release_preflight(args)
                 from runtime import pr65_gpu_create
-                outcome = pr65_gpu_create.create_guarded(
+                pr65_gpu_create.create_guarded(
                     aws, args.region, args.stack, template, parameters, minutes=expiration)
-                print(json.dumps(outcome, indent=2), flush=True)
             else:
+                progress.stage("Creating workstation stack")
                 cf_params = ["ParameterKey=" + k + ",ParameterValue=" + v for k, v in
                              (item.split("=", 1) for item in parameters)]
                 aws(args.region, "cloudformation", "create-stack", "--stack-name", args.stack,
@@ -445,10 +459,11 @@ def command(args):
             if args.profile != "publisher":
                 try:
                     wait_gpu_bootstrap(args.stack, args.region, gpu=gpu)
-                    print("DCV:", wait_dcv(args.stack, args.region)["url"])
+                    progress.stage("DCV ready: " + wait_dcv(args.stack, args.region)["url"])
                 except Exception:
                     # Failed desktop creation must not strand a billable, unreachable VM.
                     selected = context(aws, args.region, args.stack)
+                    progress.stage("Stopping EC2 after desktop readiness failure")
                     aws(args.region, "ec2", "stop-instances", "--instance-ids", selected["instance"])
                     raise
             if args.rez_version_id:
@@ -456,7 +471,7 @@ def command(args):
                     install_efs_client(instance_id(args.stack, args.region), args.region)
                 except (RuntimeError, subprocess.CalledProcessError) as exc:
                     print("WARNING: desktop is available; Studio software setup incomplete; EFS helper installation failed: " + str(exc), file=sys.stderr)
-            print(json.dumps(describe(args.stack, args.region), indent=2))
+            print(json.dumps(describe(args.stack, args.region), indent=2), flush=True)
         return
     selected = context(aws, args.region, args.stack)
     iid = selected["instance"]
@@ -504,8 +519,10 @@ def command(args):
         if args.action == "start" and selected["stack_status"] not in ("CREATE_COMPLETE", "UPDATE_COMPLETE"):
             raise ValueError("Cannot restart a workstation during failed or incomplete stack operations")
         if args.action == "start" and profile == "gpu":
+            progress.stage("Checking expiration safeguards before starting EC2")
             guard.status(aws, selected, headroom=80)
         if not retry_stop:
+            progress.stage("Starting EC2" if args.action == "start" else "Stopping EC2")
             aws(args.region, "ec2", args.action + "-instances", "--instance-ids", iid)
             aws(args.region, "ec2", "wait", "instance-status-ok" if args.action == "start" else "instance-stopped",
                 "--instance-ids", iid)
@@ -515,19 +532,22 @@ def command(args):
             else:
                 try:
                     wait_gpu_bootstrap(args.stack, args.region, gpu=profile == "gpu")
-                    print("DCV:", wait_dcv(args.stack, args.region)["url"])
+                    progress.stage("DCV ready: " + wait_dcv(args.stack, args.region)["url"])
                 except Exception:
+                    progress.stage("Stopping EC2 after desktop readiness failure")
                     aws(args.region, "ec2", "stop-instances", "--instance-ids", iid)
                     raise
-        print(json.dumps(describe(args.stack, args.region), indent=2))
+        print(json.dumps(describe(args.stack, args.region), indent=2), flush=True)
 
 def main(argv=None):
     from runtime.workstation_inventory import PROFILES
     p = argparse.ArgumentParser(prog="studio workstation", description="Named Studio workstation lifecycle")
+    p.add_argument("--quiet", "--no-progress", dest="no_progress", action="store_true", help="Suppress progress on stderr")
     sub = p.add_subparsers(dest="action", required=True)
     for action in ("list", "profiles", "profile", "hostname", "create", "status", "start", "stop", "connect",
                    "destroy", "check-ready", "extend-expiration", "run", "result"):
         s = sub.add_parser(action)
+        s.add_argument("--quiet", "--no-progress", dest="no_progress", action="store_true", default=argparse.SUPPRESS)
         s.add_argument("--region", default=DEFAULT_REGION)
         if action == "profile":
             s.add_argument("profile_name", choices=PROFILES)
@@ -595,9 +615,13 @@ def main(argv=None):
     try:
         if a.action == "connect" and a.ssm and a.hostname:
             raise ValueError("--hostname cannot be used with --ssm")
-        command(a)
+        # An interactive SSM terminal owns its display; do not print into the session.
+        enabled = not a.no_progress and not (a.action == "connect" and a.ssm)
+        with progress.operation(a.action, getattr(a, "stack", None) or a.region, enabled=enabled):
+            command(a)
     except (ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as exc:
-        message = exc.stderr if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+        message = (exc.stderr or f"AWS command failed with exit code {exc.returncode}; inspect the reported stage") \
+            if isinstance(exc, subprocess.CalledProcessError) else str(exc)
         p.exit(1, f"ERROR: {message.strip()}\n")
 
 if __name__ == "__main__":

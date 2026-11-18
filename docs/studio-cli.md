@@ -100,6 +100,44 @@ interrupted GPU safety-only stacks; `destroy NAME --delete-stack` reconciles the
 only after exact-scope absence checks. Legacy untagged stacks are diagnostic inventory,
 not automatically adopted or deleted by the new lifecycle.
 
+### Progress during waits
+
+Commands print flushed progress to **stderr**, including the operation, selected
+scope, UTC timestamp, elapsed seconds, active stage and last observed AWS state.
+A heartbeat appears every **10 seconds** while blocked, including inside native
+AWS waiters, bootstrap/reboot retries, EFS helper setup and publisher SSM checks.
+State observations reuse existing responses; reporting makes no extra AWS calls.
+Native waiter retry limits, timeouts and expiration/cleanup safeguards are unchanged.
+
+For example, a stop can show the following (illustrative elapsed times):
+
+```text
+[2026-11-17T21:10:00+00:00] stop scope=art elapsed=0.0s stage=Validating request last=not observed | started
+[2026-11-17T21:10:01+00:00] stop scope=art elapsed=1.0s stage=Stopping EC2 last=ec2:stopping | observed
+[2026-11-17T21:10:10+00:00] stop scope=art elapsed=10.0s stage=Waiting for ec2 instance-stopped last=ec2:stopping | heartbeat
+[2026-11-17T21:10:20+00:00] stop scope=art elapsed=20.0s stage=Waiting for ec2 instance-stopped last=ec2:stopping | heartbeat
+[2026-11-17T21:10:22+00:00] stop scope=art elapsed=22.0s stage=AWS waiter confirmed: ec2 instance-stopped last=ec2:stopping | progress
+```
+
+The command then reports EIP/certificate cleanup and finishes with total elapsed
+time. `last` is an observation, not a predicted current state: native waiters do
+not expose their intermediate responses. A confirmed waiter is one completed
+stage; the command can still fail later. A heartbeat proves the CLI is alive,
+not that AWS is advancing. No percentages or credentials are printed by the reporter.
+
+```bash
+python3 studio workstation stop art > stop.json
+python3 studio workstation stop art --no-progress > stop.json
+python3 studio workstation --quiet stop art > stop.json
+```
+
+Successful create/start/stop/destroy/readiness commands keep their final JSON on
+stdout. `--quiet` and `--no-progress` suppress progress, while warnings and errors
+remain on stderr. Dry-run previews and `connect` retain their existing text results.
+Interactive `connect --ssm` suppresses progress so it does not write into the guest
+terminal. Publisher build submission remains asynchronous: `command finished`
+with JSON status `submitted` means the request was sent; use `result` to check the build.
+
 ## GPU expiration: the workstation, never a separate disk
 
 `--expires-in` accepts 60–240 whole minutes (`150m` default). A native independent

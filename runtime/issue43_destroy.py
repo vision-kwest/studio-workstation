@@ -7,6 +7,7 @@ import time
 from runtime import issue43_hostname_handoff as h
 from runtime import pr65_one_shot_guard as guard
 from runtime import pr65_gpu_create as creator
+from runtime import cli_progress as progress
 from runtime.workstation_inventory import context, stack_record
 
 
@@ -31,9 +32,11 @@ def _remaining(aws, region, filters):
 
 def _remove_safety(aws, region, stack, identity, selected=None):
     """Remove guards only after independent absence checks, including interrupted creates."""
+    progress.stage("Verifying resources before safeguard cleanup")
     token = identity["token"]
     filters = ["Name=tag:StudioStack,Values=" + stack, "Name=tag:StudioCleanupToken,Values=" + token]
     _remaining(aws, region, filters)
+    progress.stage("Removing expiration safeguards")
     for prefix, action, field in (("studio-expiry-", guard.DELETE_STACK, "StackName"),
                                   ("studio-fallback-", guard.TERMINATE, "InstanceIds")):
         name = prefix + token
@@ -75,6 +78,7 @@ def _remove_safety(aws, region, stack, identity, selected=None):
 
 def destroy(aws, run, stack, region, *, sleep=time.sleep):
     """Retry native DeleteStack, never a volume-only delete or force/retain operation."""
+    progress.stage("Verifying destruction scope")
     if region != h.REGION:
         raise ValueError("Only validated us-east-1 is supported")
     record = stack_record(aws, region, stack)
@@ -102,6 +106,7 @@ def destroy(aws, run, stack, region, *, sleep=time.sleep):
             independent_eip.release_if_owned(aws, selected, None, destroying=True)
         except Exception as exc:
             warnings.append(str(exc))
+    progress.stage("Deleting workstation stack")
     if selected["stack_status"] != "DELETE_COMPLETE":
         if selected["stack_status"] != "DELETE_IN_PROGRESS":
             aws(region, "cloudformation", "delete-stack", "--stack-name", selected["stack_id"])
@@ -110,6 +115,7 @@ def destroy(aws, run, stack, region, *, sleep=time.sleep):
     if not done or done["StackStatus"] != "DELETE_COMPLETE":
         raise RuntimeError("Immutable workstation DELETE_COMPLETE not verified")
     filters = ["Name=tag:StudioStackId,Values=" + selected["stack_id"]]
+    progress.stage("Verifying workstation resource removal")
     for attempt in range(12):
         try:
             _remaining(aws, region, filters)

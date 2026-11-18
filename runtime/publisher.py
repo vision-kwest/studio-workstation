@@ -2,6 +2,7 @@
 import json
 import re
 import time
+from runtime import cli_progress as progress
 
 PROFILE = "StudioEfsCiPublisher"
 REGION = "us-east-1"
@@ -89,6 +90,8 @@ def command(args, aws):
         commands = ["set -eu", "test -x /opt/studio/rez/scripts/studio-rez-promote-package",
                     "PYTHONPATH=/opt/studio/rez/python STUDIO_PACKAGE_ROOT=/opt/studio/packages /opt/studio/rez/scripts/studio-rez-promote-package "
                     + args.name + " " + args.version + " " + src + " " + dst]
+    progress.stage("Submitting publisher build" if args.operation == "build" else
+                   "Checking publisher" if args.operation == "check" else "Promoting software package")
     result = aws(REGION, "ssm", "send-command", "--instance-ids", args.instance_id,
                  "--document-name", "AWS-RunShellScript",
                  "--parameters", json.dumps({"commands": commands}),
