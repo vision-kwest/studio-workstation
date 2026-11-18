@@ -25,6 +25,9 @@ DEFAULT_VPC = "vpc-01bbe5d01838f70b2"
 DEFAULT_SUBNET = "subnet-0986937ce71fb97cb"
 DEFAULT_PROFILE = "StudioWorkstationSSMRole"
 DEFAULT_REGION = "us-east-1"
+# One approved Rez 3.4.0 bootstrap bundle; application packages remain on EFS.
+DEFAULT_REZ_VERSION_ID = "LBsqCMx_GF2pullxiHQKl8w9U0Yf08dX"
+DEFAULT_REZ_SHA256 = "de9d5159369fd57e3109ce047a290419d07f5dceba71dd18100c94be1f16cea2"
 GPU_AMI = DEFAULT_AMI  # Canonical 24.04: let RES install NVIDIA after runtime dependencies
 GPU_AMI_OWNER = "099720109477"  # Canonical
 GPU_PREFIX = "releases/issue100-res-native-20261115/res-2026.06"
@@ -358,6 +361,13 @@ def command(args):
             raise ValueError("Publisher uses its existing publishing bootstrap, not desktop Rez pins")
         if args.profile == "publisher" and not args.security_group_id:
             raise ValueError("Publisher requires --security-group-id for its existing EFS client group")
+        explicit_pins = args.rez_version_id is not None or args.rez_sha256 is not None
+        if explicit_pins and not (args.rez_version_id and args.rez_sha256):
+            raise ValueError("Rez override requires both --rez-version-id and --rez-sha256")
+        if args.no_studio_software and (explicit_pins or args.profile == "publisher"):
+            raise ValueError("--no-studio-software requires a desktop profile without Rez overrides")
+        if args.profile != "publisher" and not (args.no_studio_software or explicit_pins):
+            args.rez_version_id, args.rez_sha256 = DEFAULT_REZ_VERSION_ID, DEFAULT_REZ_SHA256
         if (args.rez_version_id or args.rez_sha256) and args.vpc_id != DEFAULT_VPC:
             raise ValueError("Software EFS client SG requires the reviewed VPC")
         if args.rez_version_id or args.rez_sha256:
@@ -389,6 +399,9 @@ def command(args):
                 f"DiskSizeGiB={args.disk_size}",
             ]
             print("Stack:", args.stack, "Release:", args.version, "DCV ingress:", args.client_cidr, flush=True)
+            if args.profile != "publisher":
+                print("Studio software: " + ("disabled" if args.no_studio_software else
+                      "Rez/EFS setup requested after DCV; VersionId=" + args.rez_version_id), flush=True)
             if args.profile != "publisher" and args.client_cidr == "0.0.0.0/0":
                 print("WARNING: DCV login will be publicly accessible on TCP 8443.", flush=True)
             if args.dry_run:
@@ -442,7 +455,7 @@ def command(args):
                 try:
                     install_efs_client(instance_id(args.stack, args.region), args.region)
                 except (RuntimeError, subprocess.CalledProcessError) as exc:
-                    print("WARNING: desktop is available; optional EFS helper installation failed: " + str(exc), file=sys.stderr)
+                    print("WARNING: desktop is available; Studio software setup incomplete; EFS helper installation failed: " + str(exc), file=sys.stderr)
             print(json.dumps(describe(args.stack, args.region), indent=2))
         return
     selected = context(aws, args.region, args.stack)
@@ -533,6 +546,8 @@ def main(argv=None):
             s.add_argument("--version", default="v0.1.3")
             s.add_argument("--rez-version-id")
             s.add_argument("--rez-sha256")
+            s.add_argument("--no-studio-software", action="store_true",
+                           help="Desktop only: skip the default Rez setup and read-only EFS package mount")
             s.add_argument("--bucket", default=DEFAULT_BUCKET)
             s.add_argument("--image-id")
             s.add_argument("--vpc-id", default=DEFAULT_VPC)

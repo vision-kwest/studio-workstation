@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from scripts import studio_workstation_cli as cli
 from runtime import dcv_endpoint, independent_eip as eip, pr65_gpu_create as creator
@@ -14,16 +15,19 @@ from workstation_fake import AWS, NOW, tags
 class CliFixture(unittest.TestCase):
     def setUp(self):
         self.aws=AWS()
+        self.templates=[]
         self.aws.groups['sg-0123456789abcdef0']={'GroupId':'sg-0123456789abcdef0','VpcId':cli.DEFAULT_VPC}
         real_run, real_create, real_status=cli.run, creator.create_guarded, guard.status
         def run(args, **kw):
             if args[0]=='aws':
                 self.assertEqual(args[1:3],['cloudformation','validate-template'])
+                self.templates.append(json.loads(Path(args[args.index('--template-body')+1][7:]).read_text()))
                 return '{}'
             return real_run(args,**kw)
         self.add(patch.object(cli,'aws',self.aws))
         self.add(patch.object(cli,'run',side_effect=run))
         self.add(patch.object(cli,'wait_gpu_bootstrap'))
+        self.add(patch.object(cli,'install_efs_client'))
         self.add(patch.object(cli,'verified_dcv_hostname',side_effect=lambda host,ip:'https://'+host+':8443'))
         self.add(patch.object(dcv_endpoint,'_probe'))
         self.add(patch.object(h,'check_gpu_tls'))
@@ -46,6 +50,59 @@ class CliFixture(unittest.TestCase):
 
 
 class NamedLifecycleTests(CliFixture):
+    def test_desktop_software_defaults_opt_out_and_complete_override(self):
+        approved=(cli.DEFAULT_REZ_VERSION_ID,cli.DEFAULT_REZ_SHA256)
+        cases=[('default',[],approved),('off',['--no-studio-software'],None),
+               ('override',['--rez-version-id','reviewed-v','--rez-sha256','a'*64],('reviewed-v','a'*64)),
+               ('pinned',['--rez-version-id',approved[0],'--rez-sha256',approved[1]],approved)]
+        for profile in ('cpu','gpu'):
+            for mode,options,pins in cases:
+                with self.subTest(profile=profile,mode=mode):
+                    cli.install_efs_client.reset_mock()
+                    cli.wait_gpu_bootstrap.reset_mock()
+                    cli.install_efs_client.side_effect=lambda *_:cli.wait_gpu_bootstrap.assert_called_once()
+                    name=profile+'-'+mode
+                    self.invoke('create','--profile',profile,'--name',name,*options)
+                    props=self.templates[-1]['Resources']['Workstation']['Properties']
+                    if mode=='default':default_props=props
+                    if mode=='pinned':self.assertEqual(props,default_props)
+                    data=props['UserData']['Fn::Base64']['Fn::Sub']
+                    self.assertEqual('studio-software-setup.service' in data,pins is not None)
+                    self.assertEqual('sg-058f2babb18747976' in props['SecurityGroupIds'],pins is not None)
+                    if pins:
+                        for key,value in zip(('STUDIO_REZ_VERSION_ID','STUDIO_REZ_SHA256'),pins):
+                            self.assertIn(key+'='+value+'\n',data)
+                        selected=inventory.context(self.aws,h.REGION,name)
+                        cli.install_efs_client.assert_called_once_with(selected['instance'],h.REGION)
+                    else:cli.install_efs_client.assert_not_called()
+
+    def test_invalid_software_options_never_mutate_aws(self):
+        cases=[['--rez-version-id','reviewed-v'],['--rez-sha256','a'*64],
+               ['--rez-version-id',''],['--rez-version-id','','--rez-sha256',''],
+               ['--rez-version-id','','--rez-sha256','a'*64],
+               ['--no-studio-software','--rez-version-id','reviewed-v'],
+               ['--no-studio-software','--rez-version-id','reviewed-v','--rez-sha256','a'*64],
+               ['--rez-version-id','bad;version','--rez-sha256','a'*64],
+               ['--rez-version-id','reviewed-v','--rez-sha256','invalid']]
+        for profile in ('cpu','gpu'):
+            for options in cases:
+                with self.subTest(profile=profile,options=options),self.assertRaises(SystemExit):
+                    self.invoke('create','--profile',profile,*options)
+        for options in (['--no-studio-software'],['--rez-version-id','reviewed-v','--rez-sha256','a'*64]):
+            with self.subTest(publisher=options),self.assertRaises(SystemExit):
+                self.invoke('create','--profile','publisher','--security-group-id','sg-0123456789abcdef0',*options)
+        self.assertEqual(self.aws.calls,[])
+        cli.install_efs_client.assert_not_called()
+
+    def test_software_helper_failure_keeps_desktop_available(self):
+        cli.install_efs_client.side_effect=RuntimeError('SSM unavailable')
+        errors=io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(errors):
+            cli.main(['create','--name','desktop'])
+        self.assertIn('desktop is available',errors.getvalue())
+        self.assertEqual(inventory.context(self.aws,h.REGION,'desktop')['state'],'running')
+        self.assertFalse(any(c[1]=='stop-instances' for c in self.aws.calls))
+
     def test_profiles_and_profile_are_read_only_without_aws(self):
         self.assertEqual(set(json.loads(self.invoke('profiles'))['profiles']),{'cpu','gpu','publisher'})
         self.assertFalse(json.loads(self.invoke('profile','publisher'))['profiles']['publisher']['desktop'])
@@ -129,6 +186,7 @@ class NamedLifecycleTests(CliFixture):
             if profile=='publisher':args+=['--security-group-id','sg-0123456789abcdef0']
             self.assertIn('DRY RUN',self.invoke(*args))
         self.assertEqual(self.aws.writes,[])
+        cli.install_efs_client.assert_not_called()
 
     def test_wrong_identity_or_profile_fails_before_mutation(self):
         for kind in ('stack-id','profile','instance-type','iam-profile'):
@@ -144,6 +202,7 @@ class NamedLifecycleTests(CliFixture):
 
     def test_publisher_cf_lifecycle_has_no_dcv_or_implicit_promotion(self):
         p=self.create('publisher','publish')
+        cli.install_efs_client.assert_not_called()
         self.assertIsNone(p['dcv_url'])
         self.assertEqual([r['ResourceType'] for r in p['resources']],['AWS::EC2::Instance'])
         with self.assertRaises(SystemExit):self.invoke('connect','publish')
