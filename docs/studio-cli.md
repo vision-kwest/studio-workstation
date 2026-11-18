@@ -3,9 +3,10 @@
 ## Evidence and branch status
 
 Issue #98 replaces the fixed PR #65 acceptance name and CPU-return hostname model.
-The implementation is under review on `feature/issue98-unified-lifecycle`, stacked
-on draft PRs #113–#115. Do not infer a merge or completed browser acceptance from
-this guide. Exact test evidence and known limitations belong in the implementation
+The implementation is under review in draft PR #116 against `main`, from
+`feature/issue98-unified-lifecycle`. PRs #113–#115 have merged into their respective
+base branches; #116 includes their changes. Browser acceptance status, exact test
+evidence and known limitations belong in the implementation
 PR and Issue #98. Historical acceptance records describe older commands.
 
 ## Setup and profiles
