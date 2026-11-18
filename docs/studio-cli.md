@@ -68,8 +68,10 @@ sudo passwd workstation
 
 Then open the URL from `connect art` in your browser and log in as `workstation`.
 SSM is administrative access, not a substitute for a working DCV login page.
-CPU/GPU create includes the approved Rez bundle and read-only `/opt/studio/packages`
-EFS mount by default. Use `--no-studio-software` to opt out. Complete explicit
+CPU/GPU create mounts the existing EFS read/write at `/opt/studio/packages` and
+exposes its user-owned `shared` directory as `/studio`. New desktop accounts use
+UID/GID 2000 consistently. Files saved there survive workstation destruction.
+Use `--no-studio-software` to skip the optional Rez setup while retaining shared storage. Complete explicit
 `--rez-version-id`/`--rez-sha256` pairs remain compatible; partial pairs and opt-out
 conflicts are rejected. Software setup completes asynchronously after DCV; a helper
 failure reports incomplete software setup while the desktop remains available.

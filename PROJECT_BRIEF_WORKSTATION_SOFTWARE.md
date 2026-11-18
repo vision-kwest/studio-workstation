@@ -1,4 +1,14 @@
-# Project brief — CPU/GPU software delivery (Rez 3.4.0 + OpenUSD 26.05)
+# Project brief — shared writable Studio storage
+
+**Current approved scope (November 18, 2026):** [Issue #96](https://github.com/vision-kwest/studio-workstation/issues/96), ordinary shared writes at `/studio`, independent of Rez and a dedicated publisher. The sole operator explicitly relaxed the earlier read-only software constraints. New desktop accounts and `/opt/studio/packages/shared` use UID/GID 2000; `/studio` is a stable alias to that EFS subtree.
+
+Reuse the existing EFS helper, post-DCV service and native mount. `--no-studio-software` skips Rez only. Preserve old package data and normal DCV availability. Application installation, desktop-menu integration and GPU resizing are outside this task.
+
+Acceptance requires normal-user create/edit/delete, reboot persistence and access from a fresh workstation. Offline CPU/GPU contracts and live equivalent shared-storage tests must be distinguished; browser login is not implied by shell checks. Deployment and cleanup evidence belong to #96.
+
+## Historical software-delivery brief
+
+The following records the earlier Rez/OpenUSD scope and its historical status. Its read-only consumer and publisher requirements are superseded by the current scope above.
 
 **Status:** Approved *minimum-change design*; candidate code is offline-tested in [workstation draft PR #73](https://github.com/vision-kwest/studio-workstation/pull/73) and [OpenUSD draft PR #7](https://github.com/vision-kwest/studio-openusd/pull/7), **not yet live accepted or merged**. This brief is the current scope contract, not a deployment authorization. Details and acceptance checklists belong to [workstation Issue #74](https://github.com/vision-kwest/studio-workstation/issues/74) and [publisher Issue #8](https://github.com/vision-kwest/studio-openusd/issues/8).
 

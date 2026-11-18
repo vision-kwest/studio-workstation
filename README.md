@@ -29,8 +29,9 @@ python3 studio workstation connect art
 
 Use the authorized account and `us-east-1`. Create is billable without `--dry-run`.
 Omit `--name` for a generated name. No user cleanup token or disk-cleanup delay.
-CPU/GPU creates include the approved Rez setup and read-only EFS packages by default.
-Use `--no-studio-software` for a desktop-only launch; software setup follows DCV.
+CPU/GPU creates provide writable shared EFS at `/studio` and optional Rez setup.
+Use `--no-studio-software` to skip Rez; shared storage still follows DCV setup.
+The normal `workstation` account can install and save files under `/studio` without sudo.
 Default DCV TCP/8443 is public, with a warning; restrict it using
 `--client-cidr YOUR_PUBLIC_IP/32`. No SSH ingress is needed. Run CLI endpoint checks
 from a network allowed by that CIDR.
