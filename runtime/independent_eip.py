@@ -10,6 +10,7 @@ import time
 from runtime import issue43_hostname_handoff as legacy
 from runtime import issue43_gpu_acm_setup as acm
 from runtime import pr65_one_shot_guard as guard
+from runtime import cli_progress as progress
 from runtime.workstation_inventory import context
 from runtime.dcv_endpoint import resolve
 
@@ -57,6 +58,7 @@ def _owner(aws, address):
 
 def _move(aws, before, destination):
     """Recheck exact association; never use allow-reassociation to steal ownership."""
+    progress.stage("Assigning independent DCV EIP" if destination else "Releasing independent DCV EIP")
     if _fingerprint(_address(aws)) != _fingerprint(before):
         raise RuntimeError("Hostname owner changed; operation aborted")
     if before.get("AssociationId"):
@@ -84,6 +86,7 @@ def _move(aws, before, destination):
 
 def _reachable(aws, selected, check_tls, *, restart=False, sleep=time.sleep):
     """Wait for native IP recovery; bounded stop/start only for a verified owned VM."""
+    progress.stage("Checking DCV endpoint recovery")
     for cycle in range(2 if restart else 1):
         for attempt in range(24):
             fresh = context(aws, legacy.REGION, selected["stack_id"])
@@ -105,13 +108,16 @@ def _reachable(aws, selected, check_tls, *, restart=False, sleep=time.sleep):
         if fresh["profile"] == "gpu":
             guard.status(aws, fresh, headroom=80)  # Never extend expiration implicitly.
         iid = fresh["instance"]
+        progress.stage("Restarting workstation for DCV endpoint recovery")
         aws(legacy.REGION, "ec2", "stop-instances", "--instance-ids", iid)
         aws(legacy.REGION, "ec2", "wait", "instance-stopped", "--instance-ids", iid)
         aws(legacy.REGION, "ec2", "start-instances", "--instance-ids", iid)
         aws(legacy.REGION, "ec2", "wait", "instance-status-ok", "--instance-ids", iid)
+        progress.stage("Checking DCV endpoint recovery")
 
 
 def _change(aws, destination, check_tls, *, destroying=False):
+    progress.stage("Checking independent DCV hostname ownership")
     before = _address(aws)
     stale = legacy._tags(before).get("StudioDcvInstanceId") if not before.get("InstanceId") else None
     if stale:
@@ -181,6 +187,7 @@ def release(aws, check_tls=None):
 
 
 def release_if_owned(aws, selected, check_tls, *, destroying=False):
+    progress.stage("Checking independent DCV EIP release")
     address = legacy._eip(aws)
     iid = selected["instance"]
     if address.get("InstanceId") == iid and iid:

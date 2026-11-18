@@ -5,6 +5,7 @@ import subprocess
 import time
 
 from runtime import issue43_hostname_handoff as handoff
+from runtime import cli_progress as progress
 
 BASE_ROLE = "StudioWorkstationSSMRole"
 EXPORT_NAME = "studio-issue43-dcv-acm-export"
@@ -204,6 +205,7 @@ def _guest_script():
 
 
 def _ssm(aws, gpu_id, commands, *, sleep=time.sleep):
+    progress.stage("Waiting for DCV certificate enrollment")
     r = aws(handoff.REGION, "ssm", "send-command", "--instance-ids", gpu_id,
             "--document-name", "AWS-RunShellScript",
             "--parameters", json.dumps({"commands": commands, "executionTimeout": ["240"]}),
@@ -244,6 +246,7 @@ def _refresh_script():
 
 def prepare_gpu(aws, gpu_id, *, sleep=time.sleep):
     """Explicit hostname destination only; reuse the pinned AWCP/activation installer."""
+    progress.stage("Preparing DCV hostname certificate")
     from runtime.workstation_inventory import context
     vm = handoff._items(aws, gpu_id)[gpu_id]
     selected = context(aws, handoff.REGION, handoff._tags(vm)["aws:cloudformation:stack-id"])
@@ -270,6 +273,7 @@ def prepare_gpu(aws, gpu_id, *, sleep=time.sleep):
                 _ssm(aws, gpu_id, _refresh_script(), sleep=sleep)
             except RuntimeError:
                 _ssm(aws, gpu_id, _guest_script(), sleep=sleep)
+        progress.stage("Verifying DCV hostname certificate")
         handoff.check_gpu_tls(aws, gpu_id, sleep=sleep)
         if handoff._eip(aws).get("InstanceId") != owner:
             raise RuntimeError("Hostname owner changed during certificate preparation")
@@ -282,6 +286,7 @@ def prepare_gpu(aws, gpu_id, *, sleep=time.sleep):
 
 def revoke_gpu(aws, gpu_id):
     """A non-owner may keep its valid certificate, but cannot renew/export it."""
+    progress.stage("Revoking former hostname certificate access")
     if handoff._eip(aws).get("InstanceId") == gpu_id:
         raise ValueError("Cannot revoke certificate renewal from the current hostname owner")
     return {"instance_id": gpu_id, "revoked": _revoke_grant(aws, gpu_id)}
