@@ -12,6 +12,8 @@
 |---|---|
 | [Main README / Quick Start](../README.md) | Project state, first commands, key costs and access risks |
 | [Studio CLI](studio-cli.md) | **Canonical create, preview, check-ready, connect, stop, start, destroy commands** |
+| [Shared application menus](shared-applications.md) | MenuLibre GUI workflow, shared launchers, migration and refresh |
+| [Shared EFS setup](efs-helper-install.md) | Writable `/studio`, EFS helper and dated CPU storage acceptance |
 | [GPU workstation profile](gpu-workstation-profile.md) | Validated Tesla T4 / RES 2026.06 GPU runtime and pinned limits |
 | [GPU runtime provenance](../runtime/README.md) | Exact derived archive keys, versions, SHA-256 and acceptance evidence |
 | [Workstation lifecycle](workstation-lifecycle-visual.md) | EBS, stop/start, changed public IP, cleanup |
@@ -30,8 +32,8 @@
 - [Repository charter](../AGENTS.md) — permanent RES/DCV/safety boundaries and review expectations.
 - [Minimum-change engineering playbook](../ENGINEERING_PLAYBOOK.md) — reusable assignment, evidence, estimation, approval and scope-control method.
 - [Current workstation software brief](../PROJECT_BRIEF_WORKSTATION_SOFTWARE.md) and [ADR-0001: EFS publisher/consumer architecture](adr/0001-software-publishing-and-consumption.md) — accepted design, explicit dependencies and live definition of done.
-- Implementation ownership: [workstation Issue #74](https://github.com/vision-kwest/studio-workstation/issues/74) / draft [PR #73](https://github.com/vision-kwest/studio-workstation/pull/73); [OpenUSD publisher Issue #8](https://github.com/vision-kwest/studio-openusd/issues/8) / draft [PR #7](https://github.com/vision-kwest/studio-openusd/pull/7). **Offline implementation does not mean live accepted.**
-- Future shared writable models/projects remain [Issue #71](https://github.com/vision-kwest/studio-workstation/issues/71), separate from read-only production software consumption.
+- Earlier Rez/OpenUSD implementation: [workstation Issue #74](https://github.com/vision-kwest/studio-workstation/issues/74) / draft [PR #73](https://github.com/vision-kwest/studio-workstation/pull/73); [OpenUSD publisher Issue #8](https://github.com/vision-kwest/studio-openusd/issues/8) / draft [PR #7](https://github.com/vision-kwest/studio-openusd/pull/7). **Offline implementation does not mean live accepted.**
+- Writable `/studio` is the current storage model ([Issue #96](https://github.com/vision-kwest/studio-workstation/issues/96)); shared launcher integration is [Issue #121](https://github.com/vision-kwest/studio-workstation/issues/121). Broader models/projects remain [Issue #71](https://github.com/vision-kwest/studio-workstation/issues/71).
 
 ## Historical source audits and design gates
 

@@ -4,7 +4,9 @@
 
 [Issue #96](https://github.com/vision-kwest/studio-workstation/issues/96) supersedes the read-only consumer and mandatory publisher/Rez constraints below. The sole operator approved ordinary writable shared storage: reuse the existing EFS root mount at `/opt/studio/packages`, with `/studio` pointing to its `shared` subtree. New desktop accounts and that subtree use UID/GID 2000; existing package ownership is preserved.
 
-Reuse the post-DCV setup service, native fstab/systemd automount and official EFS helper. Storage is independent of Rez pins, including with `--no-studio-software`. Workstation IAM permits the required shared writes; IAM rights remain filesystem-wide. A separate publisher, access point, or filesystem is unnecessary for this scope. Application installation and shared-menu integration are separate tasks.
+Reuse the post-DCV setup service, native fstab/systemd automount and official EFS helper. Storage is independent of Rez pins, including with `--no-studio-software`. Workstation IAM permits the required shared writes; IAM rights remain filesystem-wide. A separate publisher, access point, or filesystem is unnecessary for this scope. Application installation remains separate.
+
+[Issue #121](https://github.com/vision-kwest/studio-workstation/issues/121) adds [shared application menus](../shared-applications.md): symlink the desktop user's native applications directory to `/studio/share/applications` and use Ubuntu MenuLibre for GUI saves. Preserve original local entries and existing shared files; keep desktop preferences local. Reuse post-DCV setup without a new service or refresh daemon. Local/native verification does not establish live GNOME/DCV acceptance.
 
 Live preflight found no custom EFS filesystem policy, no access points and no nonterminated workstations. The old review-only denial policy was not deployed at preflight. Source provenance, successful CPU write/restart/fresh-instance checks and verified cleanup are recorded in the [EFS setup guide](../efs-helper-install.md); this does not claim GPU or GUI acceptance.
 

@@ -32,6 +32,8 @@ Omit `--name` for a generated name. No user cleanup token or disk-cleanup delay.
 CPU/GPU creates provide writable shared EFS at `/studio` and optional Rez setup.
 Use `--no-studio-software` to skip Rez; shared storage still follows DCV setup.
 The normal `workstation` account can install and save files under `/studio` without sudo.
+Shared application launchers use MenuLibre (**Menu Editor**); see the
+[shared application guide](docs/shared-applications.md) for setup, GUI saves and refresh.
 Default DCV TCP/8443 is public, with a warning; restrict it using
 `--client-cidr YOUR_PUBLIC_IP/32`. No SSH ingress is needed. Run CLI endpoint checks
 from a network allowed by that CIDR.
