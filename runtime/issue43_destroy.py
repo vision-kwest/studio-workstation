@@ -56,7 +56,7 @@ def _remove_safety(aws, region, stack, identity, selected=None):
                 raise ValueError("Invalid fallback instance")
             if selected and selected["instance"] and ids != [selected["instance"]]:
                 raise ValueError("Fallback belongs to another workstation")
-            vm = _absent(lambda: h._items(aws, ids[0])[ids[0]], "InvalidInstanceID.NotFound")
+            vm = _absent(lambda: h._items(aws, ids[0], allow_missing=True).get(ids[0]), "InvalidInstanceID.NotFound")
             if vm and (vm["State"]["Name"] != "terminated" or
                        (h._tags(vm).get("StudioStack"), h._tags(vm).get("StudioCleanupToken")) != (stack, token)):
                 raise ValueError("Fallback instance deletion/ownership is not verified")
@@ -119,7 +119,7 @@ def destroy(aws, run, stack, region, *, sleep=time.sleep):
                 raise
             sleep(3)
     if selected["instance"]:
-        terminated = _absent(lambda: h._items(aws, selected["instance"])[selected["instance"]], "InvalidInstanceID.NotFound")
+        terminated = _absent(lambda: h._items(aws, selected["instance"], allow_missing=True).get(selected["instance"]), "InvalidInstanceID.NotFound")
         if terminated and terminated.get("State", {}).get("Name") != "terminated":
             raise RuntimeError("Original instance is not terminated")
     for resource in selected["resources"]:

@@ -51,10 +51,12 @@ def context(aws, region, name):
     if iid:
         if not re.fullmatch(r"i-[0-9a-f]{8,17}", iid):
             raise ValueError("Invalid CloudFormation workstation ID")
+        deleted = (stack["StackStatus"] in ("DELETE_COMPLETE", "DELETE_FAILED", "DELETE_IN_PROGRESS") and
+                   matches[0].get("ResourceStatus") == "DELETE_COMPLETE")
         try:
-            vm = hostname._items(aws, iid)[iid]
+            vm = hostname._items(aws, iid, allow_missing=deleted).get(iid, {})
         except subprocess.CalledProcessError as exc:
-            if "InvalidInstanceID.NotFound" not in (exc.stderr or ""):
+            if not deleted or "InvalidInstanceID.NotFound" not in (exc.stderr or ""):
                 raise
         if vm and (hostname._tags(vm).get("aws:cloudformation:stack-id") != arn or
                    vm.get("InstanceType") not in PROFILES[profile]["instance_types"] or
