@@ -16,8 +16,7 @@ Run in AWS CloudShell in account `401233741942`, region `us-east-1`:
 ```bash
 git clone https://github.com/vision-kwest/studio-workstation.git
 cd studio-workstation
-git fetch origin feature/issue98-unified-lifecycle
-git checkout feature/issue98-unified-lifecycle
+git checkout main
 python3 -m pip install -r requirements.txt
 python3 studio workstation profiles
 python3 studio workstation profile gpu
@@ -69,8 +68,11 @@ sudo passwd workstation
 
 Then open the URL from `connect art` in your browser and log in as `workstation`.
 SSM is administrative access, not a substitute for a working DCV login page.
-Optional pinned Rez/EFS arguments remain available on desktop create. Their failure
-does not turn successful DCV provisioning into a hidden inaccessible desktop.
+CPU/GPU create includes the approved Rez bundle and read-only `/opt/studio/packages`
+EFS mount by default. Use `--no-studio-software` to opt out. Complete explicit
+`--rez-version-id`/`--rez-sha256` pairs remain compatible; partial pairs and opt-out
+conflicts are rejected. Software setup completes asynchronously after DCV; a helper
+failure reports incomplete software setup while the desktop remains available.
 
 ## One disposable lifecycle
 

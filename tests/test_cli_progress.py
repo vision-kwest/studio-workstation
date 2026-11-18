@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import io
+from itertools import product
 import json
 from pathlib import Path
 import re
@@ -201,14 +202,34 @@ def test_progress_never_changes_lifecycle_aws_calls_or_guards(profile):
 
 class TestCreateProgress(CliFixture):
     def test_cpu_gpu_create_emit_one_final_json_result(self):
-        for profile in ("cpu", "gpu"):
-            with self.subTest(profile=profile):
+        requested = "Studio software: Rez/EFS setup requested after DCV"
+        override = ["--rez-version-id", "reviewed-private-pin", "--rez-sha256", "b" * 64]
+        cases = [("default", [], requested), ("disabled", ["--no-studio-software"], "Studio software disabled"),
+                 ("override", override, requested)]
+        for profile, (mode, options, plan), quiet in product(("cpu", "gpu"), cases, (False, True)):
+            with self.subTest(profile=profile, software=mode, quiet=quiet):
+                cli.install_efs_client.reset_mock()
                 stdout, stderr = io.StringIO(), io.StringIO()
+                argv = ["create", "--profile", profile, "--name", f"{profile}-{mode}-{int(quiet)}",
+                        "--client-cidr", "198.51.100.17/32", *options]
+                if quiet:
+                    argv += ["--quiet"]
                 with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                    cli.main(["create", "--profile", profile, "--name", profile + "-art"])
+                    cli.main(argv)
                 result = json.loads(stdout.getvalue())
                 self.assertEqual((result["profile"], result["state"]), (profile, "running"))
-                self.assertIn("command finished", stderr.getvalue())
+                if mode == "disabled":
+                    cli.install_efs_client.assert_not_called()
+                else:
+                    cli.install_efs_client.assert_called_once_with(result["instance"], h.REGION)
+                self.assertNotIn(plan, stdout.getvalue())
+                if quiet:
+                    self.assertEqual(stderr.getvalue(), "")
+                else:
+                    self.assertIn(plan, stderr.getvalue())
+                    self.assertIn("command finished", stderr.getvalue())
+                for pin in (cli.DEFAULT_REZ_VERSION_ID, cli.DEFAULT_REZ_SHA256, override[1], override[3]):
+                    self.assertNotIn(pin, stdout.getvalue() + stderr.getvalue())
 
 
 def test_publisher_build_remains_submission_without_waiting(capsys):

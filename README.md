@@ -18,9 +18,7 @@ baseline; no new installer or GPU bootstrap architecture is introduced.
 ```bash
 git clone https://github.com/vision-kwest/studio-workstation.git
 cd studio-workstation
-# During review, use the integration branch rather than assuming main has it:
-git fetch origin feature/issue98-unified-lifecycle
-git checkout feature/issue98-unified-lifecycle
+git checkout main
 python3 -m pip install -r requirements.txt
 python3 studio workstation profiles
 python3 studio workstation create --profile gpu --name art --dry-run
@@ -31,6 +29,8 @@ python3 studio workstation connect art
 
 Use the authorized account and `us-east-1`. Create is billable without `--dry-run`.
 Omit `--name` for a generated name. No user cleanup token or disk-cleanup delay.
+CPU/GPU creates include the approved Rez setup and read-only EFS packages by default.
+Use `--no-studio-software` for a desktop-only launch; software setup follows DCV.
 Default DCV TCP/8443 is public, with a warning; restrict it using
 `--client-cidr YOUR_PUBLIC_IP/32`. No SSH ingress is needed. Run CLI endpoint checks
 from a network allowed by that CIDR.
