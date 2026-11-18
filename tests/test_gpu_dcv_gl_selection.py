@@ -50,6 +50,7 @@ phases:
         set -euxo pipefail
         gl=(packages/nice-dcv-gl*_amd64.ubuntu2404.deb)
         test "${#gl[@]}" -eq 1
+        expected=$(awk '{print $1}' checksum)
         printf "%s  %s\\n" "$expected" dcv.tgz | sha256sum -c -
         apt-get install -y "./${server[0]}" "./${viewer[0]}" "./${xdcv[0]}" "./${gl[0]}"
   - name: RebootAfterDCV

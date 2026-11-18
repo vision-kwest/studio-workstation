@@ -1,4 +1,5 @@
 """Offline checks for official EFS client installation in Studio CLI."""
+import json
 import subprocess
 import unittest
 from unittest import mock
@@ -12,7 +13,9 @@ class EfsClientInstallTests(unittest.TestCase):
             calls.append(args)
             if args[1] == "send-command":
                 self.assertIn("AWS-ConfigureAWSPackage", args)
-                self.assertIn("AmazonEFSUtils", args)
+                parameters = json.loads(args[args.index("--parameters") + 1])
+                self.assertEqual(parameters["name"], ["AmazonEFSUtils"])
+                self.assertEqual(parameters["action"], ["Install"])
                 return {"Command": {"CommandId": "cmd-1"}}
             return {"Status": "Success"}
         cli.install_efs_client("i-test", "us-east-1", manager=manager, sleep=lambda _: None)

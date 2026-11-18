@@ -22,6 +22,7 @@ on:
       - 'runtime/render_workstation.py'
       - 'tests/test_gpu_profile_contract.py'
       - 'tests/test_studio_workstation_cli.py'
+      - 'tests/test_efs_client_install.py'
       - '.github/workflows/studio-cli.yml'
   workflow_dispatch:
 permissions:
@@ -36,6 +37,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -p test_workstation_inventory.py -v
       - run: python3 -m unittest discover -s tests -p test_dcv_endpoint.py -v
       - run: python3 -m unittest discover -s tests -p test_studio_software_offline.py -v
+      - run: python3 -m unittest discover -s tests -p test_efs_client_install.py -v
       - run: python3 -m unittest discover -s tests -p test_gpu_profile_contract.py -v
       - run: python3 -m unittest discover -s tests -p test_pr65_one_shot_guard.py -v
       - run: python3 -m unittest discover -s tests -p test_pr65_gpu_create.py -v
