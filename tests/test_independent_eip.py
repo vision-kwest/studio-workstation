@@ -1,105 +1,143 @@
+"""One explicit hostname owner; all running desktops remain reachable after transfers."""
+import copy
+import datetime as dt
 import unittest
 from unittest.mock import patch
-from runtime import independent_eip
-
-class IndependentEipTests(unittest.TestCase):
-    def test_target_rejects_non_studio_stack(self):
-        with self.assertRaisesRegex(ValueError, "Invalid Studio stack"):
-            independent_eip._target(lambda *args: None, "foreign-stack")
-
-    def test_release_unassociated_is_noop(self):
-        address = {"AllocationId": independent_eip.legacy.EIP_ID, "Tags": []}
-        with patch.object(independent_eip, "_address", return_value=address):
-            self.assertEqual(independent_eip.release(lambda *a: self.fail("unexpected AWS write"))["state"], "unassociated")
-
-    def test_assign_rejects_existing_association(self):
-        with patch.object(independent_eip, "_target", return_value=("i-test", "eni-test")), patch.object(
-            independent_eip, "_address", return_value={"AssociationId": "eipassoc-old", "Tags": []}
-        ):
-            with self.assertRaisesRegex(ValueError, "not unassociated"):
-                independent_eip.assign(lambda *a: self.fail("unexpected AWS write"), "studio-test", lambda *a: None)
-
-    def test_release_refuses_running_owner(self):
-        address = {"InstanceId": "i-old", "AssociationId": "eipassoc-old",
-                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": "i-old"}]}
-        vm = {"VpcId": "vpc-01bbe5d01838f70b2",
-              "IamInstanceProfile": {"Arn": independent_eip.legacy.BASE_PROFILE},
-              "State": {"Name": "running"}}
-        with patch.object(independent_eip.legacy, "_items", return_value={"i-old": vm}), patch.object(
-            independent_eip, "_address", return_value=address
-        ):
-            with self.assertRaisesRegex(ValueError, "Stop the current"):
-                independent_eip.release(lambda *a: self.fail("unexpected AWS write"))
-
-    def test_guest_tls_fails_closed(self):
-        def aws(region, service, operation, *args):
-            if operation == "send-command":
-                return {"Command": {"CommandId": "test"}}
-            return {"Status": "Failed"}
-        with self.assertRaisesRegex(RuntimeError, "readiness failed"):
-            independent_eip._guest_tls(aws, "i-test", sleep=lambda _: None)
-
-    def test_release_refuses_stale_unassociated_tag(self):
-        with patch.object(independent_eip, "_address", return_value={
-            "Tags": [{"Key": "StudioDcvInstanceId", "Value": "i-stale"}]
-        }):
-            with self.assertRaises(ValueError):
-                independent_eip.release(lambda *a: self.fail("unexpected AWS write"))
+from runtime import independent_eip as eip, dcv_endpoint, pr65_one_shot_guard as guard
+from workstation_fake import AWS, NOW, h, acm, inventory, tagdict, tags, missing
 
 
-    def test_gpu_preview_uses_replacement_cpu(self):
-        h = independent_eip.legacy
-        cpu, gpu = "i-aaaaaaaaaaaaaaaaa", "i-bbbbbbbbbbbbbbbbb"
-        address = {"InstanceId": cpu, "AssociationId": "eipassoc-old",
-                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": cpu}]}
-        owner = {"instance": cpu, "stack": "studio-workstation-cpu-rez77",
-                 "eni": "eni-cpu", "association": "eipassoc-old"}
-        vm = {"State": {"Name": "running"}, "ImageId": h.GPU_AMI,
-              "InstanceType": "g4dn.xlarge",
-              "IamInstanceProfile": {"Arn": h.BASE_PROFILE},
-              "VpcId": "vpc-01bbe5d01838f70b2",
-              "NetworkInterfaces": [{"NetworkInterfaceId": "eni-gpu",
-                                     "Attachment": {"DeviceIndex": 0, "Status": "attached"}}]}
-        with (patch.object(independent_eip, "_address", return_value=address),
-              patch.object(independent_eip, "_cpu_owner", return_value=owner),
-              patch.object(h, "_stack_iid", return_value=gpu),
-              patch.object(h, "_items", return_value={gpu: vm}),
-              patch.object(h, "_gpu_guard", return_value={"terminate_at": "future"}) as guard,
-              patch("runtime.pr65_gpu_create.preflight") as preflight):
-            result = independent_eip.gpu_preview(lambda *a: None)
-        self.assertEqual(result["from"], cpu)
-        self.assertEqual(result["to"], gpu)
-        self.assertEqual(result["cpu"]["stack"], "studio-workstation-cpu-rez77")
-        guard.assert_called_once()
-        preflight.assert_called_once()
+class HostnameTests(unittest.TestCase):
+    def setUp(self):
+        self.aws=AWS();self.a=self.aws.desktop('art');self.b=self.aws.desktop('ai');self.cpu=self.aws.desktop('edit','cpu')
+        self.tls=lambda host,ip:'https://'+host+':8443'
+        self.patches=[]
+        real_status=guard.status
+        self.add(patch.object(guard,'status',side_effect=lambda aws,c,**kw:real_status(aws,c,now=NOW,**kw)))
+        self.add(patch.object(h,'check_gpu_tls'))
+        self.add(patch.object(eip,'resolve',side_effect=lambda c,r,aws,tls:dcv_endpoint.resolve(c,r,aws,tls,probe=lambda *_:None)))
+        real_reachable=eip._reachable
+        self.add(patch.object(eip,'_reachable',side_effect=lambda aws,c,tls,**kw:real_reachable(aws,c,tls,sleep=lambda _:None,**kw)))
 
-    def test_free_owner_and_unassociated_handoff(self):
-        h, gpu = independent_eip.legacy, "i-bbbbbbbbbbbbbbbbb"
-        self.assertIsNone(independent_eip._cpu_owner(lambda *a: self.fail("unexpected AWS read"), {"Tags": []}))
-        plan = {"from": None, "to": gpu, "cpu": None, "old_association": None, "gpu_eni": "eni-gpu", "guard": {}}
-        after = {"InstanceId": gpu, "NetworkInterfaceId": "eni-gpu", "AssociationId": "eipassoc-gpu",
-                 "Tags": [{"Key": "StudioDcvInstanceId", "Value": gpu}]}
-        aws = unittest.mock.Mock(return_value={"AssociationId": "eipassoc-gpu"})
-        with (patch.object(independent_eip, "gpu_preview", return_value=plan),
-              patch.object(independent_eip, "_address", side_effect=[{"Tags": []}, after])):
-            self.assertEqual(independent_eip.handoff_gpu(aws, lambda *a: None, check_guest=lambda *a: None)["owner"], gpu)
-        self.assertEqual([c.args[2] for c in aws.call_args_list], ["associate-address", "create-tags"])
+    def add(self,p):
+        p.start();self.addCleanup(p.stop)
 
-    def test_restore_refuses_missing_cpu_return_tag(self):
-        with patch.object(independent_eip, "_address", return_value={
-            "InstanceId": "i-bbbbbbbbbbbbbbbbb",
-            "Tags": [{"Key": "StudioDcvInstanceId", "Value": "i-bbbbbbbbbbbbbbbbb"}]}):
-            with self.assertRaisesRegex(ValueError, "missing verified CPU return stack"):
-                independent_eip.restore_cpu(lambda *a: None, "i-bbbbbbbbbbbbbbbbb")
+    def assign(self,name):return eip.assign(self.aws,name,self.tls)
 
-    def test_handoff_refuses_unverified_guest_before_any_writes(self):
-        plan = {"to": "i-bbbbbbbbbbbbbbbbb"}
-        with patch.object(independent_eip, "gpu_preview", return_value=plan):
-            with self.assertRaisesRegex(ValueError, "guest TLS failed"):
-                independent_eip.handoff_gpu(
-                    lambda *a: self.fail("AWS write before TLS"),
-                    lambda *a: None,
-                    check_guest=lambda *a: (_ for _ in ()).throw(ValueError("guest TLS failed")))
+    def test_gpu_gpu_cpu_transfer_preserves_every_running_endpoint(self):
+        for selected in (self.a,self.b,self.cpu):
+            result=self.assign(selected['stack'])
+            self.assertEqual(result['owner'],selected['stack'])
+            self.assertTrue(result['endpoint']['trusted'])
+            for c in (self.a,self.b,self.cpu):
+                fresh=inventory.context(self.aws,h.REGION,c['stack'])
+                self.assertTrue(eip.resolve(fresh,h.REGION,self.aws,self.tls)['reachable'])
+            self.assertEqual(acm._grants(self.aws)[0],{selected['instance']})
+        self.assertFalse(any(c[1] in ('allocate-address','release-address','stop-instances','change-resource-record-sets') for c in self.aws.calls))
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_create_or_start_never_steals_an_existing_owner(self):
+        self.assign(self.a['stack']);before=copy.deepcopy(self.aws.address)
+        self.aws.desktop('third-gpu')
+        self.assertEqual(self.aws.address,before)
+
+    def test_release_preserves_allocation_and_native_public_access(self):
+        self.assign('art');result=eip.release(self.aws,self.tls)
+        self.assertIsNone(result['owner']);self.assertTrue(result['previous_endpoint']['reachable'])
+        self.assertEqual(self.aws.address['AllocationId'],h.EIP_ID)
+        self.assertEqual(acm._grants(self.aws)[0],set())
+
+    def test_stop_start_fallback_only_for_previous_owner(self):
+        self.assign('art');self.aws.restore_public_ip=False;self.aws.calls=[]
+        result=self.assign('ai')
+        self.assertTrue(result['previous_endpoint']['reachable'])
+        writes=[c for c in self.aws.calls if c[1] in ('stop-instances','start-instances')]
+        self.assertEqual([c[1] for c in writes],['stop-instances','start-instances'])
+        self.assertTrue(all(c[-1]==self.a['instance'] for c in writes))
+        self.assertFalse(any(c[1]=='allocate-address' for c in self.aws.calls))
+
+    def test_expired_restart_window_rolls_back_without_extending_deadlines(self):
+        self.assign('art');self.aws.restore_public_ip=False
+        original=guard.status.side_effect
+        def near_expiry(aws,c,**kw):
+            if c['instance']==self.a['instance'] and kw.get('headroom')==80:raise ValueError('too little restart time')
+            return original(aws,c,**kw)
+        guard.status.side_effect=near_expiry
+        with self.assertRaisesRegex(RuntimeError,'original association restored'):self.assign('ai')
+        self.assertEqual(self.aws.address['InstanceId'],self.a['instance'])
+        self.assertFalse(any(c[1]=='stop-instances' and c[-1]==self.a['instance'] for c in self.aws.calls))
+        self.assertTrue(eip.resolve(inventory.context(self.aws,h.REGION,'ai'),h.REGION,self.aws,self.tls)['reachable'])
+
+    def test_failure_before_or_after_eip_mutation_restores_original_owner(self):
+        self.assign('art')
+        for action in ('disassociate-address','associate-address','create-tags'):
+            for after in (False,True):
+                fired=[]
+                def fail(service,op,args,*rest):
+                    if service=='ec2' and op==action and not fired:fired.append(1);raise RuntimeError('injected transport failure')
+                if after:self.aws.after=fail
+                else:self.aws.before=fail
+                with self.subTest(action=action,after=after),self.assertRaises(RuntimeError):self.assign('ai')
+                self.aws.before=self.aws.after=None
+                self.assertEqual(self.aws.address.get('InstanceId'),self.a['instance'])
+                self.assertEqual(acm._grants(self.aws)[0],{self.a['instance']})
+
+    def test_failed_public_tls_rolls_back_and_checks_both_endpoints(self):
+        self.assign('art')
+        def bad_tls(host,ip):
+            if self.aws.address.get('InstanceId')==self.b['instance']:raise ValueError('Trusted DCV TLS failure')
+            return self.tls(host,ip)
+        with self.assertRaisesRegex(RuntimeError,'original association restored'):eip.assign(self.aws,'ai',bad_tls)
+        self.assertEqual(self.aws.address['InstanceId'],self.a['instance'])
+        self.assertTrue(self.aws.vms[self.b['instance']].get('PublicIpAddress'))
+
+    def test_foreign_owner_on_failure_is_never_seized_by_rollback(self):
+        self.assign('art');fired=[]
+        def conflict(service,action,args,*rest):
+            if action=='disassociate-address' and not fired:
+                fired.append(1);self.aws.address.update(InstanceId='i-0ffffffffffffffff',AssociationId='foreign',NetworkInterfaceId='foreign')
+                raise RuntimeError('concurrent owner')
+        self.aws.after=conflict
+        with self.assertRaisesRegex(RuntimeError,'foreign owner'):self.assign('ai')
+        self.assertEqual(self.aws.address['InstanceId'],'i-0ffffffffffffffff')
+
+    def test_foreign_tags_and_unsupported_networking_fail_before_eip_writes(self):
+        for mutation in ('owner-tag','two-enis','secondary-private','foreign-vpc','wrong-stack'):
+            aws=AWS();a=aws.desktop('cpu','cpu')
+            if mutation=='owner-tag':aws.address.update(InstanceId=a['instance'],AssociationId='x',NetworkInterfaceId='x')
+            if mutation=='two-enis':aws.vms[a['instance']]['NetworkInterfaces']*=2
+            if mutation=='secondary-private':aws.vms[a['instance']]['NetworkInterfaces'][0]['PrivateIpAddresses'].append({'Primary':False})
+            if mutation=='foreign-vpc':aws.vms[a['instance']]['VpcId']='foreign'
+            if mutation=='wrong-stack':next(t for t in aws.vms[a['instance']]['Tags'] if t['Key']=='aws:cloudformation:stack-id')['Value']='foreign'
+            aws.calls=[]
+            with self.subTest(mutation=mutation),self.assertRaises((ValueError,RuntimeError)):eip.assign(aws,'cpu',self.tls)
+            self.assertFalse(any(c[1] in ('associate-address','disassociate-address') for c in aws.calls))
+
+    def test_stale_detached_owner_recovers_before_assignment(self):
+        self.assign('art');self.aws.detach();self.aws.vms[self.a['instance']].pop('PublicIpAddress',None)
+        self.assign('ai')
+        self.assertTrue(self.aws.vms[self.a['instance']].get('PublicIpAddress'))
+        self.assertEqual(self.aws.address['InstanceId'],self.b['instance'])
+
+    def test_stopped_nonowner_does_not_change_the_selected_hostname(self):
+        self.assign('ai');before=copy.deepcopy(self.aws.address)
+        self.aws.vms[self.a['instance']]['State']['Name']='stopped'
+        eip.release_if_owned(self.aws,self.a,self.tls)
+        self.assertEqual(self.aws.address,before)
+
+    def test_owner_stopping_during_assignment_is_not_reported_success(self):
+        self.assign('art')
+        def stopped(service,action,args,result):
+            if action=='create-tags':self.aws.vms[self.b['instance']]['State']['Name']='stopped'
+        self.aws.after=stopped
+        with self.assertRaises(RuntimeError):self.assign('ai')
+        self.assertEqual(self.aws.address['InstanceId'],self.a['instance'])
+
+    def test_failed_guest_certificate_prevents_any_eip_change(self):
+        self.assign('art');before=copy.deepcopy(self.aws.address)
+        with patch.object(acm,'prepare_gpu',side_effect=RuntimeError('guest failed')):
+            with self.assertRaises(RuntimeError):self.assign('ai')
+        self.assertEqual(self.aws.address,before)
+
+    def test_unassociated_release_is_idempotent(self):
+        self.assertIsNone(eip.release(self.aws,self.tls)['owner'])
+        self.assertIsNone(eip.release(self.aws,self.tls)['owner'])

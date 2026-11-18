@@ -1,19 +1,30 @@
-# On-demand publisher (draft PR #76)
+# Named on-demand publisher
 
-The publisher uses a dedicated EC2 IAM instance profile, SSM, and IAM/TLS EFS. It does **not** use DCV, the shared EIP, or a GitHub Actions runner. Its bootstrap clones public `studio-rez` at pinned commit `2fee37e32a09c337d9486e00bcc2a16c3ff4b0fb`.
+Publisher now shares the native CloudFormation lifecycle with desktops, without
+installing a desktop or acquiring the shared EIP. Existing software publishing
+bootstrap and explicit build/test/prod promotion remain unchanged. The dedicated
+`StudioEfsCiPublisher` profile and existing EFS client security group are inputs,
+not resources owned by the disposable publisher stack.
 
 ```bash
-python3 studio workstation publisher-create --security-group-id sg-004ad23682c7db931
-python3 studio workstation publisher-status --instance-id <publisher-instance-id>
-python3 studio workstation publisher-run --instance-id <publisher-instance-id> --operation check
-python3 studio workstation publisher-run --instance-id <publisher-instance-id> --operation build --recipe-repo vision-kwest/studio-workstation --recipe-ref <reviewed-40-character-commit> --recipe-path tests/fixtures/publisher_acceptance_build.sh
-python3 studio workstation publisher-result --instance-id <publisher-instance-id> --command-id <ssm-command-id>
-python3 studio workstation publisher-run --instance-id <publisher-instance-id> --operation promote-test --name publisheraccept --version 0.1
-python3 studio workstation publisher-run --instance-id <publisher-instance-id> --operation promote-prod --name publisheraccept --version 0.1
-python3 studio workstation publisher-stop --instance-id <publisher-instance-id>
-python3 studio workstation publisher-start --instance-id <publisher-instance-id>
+python3 studio workstation create --profile publisher --name publish \
+  --security-group-id sg-004ad23682c7db931
+python3 studio workstation check-ready publish
+python3 studio workstation run publish --operation check
+python3 studio workstation run publish --operation build \
+  --recipe-repo vision-kwest/REPO --recipe-ref FULL_COMMIT_SHA --recipe-path recipes/build.sh
+python3 studio workstation result publish --command-id COMMAND_UUID
+python3 studio workstation run publish --operation promote-test --package usd --version 26.05
+python3 studio workstation run publish --operation promote-prod --package usd --version 26.05
+python3 studio workstation stop publish
+python3 studio workstation destroy publish --delete-stack
 ```
 
-The build operation runs an explicitly pinned shell recipe from a `vision-kwest` GitHub repository; it submits a long-running SSM command and returns its command ID. It does not build OpenUSD automatically without an OpenUSD recipe. Only execute reviewed recipes. The publisher has EFS write permission across the filesystem to support promotion; the current implementation does **not** sandbox build recipes to dev. Promotion rejects existing destinations.
+Replace the recipe placeholders with a reviewed pinned recipe. Build only writes
+to the existing dev workflow; test/prod promotion is explicit. Retrieve SSM results
+before claiming publishing succeeded. `check-ready` proves bootstrap and dev write
+access; it does not prove a particular package builds. Stop/start preserves local
+EBS; destroy discards it natively with the instance. Shared package data is preserved.
 
-Live acceptance: fresh bootstrap, public Git clone, IAM/TLS EFS, generic isolated test recipe, dev→test→prod promotion, non-root dev write, stop/start persistence and cleanup passed on `i-0499bf014d1fc86eb` (stopped). The CLI itself and its new parser/tests still require CI verification. Avoid running two publishers concurrently.
+Raw `publisher-* --instance-id` commands are retired, not parallel supported paths.
+See [Studio CLI](studio-cli.md#publisher) and Issue #98 for branch/acceptance status.

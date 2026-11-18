@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small AWS CLI/CloudFormation wrapper for the validated CPU RES workstation.
+"""Named AWS CLI/CloudFormation lifecycle for CPU, GPU and publisher workstations.
 
 No external Python dependencies. Uses existing render_workstation.py and AWS CLI.
 Commands run when explicitly invoked; use --dry-run to preview create, and --delete-stack for teardown.
@@ -19,7 +19,6 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_STACK = "studio-workstation-cpu-v013"
 DEFAULT_BUCKET = "studio-workstation-releases-401233741942-us-east-1"
 DEFAULT_AMI = "ami-0d6dd9e8265d48906"
 DEFAULT_VPC = "vpc-01bbe5d01838f70b2"
@@ -39,16 +38,10 @@ GPU_KEYS = {
     "virtual-desktop.tar.gz": GPU_APP_PREFIX + "/virtual-desktop.tar.gz",
 }
 
-# The PR #65 GPU acceptance launcher is limited to this exact stack/token.
-# Automatic TLS/hostname orchestration never overrides its expiration guard.
-GPU_ACCEPTANCE_LIVE_ENABLED = True
-GPU_ACCEPTANCE_STACK = "studio-gpu-cli-accept65"
-GPU_ACCEPTANCE_TOKEN = "pr65-b23c8e5fdf67b683cd35"
 TRUSTED_DCV_HOSTNAME = "dcv.kwesidavis.com"  # Issue #43: opt-in, never an IP alias
 
 # Original PR65 supervised defaults; custom values use the same guarded Scheduler path.
 GPU_EXPIRATION_DEFAULT_MINUTES = 150
-GPU_VOLUME_CLEANUP_DEFAULT_MINUTES = 45
 
 
 def gpu_duration_minutes(value):
@@ -66,22 +59,14 @@ def gpu_extension_minutes(value):
 
 
 def gpu_expiration_options(args):
-    """Validate bounded, GPU-only expiry options without changing PR65 defaults."""
-    explicit = args.expires_in is not None or args.volume_cleanup_delay is not None
     if args.profile != "gpu":
-        if explicit:
-            raise ValueError("GPU expiration options require --profile gpu")
+        if args.expires_in is not None:
+            raise ValueError("--expires-in requires --profile gpu")
         return None
-    minutes = (GPU_EXPIRATION_DEFAULT_MINUTES if args.expires_in is None
-               else args.expires_in)
-    delay = (GPU_VOLUME_CLEANUP_DEFAULT_MINUTES if args.volume_cleanup_delay is None
-             else args.volume_cleanup_delay)
-    if not 60 <= minutes <= 240:
-        raise ValueError("--expires-in must be between 60m and 240m")
-    if not 30 <= delay <= 120:
-        raise ValueError("--volume-cleanup-delay must be between 30m and 120m")
-    return (minutes, delay)
-
+    from runtime.pr65_one_shot_guard import validate_durations
+    minutes = GPU_EXPIRATION_DEFAULT_MINUTES if args.expires_in is None else args.expires_in
+    validate_durations(minutes)
+    return minutes
 
 
 def run(args, *, capture=True):
@@ -117,19 +102,9 @@ def instance_id(stack, region):
 
 
 def describe(stack, region):
-    resource = workstation_resource(stack, region)
-    iid = resource["PhysicalResourceId"]
-    reservations = aws(region, "ec2", "describe-instances", "--instance-ids", iid)["Reservations"]
-    instances = [vm for reservation in reservations for vm in reservation["Instances"]]
-    if len(instances) != 1 or instances[0].get("InstanceId") != iid:
-        raise ValueError("Expected exactly one CloudFormation-owned workstation")
-    vm = instances[0]
-    from runtime.issue43_hostname_handoff import _tags
-    if _tags(vm).get("aws:cloudformation:stack-id") != resource["StackId"]:
-        raise ValueError("EC2 does not belong to the selected CloudFormation stack ID")
-    return {"stack": stack, "stack_id": resource["StackId"], "instance": iid, "state": vm["State"]["Name"],
-            "public_ip": vm.get("PublicIpAddress"),
-            "dcv_url": f"https://{vm['PublicIpAddress']}:8443" if vm.get("PublicIpAddress") else None}
+    from runtime.workstation_inventory import context
+    return {k: v for k, v in context(aws, region, stack).items()
+            if k not in ("vm", "resources", "token")}
 
 def verified_dcv_hostname(hostname, public_ip):
     """Only advertise a trusted URL when DNS AND system TLS verification pass.
@@ -175,15 +150,22 @@ def gpu_release_preflight(args):
             raise ValueError("GPU release latest object differs from validated version: " + name)
 
 
-def gpu_ready(stack, region):
+def gpu_ready(stack, region, *, gpu=True):
     """Read-only guest readiness via bounded SSM diagnostics; no secrets."""
     import time
     iid = instance_id(stack, region)
     commands = [
         "set -e",
+        "echo 'Checking RES desktop readiness marker'",
         "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
+        "echo 'Checking GDM and DCV services'",
         "systemctl is-active gdm3 dcvserver",
+        "echo 'Checking DCV console session'",
         "dcv describe-session console",
+    ]
+    if gpu:
+        commands += [
+        "echo 'Checking NVIDIA T4 and Xorg OpenGL'",
         "nvidia-smi -L | grep -q 'Tesla T4'",
         "pgrep -x Xorg",
         "DISPLAY=:0 XAUTHORITY=/run/user/119/gdm/Xauthority __GLX_VENDOR_LIBRARY_NAME=nvidia glxinfo -B | grep -q 'OpenGL renderer string: Tesla T4'",
@@ -191,28 +173,32 @@ def gpu_ready(stack, region):
     response = aws(region, "ssm", "send-command", "--instance-ids", iid,
                    "--document-name", "AWS-RunShellScript",
                    "--parameters", json.dumps({"commands": commands, "executionTimeout": ["45"]}),
-                   "--timeout-seconds", "60", "--comment", "Studio GPU readiness: no credentials")
+                   "--timeout-seconds", "60", "--comment", "Studio desktop readiness: no credentials")
     cid = response["Command"]["CommandId"]
     for _ in range(18):
         time.sleep(5)
         try:
             result = aws(region, "ssm", "get-command-invocation",
                          "--command-id", cid, "--instance-id", iid)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
+            if "InvocationDoesNotExist" not in (exc.stderr or ""):
+                raise
             continue
         if result["Status"] == "Success":
-            print("GPU READY: RES, GDM, DCV, Xorg and Tesla T4 OpenGL")
+            print("READY: RES, GDM and DCV" + (", Xorg and Tesla T4 OpenGL" if gpu else ""))
             return
         if result["Status"] in ("Failed", "Cancelled", "TimedOut"):
-            raise ValueError("GPU readiness failed: " + result.get("StandardErrorContent", "")[-1200:])
+            details = "\n".join(result.get(key, "") for key in
+                                ("StandardOutputContent", "StandardErrorContent"))
+            raise ValueError(f"GPU readiness failed: instance={iid} SSM command={cid}\n" + details[-1600:])
     raise ValueError("GPU readiness timed out; inspect SSM and RES bootstrap logs")
 
 
-def wait_gpu_bootstrap(stack, region, *, attempts=48, sleep=time.sleep):
-    """Allow up to ~12 minutes for RES reboots, retaining fail-closed readiness.\n\n    The independent GPU termination/EBS schedules remain armed throughout.\n    """
+def wait_gpu_bootstrap(stack, region, *, attempts=96, sleep=time.sleep, gpu=True):
+    """Bound retries across native RES installation and reboots; keep fail-closed readiness.\n\n    The native workstation expiry and exact-instance fallback remain armed throughout.\n    """
     for attempt in range(attempts):
         try:
-            gpu_ready(stack, region)
+            gpu_ready(stack, region, gpu=gpu)
             return
         except subprocess.CalledProcessError as exc:
             # SSM can disconnect while RES reboots. Never retry an IAM denial.
@@ -225,140 +211,11 @@ def wait_gpu_bootstrap(stack, region, *, attempts=48, sleep=time.sleep):
             if not any(message in str(exc) for message in
                        ("GPU readiness failed", "GPU readiness timed out")):
                 raise
+            failure = str(exc)
         if attempt + 1 < attempts:
             sleep(15)
-    raise RuntimeError("GPU RES/DCV bootstrap did not become ready; "
-                       "PR #65 instance and volume expiry schedules remain armed")
-
-
-def trusted_owner(stack, instance, *, manager=aws):
-    """Only the already-approved CPU/GPU stack may claim the shared EIP."""
-    from runtime import issue43_hostname_handoff as handoff
-    expected = {DEFAULT_STACK: handoff.CPU_ID,
-                GPU_ACCEPTANCE_STACK: instance}
-    if stack not in expected or instance != expected[stack]:
-        raise ValueError("Shared hostname is restricted to the approved CPU/GPU stack")
-    if handoff._stack_iid(manager, stack) != instance:
-        raise ValueError("CloudFormation workstation identity changed")
-    address = handoff._eip(manager)
-    if (address.get("InstanceId") != instance or
-            handoff._tags(address).get("StudioDcvInstanceId") != instance):
-        raise ValueError("Shared EIP is not owned by this workstation")
-    handoff._dns(manager)
-    return handoff.HOST, handoff.EIP_IP
-
-
-def trusted_url(stack, instance, *, manager=aws, check_tls=verified_dcv_hostname):
-    host, ip = trusted_owner(stack, instance, manager=manager)
-    return check_tls(host, ip)
-
-
-def shared_gpu_source_ready(*, manager=aws):
-    """Fail closed before GPU billing without requiring the original CPU anchor.
-
-    The shared EIP must be safely unassociated or attached to a verified,
-    stopped Studio CPU. Never start a GPU while another owner is running.
-    """
-    from runtime import independent_eip
-    from runtime import issue43_hostname_handoff as handoff
-
-    address = independent_eip._address(manager)
-    owner = address.get("InstanceId")
-    tagged = handoff._tags(address).get("StudioDcvInstanceId")
-    if owner is None:
-        if address.get("AssociationId") or address.get("NetworkInterfaceId") or tagged:
-            raise ValueError("Unassociated EIP has stale association or ownership tags")
-        return {"owner": None, "state": "unassociated"}
-    if not address.get("AssociationId") or not address.get("NetworkInterfaceId"):
-        raise ValueError("Associated EIP lacks verified association identity")
-
-    independent_eip._owner(manager, address)  # Requires stopped, approved instance.
-    vm = handoff._items(manager, owner)[owner]
-    interfaces = vm.get("NetworkInterfaces", [])
-    if len(interfaces) != 1 or interfaces[0].get("NetworkInterfaceId") != address["NetworkInterfaceId"]:
-        raise ValueError("EIP owner's network interface identity mismatch")
-    name = handoff._tags(vm).get("aws:cloudformation:stack-name", "")
-    if not re.fullmatch(r"studio-[a-z0-9-]{3,100}", name) or name.startswith("studio-gpu-cli-"):
-        raise ValueError("EIP owner is not a verified Studio CPU stack")
-    if handoff._stack_iid(manager, name) != owner:
-        raise ValueError("EIP owner CloudFormation identity changed")
-    return {"owner": owner, "state": "stopped", "stack": name}
-
-
-def gpu_restart_preflight(stack, instance, region, *, manager=aws, now=None):
-    """Verify PR65 guards and restart headroom BEFORE starting billable EC2."""
-    from runtime import issue43_hostname_handoff as handoff
-    from runtime import pr65_gpu_create
-
-    if (stack, region) != (GPU_ACCEPTANCE_STACK, DEFAULT_REGION):
-        raise ValueError("GPU restart is restricted to the approved stack and region")
-    if handoff._stack_iid(manager, stack) != instance:
-        raise ValueError("GPU CloudFormation instance identity changed")
-    gpu = handoff._items(manager, instance)[instance]
-    if gpu.get("State", {}).get("Name") != "stopped":
-        raise ValueError("GPU must be stopped before restart")
-    pr65_gpu_create.preflight(manager, region, stack, GPU_ACCEPTANCE_TOKEN)
-    now = now or dt.datetime.now(dt.timezone.utc)
-    if now.tzinfo is None or now.utcoffset() != dt.timedelta(0):
-        raise ValueError("GPU restart clock must be UTC")
-    try:
-        expiry = handoff._gpu_guard(manager, gpu, now)
-    except ValueError as exc:
-        raise ValueError("GPU restart refused before EC2 start: " + str(exc)) from exc
-    # Reserve bootstrap/startup time in addition to the existing 60-minute
-    # handoff safety margin. A late restart must not incur EC2 charges.
-    required = handoff.SAFETY_MARGIN + dt.timedelta(minutes=20)
-    terminate_at = dt.datetime.fromisoformat(expiry["terminate_at"])
-    if terminate_at - now < required:
-        raise ValueError("GPU restart refused before EC2 start: fewer than "
-                         "80 minutes remain before automatic termination")
-    return expiry
-
-
-
-def gpu_expiration_summary(terminate_at, cleanup_at, *, now=None):
-    """Format already-verified UTC deadlines; do not call AWS or change schedules."""
-    now = now or dt.datetime.now(dt.timezone.utc)
-    termination = dt.datetime.fromisoformat(terminate_at)
-    cleanup = dt.datetime.fromisoformat(cleanup_at)
-    if any(t.tzinfo is None or t.utcoffset() != dt.timedelta(0)
-           for t in (now, termination, cleanup)):
-        raise ValueError("GPU expiration timestamps must be UTC-aware")
-    if not dt.timedelta(minutes=30) <= cleanup - termination <= dt.timedelta(minutes=120):
-        raise ValueError("Unexpected retained-EBS cleanup deadline")
-    remaining = int((termination - now).total_seconds())
-    status = "expired" if remaining <= 0 else (
-        "restart_unsafe" if remaining < 80 * 60 else "scheduled")
-    result = {
-        "termination_utc": termination.isoformat(),
-        "ebs_cleanup_utc": cleanup.isoformat(),
-        "remaining_seconds": max(0, remaining),
-        "remaining_minutes": max(0, remaining // 60),
-        "status": status,
-    }
-    if status == "expired":
-        result["warning"] = ("Termination deadline has passed; independently verify "
-                             "EC2 and retained-EBS cleanup.")
-    elif status == "restart_unsafe":
-        result["warning"] = ("Less than 80 minutes remain; the GPU cannot be safely "
-                             "restarted under the existing guard.")
-    return result
-
-
-def gpu_expiration_status(stack, instance, region, *, manager=aws, now=None):
-    """Read and verify the exact GPU's two active schedules even near expiration."""
-    from runtime import issue43_hostname_handoff as handoff
-    from runtime import pr65_gpu_create
-    if (stack, region) != (GPU_ACCEPTANCE_STACK, DEFAULT_REGION):
-        raise ValueError("Expiration status limited to approved GPU and region")
-    if handoff._stack_iid(manager, stack) != instance:
-        raise ValueError("GPU stack instance identity mismatch")
-    gpu = handoff._items(manager, instance)[instance]
-    pr65_gpu_create.preflight(manager, region, stack, GPU_ACCEPTANCE_TOKEN)
-    now = now or dt.datetime.now(dt.timezone.utc)
-    deadlines = handoff._gpu_guard(manager, gpu, now, require_headroom=False)
-    return gpu_expiration_summary(deadlines["terminate_at"],
-                                  deadlines["volume_cleanup_at"], now=now)
+    raise RuntimeError("RES/DCV bootstrap did not become ready; "
+                       "native workstation expiry remains armed; last check: " + failure)
 
 
 def verify_software_bootstrap_source(source):
@@ -412,41 +269,6 @@ def install_efs_client(instance, region, *, manager=aws, sleep=time.sleep):
     raise RuntimeError("Timed out waiting for official EFS helper installation")
 
 
-def complete_gpu_setup(stack, region, instance, *, manager=aws,
-                       wait=wait_gpu_bootstrap):
-    """Guarded GPU ACM enrollment and replacement-CPU EIP handoff."""
-    if stack != GPU_ACCEPTANCE_STACK or region != DEFAULT_REGION:
-        raise ValueError("GPU trusted setup limited to approved acceptance scope")
-    wait(stack, region)
-    from runtime import issue43_gpu_acm_setup as acm
-    from runtime import independent_eip
-    result = acm.prepare_gpu(manager, independent=True)
-    if result["instance_id"] != instance:
-        raise RuntimeError("GPU instance changed during ACM enrollment")
-    transfer = independent_eip.handoff_gpu(manager, verified_dcv_hostname)
-    if transfer["owner"] != instance:
-        raise RuntimeError("GPU EIP handoff owner mismatch")
-    return "https://" + independent_eip.legacy.HOST + ":8443"
-
-
-def complete_gpu_stop(stack, instance, *, manager=aws):
-    """Restore replacement CPU EIP and revoke exact GPU certificate grant."""
-    from runtime import issue43_gpu_acm_setup as acm
-    from runtime import independent_eip
-    if stack != GPU_ACCEPTANCE_STACK:
-        raise ValueError("Not an approved GPU acceptance stack")
-    address = independent_eip._address(manager)
-    owner = address.get("InstanceId")
-    tagged = independent_eip.legacy._tags(address).get("StudioDcvInstanceId")
-    if owner == instance or (owner is None and tagged == instance):
-        independent_eip.restore_cpu(manager, instance)
-    elif tagged == owner:
-        independent_eip._cpu_owner(manager, address)
-    else:
-        raise ValueError("Unexpected EIP owner; refusing GPU cleanup")
-    return acm.revoke_gpu(manager, instance, independent=True)
-
-
 def interactive_ssm(instance, region, *, attempts=8, sleep=time.sleep,
                     execute=subprocess.run):
     """Retry only transient SSM TargetNotConnected; preserve interactive input."""
@@ -462,84 +284,61 @@ def interactive_ssm(instance, region, *, attempts=8, sleep=time.sleep,
         sleep(8)
 
 
-def wait_cpu_https(stack, instance, *, attempts=30, sleep=time.sleep):
-    """The approved CPU already has AWCP; wait for trusted DCV after EC2 start."""
+def wait_dcv(stack, region, *, attempts=24, sleep=time.sleep):
+    """Fresh IP/owner on every retry. No cached CloudFormation public addresses."""
+    from runtime.dcv_endpoint import resolve
     for attempt in range(attempts):
+        state = describe(stack, region)
         try:
-            return trusted_url(stack, instance)
-        except (OSError, ValueError):
+            return resolve(state, region, aws, verified_dcv_hostname)
+        except ValueError as exc:
+            if not str(exc).startswith(("No running public", "DCV HTTPS", "Trusted DCV TLS")):
+                raise
             if attempt + 1 == attempts:
                 raise
             sleep(10)
 
 
 def command(args):
+    from runtime.workstation_inventory import PROFILES, context, list_workstations
+    from runtime import pr65_one_shot_guard as guard
+    from runtime import independent_eip
+    if args.action in ("profiles", "profile"):
+        chosen = PROFILES if args.action == "profiles" else {args.profile_name: PROFILES[args.profile_name]}
+        print(json.dumps({"profiles": chosen, "region": DEFAULT_REGION,
+                          "storage": "Local disks survive stop/start; destroyed with the workstation",
+                          "costs": "On-demand EC2 while running; EBS/public IPv4 while allocated; no pricing engine"}, indent=2))
+        return
+    if args.region != DEFAULT_REGION:
+        raise ValueError("Only validated us-east-1 is supported")
     if args.action == "list":
-        from runtime.workstation_inventory import list_workstations
         print(json.dumps(list_workstations(aws, args.region), indent=2))
+        return
+    if args.action == "hostname":
+        if args.hostname_action == "status":
+            result = independent_eip.status(aws)
+        elif args.hostname_action == "assign":
+            result = independent_eip.assign(aws, args.stack, verified_dcv_hostname)
+        else:
+            result = independent_eip.release(aws, verified_dcv_hostname)
+        print(json.dumps(result, indent=2))
         return
     if args.action == "extend-expiration":
         from runtime import issue68_expiration_extension as extension
-        if args.stack != GPU_ACCEPTANCE_STACK or args.region != DEFAULT_REGION:
-            raise ValueError("Expiration extension restricted to approved GPU stack in us-east-1")
-        # Supplying --additional-minutes authorizes the guarded update.
-        print(json.dumps(extension.extend(
-            aws, args.stack, args.region, args.additional_minutes), indent=2))
+        print(json.dumps(extension.extend(aws, args.stack, args.region, args.additional_minutes), indent=2))
         return
-    # Issue #43: exact-scope EIP transfer/return requires --execute and the
-    # existing strict RES/TLS/PR65 guard preflights. No GPU creation here.
-    if args.action in ("hostname-acm-prepare", "hostname-acm-revoke"):
-        from runtime import issue43_gpu_acm_setup as acm
-        if args.region != DEFAULT_REGION or not args.execute:
-            raise ValueError("GPU ACM setup/revoke requires us-east-1 and explicit --execute")
-        if args.action == "hostname-acm-prepare":
-            print(json.dumps(acm.prepare_gpu(aws, independent=True), indent=2))
-        else:
-            print(json.dumps(acm.revoke_gpu(aws, args.gpu_instance_id, independent=True), indent=2))
-        return
-    if args.action in ("hostname-assign", "hostname-release"):
-        from runtime import independent_eip
-        if args.region != DEFAULT_REGION or not args.execute:
-            raise ValueError("Independent EIP operation requires us-east-1 and --execute")
-        result = (independent_eip.release(aws) if args.action == "hostname-release"
-                  else independent_eip.assign(aws, args.stack, verified_dcv_hostname))
-        print(json.dumps(result, indent=2))
-        return
-    if args.action in ("hostname-plan", "hostname-iam", "hostname-handoff",
-                       "hostname-return-plan", "hostname-return"):
-        from runtime import issue43_hostname_handoff as handoff
-        if args.region != handoff.REGION:
-            raise ValueError("Issue #43 hostname handoff supports only us-east-1")
-        if args.action == "hostname-iam":
-            print(json.dumps(handoff.review_gpu_iam(args.gpu_instance_id), indent=2))
-            return
-        if args.action == "hostname-plan":
-            from runtime import independent_eip
-            if args.stack != GPU_ACCEPTANCE_STACK:
-                raise ValueError("GPU hostname plan requires the guarded acceptance stack")
-            print(json.dumps(independent_eip.gpu_preview(aws), indent=2))
-            return
-        if args.action == "hostname-return-plan":
-            print(json.dumps(handoff.cpu_return_preview(aws, args.gpu_instance_id), indent=2))
-            return
-        if not args.execute:
-            raise ValueError("Live hostname handoff requires a separately approved --execute")
-        from runtime import independent_eip
-        if args.action == "hostname-handoff":
-            print(json.dumps(independent_eip.handoff_gpu(aws, verified_dcv_hostname), indent=2))
-        else:
-            print(json.dumps(independent_eip.restore_cpu(aws, args.gpu_instance_id), indent=2))
-        return
-    if args.action in ("publisher-create", "publisher-status", "publisher-start", "publisher-stop", "publisher-run", "publisher-result"):
-        from runtime import publisher
-        print(json.dumps(publisher.command(args, aws), indent=2))
+    if args.action == "destroy":
+        if not args.delete_stack:
+            raise ValueError("Refusing destruction: add --delete-stack")
+        from runtime import issue43_destroy
+        print(json.dumps(issue43_destroy.destroy(aws, run, args.stack, args.region), indent=2))
         return
     if args.action == "create":
         if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9-]{0,127}", args.stack):
             raise ValueError("Invalid CloudFormation stack name")
         if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", args.version):
             raise ValueError("Release must be a version such as v0.1.3")
-        ipaddress.IPv4Network(args.client_cidr, strict=False)
+        args.client_cidr = str(ipaddress.IPv4Network(args.client_cidr, strict=False))
         gpu = args.profile == "gpu"
         expiration = gpu_expiration_options(args)
         if gpu:
@@ -547,28 +346,18 @@ def command(args):
                 raise ValueError("GPU profile requires us-east-1, validated AMI and g4dn.xlarge")
             if args.version != "v0.1.3" or args.bucket != DEFAULT_BUCKET:
                 raise ValueError("GPU profile requires the pinned release; --version is CPU-only")
-        if not gpu and args.instance_type not in ("m7i.large", "m7i.xlarge"):
-            raise ValueError("CPU profile only supports m7i.large or m7i.xlarge")
-        if not gpu and args.allow_public_dcv:
-            raise ValueError("--allow-public-dcv is only for the scoped GPU acceptance test")
-        if gpu and not args.dry_run:
-            if not args.cleanup_token:
-                raise ValueError("GPU live create requires a scoped --cleanup-token")
-            if not GPU_ACCEPTANCE_LIVE_ENABLED:
-                raise ValueError("Scoped GPU acceptance blocked: Task 3 guard activation pending")
-            if (args.stack, args.cleanup_token) != (GPU_ACCEPTANCE_STACK, GPU_ACCEPTANCE_TOKEN):
-                raise ValueError("GPU launch refused: only the approved acceptance stack/token are permitted")
-            cidr = ipaddress.IPv4Network(args.client_cidr, strict=False)
-            if cidr == ipaddress.IPv4Network("0.0.0.0/0"):
-                if not args.allow_public_dcv:
-                    raise ValueError("Public DCV 8443 requires explicit --allow-public-dcv")
-            elif cidr.prefixlen != 32 or not cidr.network_address.is_global:
-                raise ValueError("Restricted GPU acceptance requires a real public client /32 CIDR")
-            elif args.allow_public_dcv:
-                raise ValueError("--allow-public-dcv requires --client-cidr 0.0.0.0/0")
-            if (args.vpc_id != DEFAULT_VPC or args.subnet_id != DEFAULT_SUBNET or
-                    args.instance_profile != DEFAULT_PROFILE or args.disk_size != 100):
-                raise ValueError("GPU acceptance must use the reviewed VPC, subnet, profile and 100 GiB disk")
+        if args.instance_type not in PROFILES[args.profile]["instance_types"]:
+            raise ValueError("Instance type is not supported by the selected profile")
+        if args.instance_profile != ("StudioEfsCiPublisher" if args.profile == "publisher" else DEFAULT_PROFILE):
+            raise ValueError("Profile IAM identity must match the supported contract")
+        if (args.vpc_id, args.subnet_id) != (DEFAULT_VPC, DEFAULT_SUBNET):
+            raise ValueError("Use the validated public workstation VPC/subnet")
+        if not (30 if args.profile == "publisher" else 60) <= args.disk_size <= 2048:
+            raise ValueError("Disk size outside supported range")
+        if args.profile == "publisher" and (args.rez_version_id or args.rez_sha256):
+            raise ValueError("Publisher uses its existing publishing bootstrap, not desktop Rez pins")
+        if args.profile == "publisher" and not args.security_group_id:
+            raise ValueError("Publisher requires --security-group-id for its existing EFS client group")
         if (args.rez_version_id or args.rez_sha256) and args.vpc_id != DEFAULT_VPC:
             raise ValueError("Software EFS client SG requires the reviewed VPC")
         if args.rez_version_id or args.rez_sha256:
@@ -584,16 +373,12 @@ def command(args):
                 render.extend(["--rez-version-id", args.rez_version_id or "", "--rez-sha256", args.rez_sha256 or ""])
             if gpu:
                 render.extend(["--profile", "gpu", "--lifecycle", "persistent"])
-                if args.cleanup_token:
-                    if not re.fullmatch(r"studio-gpu-cli-[a-z0-9-]{1,25}", args.stack) or not re.fullmatch(r"[a-z0-9-]{12,64}", args.cleanup_token):
-                        raise ValueError("Cleanup scope requires studio-gpu-cli-* stack and safe token")
-                    if args.client_cidr == "0.0.0.0/0" and not args.allow_public_dcv:
-                        raise ValueError("Public DCV 8443 requires explicit --allow-public-dcv")
-                    if args.client_cidr != "0.0.0.0/0" and args.allow_public_dcv:
-                        raise ValueError("--allow-public-dcv requires --client-cidr 0.0.0.0/0")
-                    render.extend(["--cleanup-token", args.cleanup_token, "--test-stack", args.stack])
             print("Rendering:", " ".join(render), flush=True)
-            run(render, capture=False)
+            if args.profile == "publisher":
+                from runtime import publisher
+                template.write_text(json.dumps(publisher.template(args)))
+            else:
+                run(render, capture=False)
             validate = ["aws", "cloudformation", "validate-template", "--template-body",
                         f"file://{template}", "--region", args.region]
             run(validate)
@@ -603,15 +388,8 @@ def command(args):
                 f"ClientCidr={args.client_cidr}", f"InstanceProfileName={args.instance_profile}",
                 f"DiskSizeGiB={args.disk_size}",
             ]
-            deploy = ["aws", "cloudformation", "deploy", "--stack-name", args.stack,
-                      "--template-file", str(template), "--region", args.region,
-                      "--parameter-overrides", *parameters, "--no-fail-on-empty-changeset"]
-            if not gpu:
-                deploy.extend(["--tags", "StudioManaged=true", "StudioProfile=cpu"])
-            if gpu and args.cleanup_token:
-                deploy.extend(["--tags", "StudioCleanupToken=" + args.cleanup_token, "StudioStack=" + args.stack])
             print("Stack:", args.stack, "Release:", args.version, "DCV ingress:", args.client_cidr, flush=True)
-            if args.client_cidr == "0.0.0.0/0":
+            if args.profile != "publisher" and args.client_cidr == "0.0.0.0/0":
                 print("WARNING: DCV login will be publicly accessible on TCP 8443.", flush=True)
             if args.dry_run:
                 print("DRY RUN: validated template; deployment not executed.")
@@ -622,220 +400,190 @@ def command(args):
             except subprocess.CalledProcessError as exc:
                 # An expected first-create miss is not an error. Do not treat
                 # other failures (including AccessDenied) as proof of absence.
-                if "does not exist" not in (exc.stderr or ""):
+                if "ValidationError" not in (exc.stderr or "") or "does not exist" not in (exc.stderr or ""):
                     raise
             else:
                 raise ValueError("Stack already exists; create requires a new stack name")
+            account = aws(args.region, "sts", "get-caller-identity")["Account"]
+            if account != "401233741942":
+                raise ValueError("Unexpected AWS account")
+            subnet = aws(args.region, "ec2", "describe-subnets", "--subnet-ids", args.subnet_id)["Subnets"]
+            if (len(subnet) != 1 or subnet[0].get("MapPublicIpOnLaunch") is not True or
+                    subnet[0].get("VpcId") != args.vpc_id):
+                raise ValueError("Workstation subnet must assign a public IPv4 in the validated VPC")
+            if args.profile == "publisher":
+                groups = aws(args.region, "ec2", "describe-security-groups", "--group-ids", args.security_group_id)["SecurityGroups"]
+                if len(groups) != 1 or groups[0].get("VpcId") != args.vpc_id:
+                    raise ValueError("Publisher security group is not in the workstation VPC")
             if gpu:
                 gpu_release_preflight(args)
-                shared_gpu_source_ready()  # Do not create billable GPU against a running/foreign CPU.
                 from runtime import pr65_gpu_create
-                # The CPU deploy/wait path is too slow to arm a GPU expiration
-                # schedule; use asynchronous CreateStack with bounded discovery.
-                # Runtime IAM and schedule-group verification still fail closed.
                 outcome = pr65_gpu_create.create_guarded(
-                    aws, args.region, args.stack, args.cleanup_token, template, parameters,
-                    minutes=expiration[0], volume_delay_minutes=expiration[1])
-                if not outcome.get("guard", {}).get("guard_armed"):
-                    raise RuntimeError("PR #65 expiration safeguard not confirmed; no trusted handoff")
-                outcome["expiration"] = gpu_expiration_summary(
-                    outcome["terminate_at"], outcome["volume_cleanup_at"])
+                    aws, args.region, args.stack, template, parameters, minutes=expiration)
                 print(json.dumps(outcome, indent=2), flush=True)
-                if args.rez_version_id:
-                    install_efs_client(outcome["guard"]["instance_id"], args.region)
-                print("GPU guard armed; waiting for RES/DCV and trusted HTTPS...", flush=True)
-                url = complete_gpu_setup(args.stack, args.region, outcome["guard"]["instance_id"])
-                print("TRUSTED DCV:", url)
-                return
-            run(deploy, capture=False)
+            else:
+                cf_params = ["ParameterKey=" + k + ",ParameterValue=" + v for k, v in
+                             (item.split("=", 1) for item in parameters)]
+                aws(args.region, "cloudformation", "create-stack", "--stack-name", args.stack,
+                    "--template-body", "file://" + str(template), "--parameters", *cf_params,
+                    "--tags", "Key=StudioManaged,Value=true", "Key=StudioProfile,Value=" + args.profile,
+                    "--on-failure", "DELETE")
+            aws(args.region, "cloudformation", "wait", "stack-create-complete", "--stack-name", args.stack)
+            if args.profile != "publisher":
+                try:
+                    wait_gpu_bootstrap(args.stack, args.region, gpu=gpu)
+                    print("DCV:", wait_dcv(args.stack, args.region)["url"])
+                except Exception:
+                    # Failed desktop creation must not strand a billable, unreachable VM.
+                    selected = context(aws, args.region, args.stack)
+                    aws(args.region, "ec2", "stop-instances", "--instance-ids", selected["instance"])
+                    raise
             if args.rez_version_id:
-                install_efs_client(instance_id(args.stack, args.region), args.region)
+                try:
+                    install_efs_client(instance_id(args.stack, args.region), args.region)
+                except (RuntimeError, subprocess.CalledProcessError) as exc:
+                    print("WARNING: desktop is available; optional EFS helper installation failed: " + str(exc), file=sys.stderr)
             print(json.dumps(describe(args.stack, args.region), indent=2))
         return
-    if args.action == "check-ready":
-        gpu_ready(args.stack, args.region)
-        return
+    selected = context(aws, args.region, args.stack)
+    iid = selected["instance"]
+    profile = selected["profile"]
     if args.action == "status":
-        state = describe(args.stack, args.region)
-        if args.stack == GPU_ACCEPTANCE_STACK:
-            state["expiration"] = gpu_expiration_status(
-                args.stack, state["instance"], args.region)
-        if args.hostname:
-            if state["state"] != "running":
-                raise ValueError("Cannot verify trusted TLS while workstation is stopped")
-            if args.stack in (DEFAULT_STACK, GPU_ACCEPTANCE_STACK):
-                state["trusted_dcv_url"] = trusted_url(args.stack, state["instance"])
-            else:
-                state["trusted_dcv_url"] = verified_dcv_hostname(args.hostname, state["public_ip"])
-        print(json.dumps(state, indent=2))
-        return
-    if args.action == "destroy":
-        if not args.delete_stack:
-            raise ValueError("Refusing destruction: add --delete-stack")
-        from runtime import issue43_destroy
-        if args.stack == GPU_ACCEPTANCE_STACK:
-            result = issue43_destroy.destroy_gpu(aws, run, args.stack, args.region)
-        else:
-            result = issue43_destroy.destroy_cpu(aws, run, args.stack, args.region)
+        result = describe(args.stack, args.region)
+        if profile == "gpu" and selected["state"] in ("running", "stopped"):
+            expiry = guard.status(aws, selected)
+            result["expiration"] = {k: expiry[k] for k in ("terminate_at", "remaining_seconds", "status")}
         print(json.dumps(result, indent=2))
         return
-    state = describe(args.stack, args.region)
-    iid = state["instance"]
+    if args.action in ("run", "result") or (args.action == "check-ready" and profile == "publisher"):
+        if profile != "publisher":
+            raise ValueError("Package publishing requires the publisher profile")
+        from runtime import publisher
+        args.instance_id = iid
+        args.action = "publisher-" + ("result" if args.action == "result" else "run")
+        args.name = getattr(args, "package", "usd")
+        args.operation = getattr(args, "operation", "check")
+        print(json.dumps(publisher.command(args, aws), indent=2))
+        return
+    if args.action == "check-ready":
+        gpu_ready(args.stack, args.region, gpu=profile == "gpu")
+        print(json.dumps(wait_dcv(args.stack, args.region), indent=2))
+        return
     if args.action == "connect":
-        if state["state"] != "running":
+        if selected["state"] != "running":
             raise ValueError("Instance is not running")
         if args.ssm:
             interactive_ssm(iid, args.region)
-        elif args.stack in (DEFAULT_STACK, GPU_ACCEPTANCE_STACK):
-            print(trusted_url(args.stack, iid))
-            print("Trusted HTTPS verified; log in with the local workstation account.")
-        elif args.hostname:
-            print(verified_dcv_hostname(args.hostname, state["public_ip"]))
-            print("DNS and certificate validated; log in with the local workstation account.")
+        elif profile == "publisher":
+            raise ValueError("Publisher has no DCV desktop; use --ssm or run/result")
         else:
-            print(state["dcv_url"] or "No public IPv4 address. Use --ssm for administrative access.")
-            print("Use the local workstation account; browser certificate trust is not yet configured.")
+            from runtime.dcv_endpoint import resolve
+            endpoint = resolve(selected, args.region, aws, verified_dcv_hostname, hostname=args.hostname)
+            print(endpoint["url"])
+            print("Reachable HTTPS login page; " + ("trusted certificate verified."
+                  if endpoint["trusted"] else "IP certificate warning expected; identity is not TLS-verified."))
         return
     if args.action in ("start", "stop"):
         desired = "stopped" if args.action == "start" else "running"
-        if args.action == "stop" and args.stack == GPU_ACCEPTANCE_STACK and state["state"] == "stopped":
-            print(json.dumps(complete_gpu_stop(args.stack, iid), indent=2))
-            return
-        if state["state"] != desired:
-            raise ValueError(f"Expected {desired} before {args.action}, got {state['state']}")
-        if args.action == "start" and args.stack == DEFAULT_STACK:
-            from runtime import independent_eip
-            address = independent_eip._address(aws)
-            owner = address.get("InstanceId")
-            tagged = independent_eip.legacy._tags(address).get("StudioDcvInstanceId")
-            if (owner not in (None, iid) or
-                    (owner is None and (address.get("AssociationId") or tagged)) or
-                    (owner == iid and (not address.get("AssociationId") or tagged != iid))):
-                raise ValueError("Shared EIP has unexpected ownership; refusing CPU start")
-        if args.action == "start" and args.stack == GPU_ACCEPTANCE_STACK:
-            shared_gpu_source_ready()  # CPU/EIP must be safe before billing.
-            gpu_restart_preflight(args.stack, iid, args.region)  # Guard + deadline before EC2.
-        run(["aws", "ec2", f"{args.action}-instances", "--instance-ids", iid,
-             "--region", args.region], capture=False)
-        waiter = "instance-status-ok" if args.action == "start" else "instance-stopped"
-        run(["aws", "ec2", "wait", waiter, "--instance-ids", iid, "--region", args.region], capture=False)
-        if args.stack == GPU_ACCEPTANCE_STACK:
-            if args.action == "start":
-                print("GPU restarted; checking RES/ACM/EIP before advertising HTTPS...", flush=True)
-                print("TRUSTED DCV:", complete_gpu_setup(args.stack, args.region, iid))
+        retry_stop = args.action == "stop" and selected["state"] == "stopped"
+        if not retry_stop and selected["state"] != desired:
+            raise ValueError(f"Expected {desired} before {args.action}, got {selected['state']}")
+        if args.action == "start" and selected["stack_status"] not in ("CREATE_COMPLETE", "UPDATE_COMPLETE"):
+            raise ValueError("Cannot restart a workstation during failed or incomplete stack operations")
+        if args.action == "start" and profile == "gpu":
+            guard.status(aws, selected, headroom=80)
+        if not retry_stop:
+            aws(args.region, "ec2", args.action + "-instances", "--instance-ids", iid)
+            aws(args.region, "ec2", "wait", "instance-status-ok" if args.action == "start" else "instance-stopped",
+                "--instance-ids", iid)
+        if profile != "publisher":
+            if args.action == "stop":
+                independent_eip.release_if_owned(aws, selected, verified_dcv_hostname)
             else:
-                print(json.dumps(complete_gpu_stop(args.stack, iid), indent=2))
-        elif args.stack == DEFAULT_STACK and args.action == "start":
-            from runtime import independent_eip
-            if independent_eip._address(aws).get("InstanceId") == iid:
-                print("TRUSTED DCV:", wait_cpu_https(args.stack, iid))
+                try:
+                    wait_gpu_bootstrap(args.stack, args.region, gpu=profile == "gpu")
+                    print("DCV:", wait_dcv(args.stack, args.region)["url"])
+                except Exception:
+                    aws(args.region, "ec2", "stop-instances", "--instance-ids", iid)
+                    raise
         print(json.dumps(describe(args.stack, args.region), indent=2))
-        return
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="studio workstation",
-                                description="Validated CPU RES workstation lifecycle wrapper")
+    from runtime.workstation_inventory import PROFILES
+    p = argparse.ArgumentParser(prog="studio workstation", description="Named Studio workstation lifecycle")
     sub = p.add_subparsers(dest="action", required=True)
-    listing = sub.add_parser("list", help="List deployed desktop names and current DCV endpoints")
-    listing.add_argument("--region", default=DEFAULT_REGION)
-    named = {"status", "start", "stop", "connect", "destroy", "check-ready",
-             "hostname-assign", "extend-expiration"}
-    for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready",
-                   "hostname-assign", "hostname-release",
-                   "hostname-plan", "hostname-iam", "hostname-handoff",
-                   "hostname-return-plan", "hostname-return",
-                   "hostname-acm-prepare", "hostname-acm-revoke",
-                   "extend-expiration"):
+    for action in ("list", "profiles", "profile", "hostname", "create", "status", "start", "stop", "connect",
+                   "destroy", "check-ready", "extend-expiration", "run", "result"):
         s = sub.add_parser(action)
-        selector = s.add_mutually_exclusive_group()
-        selector.add_argument("--stack", help="CloudFormation stack name (shown by list)")
-        selector.add_argument("--name", dest="stack", help="Alias for --stack")
-        if action in named:
-            s.add_argument("name", nargs="?", help="Workstation stack name")
         s.add_argument("--region", default=DEFAULT_REGION)
-        if action in ("hostname-iam", "hostname-return-plan", "hostname-return", "hostname-acm-revoke"):
-            s.add_argument("--gpu-instance-id", required=True,
-                           help="Exact supervised GPU EC2 ID, no wildcard discovery")
-        if action in ("hostname-assign", "hostname-release", "hostname-handoff", "hostname-return",
-                      "hostname-acm-prepare", "hostname-acm-revoke"):
-            s.add_argument("--execute", action="store_true",
-                           help="Explicitly authorize guarded hostname/ACM AWS writes")
-        if action == "extend-expiration":
-            s.add_argument("--additional-minutes", type=gpu_extension_minutes, required=True,
-                           metavar="MINUTES",
-                           help="Authorize extending both GPU deadlines by 1–180 minutes; 240m remaining maximum")
+        if action == "profile":
+            s.add_argument("profile_name", choices=PROFILES)
+        if action in ("list", "profiles", "profile"):
+            continue
+        if action == "hostname":
+            s.add_argument("hostname_action", choices=["status", "assign", "release"])
+        if action != "create":
+            s.add_argument("name", nargs="?", help="Workstation name shown by list")
+        selector = s.add_mutually_exclusive_group()
+        selector.add_argument("--stack", help="CloudFormation workstation name")
+        selector.add_argument("--name", dest="stack", help="Alias for --stack")
         if action == "create":
-            s.add_argument("--dry-run", action="store_true",
-                           help="Render and validate without launching AWS resources")
-            s.add_argument("--profile", choices=["cpu", "gpu"], default="cpu")
+            s.add_argument("--dry-run", action="store_true", help="Render and validate; no AWS resources created")
+            s.add_argument("--profile", choices=PROFILES, default="cpu")
             s.add_argument("--version", default="v0.1.3")
-            s.add_argument("--rez-version-id", help="Approved immutable S3 Rez bundle version")
-            s.add_argument("--rez-sha256", help="SHA-256 of approved Rez bundle")
+            s.add_argument("--rez-version-id")
+            s.add_argument("--rez-sha256")
             s.add_argument("--bucket", default=DEFAULT_BUCKET)
-            s.add_argument("--image-id", default=None)
+            s.add_argument("--image-id")
             s.add_argument("--vpc-id", default=DEFAULT_VPC)
             s.add_argument("--subnet-id", default=DEFAULT_SUBNET)
-            s.add_argument("--instance-profile", default=DEFAULT_PROFILE)
-            s.add_argument("--instance-type", choices=["m7i.large", "m7i.xlarge", "g4dn.xlarge"], default=None)
-            s.add_argument("--disk-size", type=int, default=100)
+            s.add_argument("--instance-profile")
+            s.add_argument("--instance-type", choices=["m7i.large", "m7i.xlarge", "g4dn.xlarge"])
+            s.add_argument("--disk-size", type=int)
+            s.add_argument("--security-group-id", help="Publisher's existing EFS client security group")
             s.add_argument("--client-cidr", default="0.0.0.0/0")
-            s.add_argument("--allow-public-dcv", action="store_true",
-                           help="Explicit supervised GPU acceptance: permit TCP 8443 from any IPv4 address")
-            s.add_argument("--cleanup-token", default=None, help="Unique scope for independently guarded GPU acceptance test")
             s.add_argument("--expires-in", type=gpu_duration_minutes, metavar="MINUTESm",
-                           help="GPU-only termination deadline: 60m–240m (default 150m)")
-            s.add_argument("--volume-cleanup-delay", type=gpu_duration_minutes,
-                           metavar="MINUTESm",
-                           help="GPU-only EBS cleanup delay: 30m–120m (default 45m)")
-        if action in ("connect", "status"):
-            s.add_argument("--hostname", choices=[TRUSTED_DCV_HOSTNAME],
-                           help="Opt-in trusted hostname; verify DNS, TLS trust, and instance IPv4")
+                           help="GPU workstation expiration: 60m–240m (default 150m)")
+        if action == "extend-expiration":
+            s.add_argument("--additional-minutes", type=gpu_extension_minutes, required=True)
         if action == "connect":
-            s.add_argument("--ssm", action="store_true", help="Open administrative SSM session instead of printing DCV URL")
+            s.add_argument("--hostname", choices=[TRUSTED_DCV_HOSTNAME])
+            s.add_argument("--ssm", action="store_true")
         if action == "destroy":
             s.add_argument("--delete-stack", action="store_true")
-    for action in ("publisher-create", "publisher-status", "publisher-start", "publisher-stop", "publisher-run", "publisher-result"):
-        s = sub.add_parser(action)
-        s.add_argument("--region", default=DEFAULT_REGION)
-        s.add_argument("--instance-id", help="Exact publisher EC2 instance ID")
-        if action == "publisher-create":
-            s.add_argument("--subnet-id", default=DEFAULT_SUBNET)
-            s.add_argument("--security-group-id", required=True)
-            s.add_argument("--image-id", default=DEFAULT_AMI)
-            s.add_argument("--instance-type", default="m7i.large")
-        if action == "publisher-result":
-            s.add_argument("--command-id", required=True)
-        if action == "publisher-run":
+        if action == "run":
             s.add_argument("--operation", choices=["check", "build", "promote-test", "promote-prod"], required=True)
-            s.add_argument("--recipe-repo", help="Approved vision-kwest GitHub recipe repository")
-            s.add_argument("--recipe-ref", help="Pinned 40-character recipe commit SHA")
-            s.add_argument("--recipe-path", help="Relative build script path")
-            s.add_argument("--name", default="usd")
+            s.add_argument("--recipe-repo")
+            s.add_argument("--recipe-ref")
+            s.add_argument("--recipe-path")
+            s.add_argument("--package", default="usd")
             s.add_argument("--version", default="26.05")
+        if action == "result":
+            s.add_argument("--command-id", required=True)
     a = p.parse_args(argv)
-    if a.action in named:
-        if a.name and a.stack:
+    if a.action not in ("list", "profiles", "profile"):
+        name = getattr(a, "name", None)
+        if name and a.stack:
             p.error("Use either NAME or --stack/--name, not both")
-        a.stack = a.name or a.stack
-        if not a.stack:
+        a.stack = name or a.stack
+        no_target = a.action == "hostname" and a.hostname_action in ("status", "release")
+        if no_target and a.stack:
+            p.error("Hostname status/release does not accept a target")
+        if a.action == "create":
+            a.stack = a.stack or "studio-" + a.profile + "-" + uuid.uuid4().hex[:12]
+            a.image_id = a.image_id or DEFAULT_AMI
+            a.instance_type = a.instance_type or PROFILES[a.profile]["instance_types"][0]
+            a.instance_profile = a.instance_profile or PROFILES[a.profile]["instance_profile"]
+            a.disk_size = (30 if a.profile == "publisher" else 100) if a.disk_size is None else a.disk_size
+        elif not no_target and not a.stack:
             p.error("Specify a workstation name; use 'studio workstation list'")
-    if a.action == "create":
-        if a.stack is None:
-            if a.profile == "gpu":
-                p.error("GPU naming still requires --stack and the existing scoped guard")
-            a.stack = "studio-cpu-" + uuid.uuid4().hex[:12]
-        if a.image_id is None:
-            a.image_id = GPU_AMI if a.profile == "gpu" else DEFAULT_AMI
-        if a.instance_type is None:
-            a.instance_type = "g4dn.xlarge" if a.profile == "gpu" else "m7i.large"
     try:
         if a.action == "connect" and a.ssm and a.hostname:
             raise ValueError("--hostname cannot be used with --ssm")
         command(a)
     except (ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as exc:
-        if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
-            p.exit(1, f"ERROR: {(exc.stderr or '').strip()}\n")
-        p.exit(1, f"ERROR: {exc}\n")
+        message = exc.stderr if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+        p.exit(1, f"ERROR: {message.strip()}\n")
 
 if __name__ == "__main__":
     main()

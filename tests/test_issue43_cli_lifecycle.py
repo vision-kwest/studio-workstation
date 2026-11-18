@@ -1,598 +1,157 @@
-"""Issue #43 Task 3: offline lifecycle and hostname orchestration contracts.
-
-These tests mock every AWS and network write. Do not launch any resources.
-"""
+"""Common named lifecycle contracts: real parser/render/dispatch, stateful AWS boundary."""
 import contextlib
-import datetime as dt
 import io
-import subprocess
+import json
 import unittest
-from unittest import mock
-
+from unittest.mock import patch
 from scripts import studio_workstation_cli as cli
-from runtime import issue43_hostname_handoff as handoff
-from runtime import issue43_gpu_acm_setup as acm
-from runtime import independent_eip
-
-GPU = "i-0123456789abcdef0"
-CPU = handoff.CPU_ID
-GPU_STACK = cli.GPU_ACCEPTANCE_STACK
-CPU_STACK = cli.DEFAULT_STACK
-TRUSTED = "https://dcv.kwesidavis.com:8443"
+from runtime import dcv_endpoint, independent_eip as eip, pr65_gpu_create as creator
+from runtime import pr65_one_shot_guard as guard, issue43_hostname_handoff as h
+from runtime import workstation_inventory as inventory
+from workstation_fake import AWS, NOW, tags
 
 
-class LifecycleTests(unittest.TestCase):
-    def command(self, args):
-        with contextlib.redirect_stdout(io.StringIO()) as output:
-            cli.main(args)
+class CliFixture(unittest.TestCase):
+    def setUp(self):
+        self.aws=AWS()
+        self.aws.groups['sg-0123456789abcdef0']={'GroupId':'sg-0123456789abcdef0','VpcId':cli.DEFAULT_VPC}
+        real_run, real_create, real_status=cli.run, creator.create_guarded, guard.status
+        def run(args, **kw):
+            if args[0]=='aws':
+                self.assertEqual(args[1:3],['cloudformation','validate-template'])
+                return '{}'
+            return real_run(args,**kw)
+        self.add(patch.object(cli,'aws',self.aws))
+        self.add(patch.object(cli,'run',side_effect=run))
+        self.add(patch.object(cli,'wait_gpu_bootstrap'))
+        self.add(patch.object(cli,'verified_dcv_hostname',side_effect=lambda host,ip:'https://'+host+':8443'))
+        self.add(patch.object(dcv_endpoint,'_probe'))
+        self.add(patch.object(h,'check_gpu_tls'))
+        self.add(patch.object(creator,'create_guarded',side_effect=lambda *a,**kw:real_create(*a,**{'utc_now':lambda:NOW,'sleep':lambda _:None,**kw})))
+        self.add(patch.object(guard,'status',side_effect=lambda *a,**kw:real_status(*a,now=NOW,**kw)))
+
+    def add(self,p):
+        obj=p.start();self.addCleanup(p.stop);return obj
+
+    def invoke(self,*argv):
+        output=io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):cli.main(list(argv))
         return output.getvalue()
 
-    def test_complete_gpu_setup_orders_bootstrap_acm_then_handoff(self):
-        calls = []
-        def wait(*args):
-            calls.append("ready")
-        def prepare(*args, **kwargs):
-            calls.append("acm")
-            return {"instance_id": GPU}
-        def handoff_gpu(*args, **kwargs):
-            calls.append("handoff")
-            return {"owner": GPU, "hostname": handoff.HOST}
-        with (mock.patch.object(acm, "prepare_gpu", side_effect=prepare),
-              mock.patch.object(independent_eip, "handoff_gpu", side_effect=handoff_gpu),
-              mock.patch.object(cli, "trusted_url") as unnecessary):
-            url = cli.complete_gpu_setup(GPU_STACK, "us-east-1", GPU,
-                                         manager=mock.Mock(), wait=wait)
-        self.assertEqual(calls, ["ready", "acm", "handoff"])
-        self.assertEqual(url, TRUSTED)
-        unnecessary.assert_not_called()
-
-    def test_acm_failure_blocks_eip_handoff(self):
-        with (mock.patch.object(acm, "prepare_gpu",
-                                side_effect=RuntimeError("ACM not ready")),
-              mock.patch.object(handoff, "handoff_gpu") as move):
-            with self.assertRaisesRegex(RuntimeError, "ACM not ready"):
-                cli.complete_gpu_setup(GPU_STACK, "us-east-1", GPU,
-                                       manager=mock.Mock(), wait=lambda *_: None)
-        move.assert_not_called()
-
-    def test_mismatched_instance_does_not_transfer_eip(self):
-        with (mock.patch.object(acm, "prepare_gpu",
-                                return_value={"instance_id": "i-000000001"}),
-              mock.patch.object(handoff, "handoff_gpu") as move):
-            with self.assertRaisesRegex(RuntimeError, "instance changed"):
-                cli.complete_gpu_setup(GPU_STACK, "us-east-1", GPU,
-                                       manager=mock.Mock(), wait=lambda *_: None)
-        move.assert_not_called()
-
-    def test_wrong_stack_or_region_rejected_without_aws(self):
-        with (mock.patch.object(acm, "prepare_gpu") as prepare,
-              mock.patch.object(handoff, "handoff_gpu") as move):
-            with self.assertRaises(ValueError):
-                cli.complete_gpu_setup("foreign-stack", "us-east-1", GPU)
-            with self.assertRaises(ValueError):
-                cli.complete_gpu_setup(GPU_STACK, "us-west-2", GPU)
-        prepare.assert_not_called()
-        move.assert_not_called()
-
-    def test_gpu_stop_waits_for_stop_before_return_and_revocation(self):
-        timeline = []
-        states = [
-            {"stack": GPU_STACK, "instance": GPU, "state": "running"},
-            {"stack": GPU_STACK, "instance": GPU, "state": "stopped"},
-        ]
-        def run(args, **kwargs):
-            if "stop-instances" in args:
-                timeline.append("stop")
-            elif "instance-stopped" in args:
-                timeline.append("stopped")
-        def finished(stack, iid):
-            timeline.append("return-and-revoke")
-            self.assertEqual((stack, iid), (GPU_STACK, GPU))
-            return {"revoked": True}
-        eip = {"InstanceId": GPU, "Tags": [
-            {"Key": "StudioDcvInstanceId", "Value": GPU}]}
-        with (mock.patch.object(cli, "describe", side_effect=states),
-              mock.patch.object(cli, "run", side_effect=run),
-              mock.patch.object(handoff, "_eip", return_value=eip),
-              mock.patch.object(cli, "complete_gpu_stop", side_effect=finished)):
-            self.command(["stop", "--stack", GPU_STACK])
-        self.assertEqual(timeline, ["stop", "stopped", "return-and-revoke"])
-
-    def test_foreign_eip_does_not_block_ec2_stop(self):
-        info = {"stack": GPU_STACK, "instance": GPU, "state": "running"}
-        with (mock.patch.object(cli, "describe", return_value=info),
-              mock.patch.object(cli, "run") as run,
-              mock.patch.object(cli, "complete_gpu_stop", side_effect=ValueError("foreign EIP")),
-              contextlib.redirect_stderr(io.StringIO())):
-            with self.assertRaises(SystemExit):
-                cli.main(["stop", "--stack", GPU_STACK])
-        self.assertTrue(any("stop-instances" in call.args[0] for call in run.call_args_list))
-
-    def test_complete_gpu_stop_restores_eip_then_revokes_exact_grant(self):
-        timeline = []
-        eip = {"InstanceId": GPU, "Tags": [
-            {"Key": "StudioDcvInstanceId", "Value": GPU}]}
-        with (mock.patch.object(independent_eip, "_address", return_value=eip),
-              mock.patch.object(independent_eip, "restore_cpu", side_effect=lambda *a, **kw:
-                                (timeline.append("return") or {"owner": CPU})),
-              mock.patch.object(acm, "revoke_gpu", side_effect=lambda *a, **kw:
-                                (timeline.append("revoke") or {"revoked": True}))):
-            result = cli.complete_gpu_stop(GPU_STACK, GPU, manager=mock.Mock())
-        self.assertEqual(timeline, ["return", "revoke"])
-        self.assertTrue(result["revoked"])
-
-    def test_complete_gpu_stop_when_cpu_already_owns_ip_only_revokes(self):
-        eip = {"InstanceId": CPU, "Tags": [
-            {"Key": "StudioDcvInstanceId", "Value": CPU}]}
-        with (mock.patch.object(independent_eip, "_address", return_value=eip),
-              mock.patch.object(independent_eip, "_cpu_owner", return_value={"instance": CPU}),
-              mock.patch.object(independent_eip, "restore_cpu") as restore,
-              mock.patch.object(acm, "revoke_gpu", return_value={"revoked": False}) as revoke):
-            cli.complete_gpu_stop(GPU_STACK, GPU, manager=mock.Mock())
-        restore.assert_not_called()
-        revoke.assert_called_once()
-
-    def test_stop_after_failed_create_with_unassociated_eip(self):
-        with (mock.patch.object(cli, "describe", return_value={"stack": GPU_STACK, "instance": GPU, "state": "running"}),
-              mock.patch.object(cli, "run") as run,
-              mock.patch.object(independent_eip, "_address", return_value={"Tags": []}),
-              mock.patch.object(acm, "revoke_gpu", return_value={"revoked": False})):
-            self.command(["stop", "--stack", GPU_STACK])
-        self.assertTrue(any("stop-instances" in x.args[0] for x in run.call_args_list))
-
-    def test_gpu_source_preflight_rejects_running_cpu_before_ec2(self):
-        owner = "i-aaaaaaaaaaaaaaaaa"
-        address = {"InstanceId": owner, "AssociationId": "eipassoc-test",
-                   "NetworkInterfaceId": "eni-aaaaaaaaaaaaaaaaa",
-                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": owner}]}
-        with (mock.patch.object(independent_eip, "_address", return_value=address),
-              mock.patch.object(independent_eip, "_owner",
-                                side_effect=ValueError("Stop the current EIP owner"))):
-            with self.assertRaisesRegex(ValueError, "Stop the current EIP owner"):
-                cli.shared_gpu_source_ready(manager=mock.Mock())
-
-    def test_gpu_source_preflight_accepts_stopped_replacement_cpu(self):
-        owner = "i-aaaaaaaaaaaaaaaaa"
-        stack = "studio-workstation-cpu-rez77"
-        eni = "eni-aaaaaaaaaaaaaaaaa"
-        address = {"InstanceId": owner, "AssociationId": "eipassoc-test",
-                   "NetworkInterfaceId": eni,
-                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": owner}]}
-        vm = {"State": {"Name": "stopped"},
-              "NetworkInterfaces": [{"NetworkInterfaceId": eni}],
-              "Tags": [{"Key": "aws:cloudformation:stack-name", "Value": stack}]}
-        with (mock.patch.object(independent_eip, "_address", return_value=address),
-              mock.patch.object(independent_eip, "_owner", return_value=owner) as check,
-              mock.patch.object(handoff, "_items", return_value={owner: vm}),
-              mock.patch.object(handoff, "_stack_iid", return_value=owner)):
-            result = cli.shared_gpu_source_ready(manager=mock.Mock())
-        self.assertEqual(result, {"owner": owner, "state": "stopped", "stack": stack})
-        check.assert_called_once()
-
-    def test_gpu_source_preflight_accepts_clean_unassociated_eip(self):
-        with (mock.patch.object(independent_eip, "_address",
-                                return_value={"Tags": []}),
-              mock.patch.object(independent_eip, "_owner") as check):
-            result = cli.shared_gpu_source_ready(manager=mock.Mock())
-        self.assertEqual(result, {"owner": None, "state": "unassociated"})
-        check.assert_not_called()
-
-    def test_gpu_source_preflight_rejects_stale_unassociated_eip(self):
-        with mock.patch.object(independent_eip, "_address", return_value={
-            "Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU}]}):
-            with self.assertRaisesRegex(ValueError, "stale"):
-                cli.shared_gpu_source_ready(manager=mock.Mock())
-
-    def test_gpu_source_preflight_rejects_wrong_cfn_instance(self):
-        owner = "i-aaaaaaaaaaaaaaaaa"
-        eni = "eni-aaaaaaaaaaaaaaaaa"
-        address = {"InstanceId": owner, "AssociationId": "eipassoc-test",
-                   "NetworkInterfaceId": eni,
-                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": owner}]}
-        vm = {"NetworkInterfaces": [{"NetworkInterfaceId": eni}],
-              "Tags": [{"Key": "aws:cloudformation:stack-name",
-                        "Value": "studio-workstation-cpu-rez77"}]}
-        with (mock.patch.object(independent_eip, "_address", return_value=address),
-              mock.patch.object(independent_eip, "_owner", return_value=owner),
-              mock.patch.object(handoff, "_items", return_value={owner: vm}),
-              mock.patch.object(handoff, "_stack_iid",
-                                return_value="i-bbbbbbbbbbbbbbbbb")):
-            with self.assertRaisesRegex(ValueError, "CloudFormation identity"):
-                cli.shared_gpu_source_ready(manager=mock.Mock())
-
-    def test_gpu_start_refuses_running_cpu_before_ec2(self):
-        vm = {"stack": GPU_STACK, "instance": GPU, "state": "stopped"}
-        with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(cli, "shared_gpu_source_ready",
-                                side_effect=ValueError("CPU running")),
-              mock.patch.object(cli, "run") as run,
-              contextlib.redirect_stderr(io.StringIO())):
-            with self.assertRaises(SystemExit):
-                cli.main(["start", "--stack", GPU_STACK])
-        run.assert_not_called()
-
-    def test_gpu_restart_wires_setup_after_ec2_waiter(self):
-        states = [
-            {"stack": GPU_STACK, "instance": GPU, "state": "stopped"},
-            {"stack": GPU_STACK, "instance": GPU, "state": "running"}]
-        events = []
-        def run(cmd, **kw):
-            events.append("ec2-start" if "start-instances" in cmd else "ec2-wait")
-        with (mock.patch.object(cli, "describe", side_effect=states),
-              mock.patch.object(cli, "run", side_effect=run),
-              mock.patch.object(cli, "shared_gpu_source_ready", side_effect=lambda:
-                                events.append("cpu-eip-preflight")),
-              mock.patch.object(cli, "gpu_restart_preflight", side_effect=lambda *a:
-                                events.append("gpu-expiry-preflight")),
-              mock.patch.object(cli, "complete_gpu_setup", side_effect=lambda *a:
-                                (events.append("trusted-setup") or TRUSTED))):
-            self.command(["start", "--stack", GPU_STACK])
-        self.assertEqual(events, ["cpu-eip-preflight", "gpu-expiry-preflight",
-                                  "ec2-start", "ec2-wait", "trusted-setup"])
-
-    def test_cpu_restart_verifies_owner_before_ec2_start(self):
-        states = [
-            {"stack": CPU_STACK, "instance": CPU, "state": "stopped"},
-            {"stack": CPU_STACK, "instance": CPU, "state": "running"}]
-        events = []
-        address = {"InstanceId": CPU, "AssociationId": "eipassoc-cpu",
-                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU}]}
-        with (mock.patch.object(cli, "describe", side_effect=states),
-              mock.patch.object(independent_eip, "_address", side_effect=lambda *a:
-                                (events.append("owner-check") or address)),
-              mock.patch.object(cli, "run", side_effect=lambda *a, **kw:
-                                events.append("ec2")),
-              mock.patch.object(cli, "wait_cpu_https", side_effect=lambda *a:
-                                (events.append("tls") or TRUSTED))):
-            self.command(["start", "--stack", CPU_STACK])
-        self.assertEqual(events, ["owner-check", "ec2", "ec2", "owner-check", "tls"])
-
-    def test_cpu_restart_without_eip_does_not_attempt_trusted_url(self):
-        states = [
-            {"stack": CPU_STACK, "instance": CPU, "state": "stopped"},
-            {"stack": CPU_STACK, "instance": CPU, "state": "running"}]
-        events = []
-        with (mock.patch.object(cli, "describe", side_effect=states),
-              mock.patch.object(independent_eip, "_address", side_effect=lambda *a:
-                                (events.append("owner-check") or {"Tags": []})),
-              mock.patch.object(cli, "run", side_effect=lambda *a, **kw:
-                                events.append("ec2")),
-              mock.patch.object(cli, "wait_cpu_https") as tls):
-            self.command(["start", "--stack", CPU_STACK])
-        self.assertEqual(events, ["owner-check", "ec2", "ec2", "owner-check"])
-        tls.assert_not_called()
-
-    def test_cpu_owner_mismatch_fails_before_ec2_start(self):
-        vm = {"stack": CPU_STACK, "instance": CPU, "state": "stopped"}
-        foreign = {"InstanceId": GPU, "AssociationId": "eipassoc-foreign",
-                   "Tags": [{"Key": "StudioDcvInstanceId", "Value": GPU}]}
-        with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(independent_eip, "_address", return_value=foreign),
-              mock.patch.object(cli, "run") as run,
-              contextlib.redirect_stderr(io.StringIO())):
-            with self.assertRaises(SystemExit):
-                cli.main(["start", "--stack", CPU_STACK])
-        run.assert_not_called()
-
-    def test_cpu_start_rejects_stale_unassociated_eip_tag(self):
-        vm = {"stack": CPU_STACK, "instance": CPU, "state": "stopped"}
-        stale = {"Tags": [{"Key": "StudioDcvInstanceId", "Value": CPU}]}
-        with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(independent_eip, "_address", return_value=stale),
-              mock.patch.object(cli, "run") as run,
-              contextlib.redirect_stderr(io.StringIO())):
-            with self.assertRaises(SystemExit):
-                cli.main(["start", "--stack", CPU_STACK])
-        run.assert_not_called()
-
-    def test_cpu_start_rejects_missing_owner_tag_on_association(self):
-        vm = {"stack": CPU_STACK, "instance": CPU, "state": "stopped"}
-        malformed = {"InstanceId": CPU, "AssociationId": "eipassoc-cpu",
-                     "Tags": []}
-        with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(independent_eip, "_address", return_value=malformed),
-              mock.patch.object(cli, "run") as run,
-              contextlib.redirect_stderr(io.StringIO())):
-            with self.assertRaises(SystemExit):
-                cli.main(["start", "--stack", CPU_STACK])
-        run.assert_not_called()
-
-    def test_connect_auto_uses_trusted_url_for_approved_gpu(self):
-        vm = {"stack": GPU_STACK, "instance": GPU, "state": "running"}
-        with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(cli, "trusted_url", return_value=TRUSTED) as tls,
-              mock.patch.object(cli, "run") as run):
-            out = self.command(["connect", "--stack", GPU_STACK])
-        self.assertIn(TRUSTED, out)
-        tls.assert_called_once_with(GPU_STACK, GPU)
-        run.assert_not_called()
-
-    def test_unapproved_stack_connect_retains_original_raw_ip_behavior(self):
-        vm = {"stack": "other-cpu", "instance": "i-others", "state": "running",
-              "public_ip": "198.51.100.10", "dcv_url": "https://198.51.100.10:8443"}
-        with (mock.patch.object(cli, "describe", return_value=vm),
-              mock.patch.object(cli, "trusted_url") as trusted):
-            out = self.command(["connect", "--stack", "other-cpu"])
-        self.assertIn("https://198.51.100.10:8443", out)
-        trusted.assert_not_called()
-
-    def test_readiness_retries_bootstrap_failure_but_not_permission_denial(self):
-        attempts = []
-        def check(*args):
-            attempts.append("check")
-            if len(attempts) < 3:
-                raise ValueError("GPU readiness failed: bootstrap incomplete")
-        with mock.patch.object(cli, "gpu_ready", side_effect=check):
-            cli.wait_gpu_bootstrap(GPU_STACK, "us-east-1", attempts=3, sleep=lambda *_: None)
-        self.assertEqual(len(attempts), 3)
-        with mock.patch.object(cli, "gpu_ready",
-                               side_effect=subprocess.CalledProcessError(
-                                   254, "aws", stderr="AccessDenied")) as check:
-            with self.assertRaises(subprocess.CalledProcessError):
-                cli.wait_gpu_bootstrap(GPU_STACK, "us-east-1",
-                                       attempts=3, sleep=lambda *_: None)
-        check.assert_called_once()
-
-    def test_ssm_session_retries_only_target_not_connected(self):
-        commands = []
-        replies = [
-            mock.Mock(returncode=254, stderr="TargetNotConnected"),
-            mock.Mock(returncode=0, stderr="")]
-        def execute(cmd, **kwargs):
-            commands.append(cmd)
-            return replies.pop(0)
-        cli.interactive_ssm(GPU, "us-east-1", execute=execute, sleep=lambda *_: None)
-        self.assertEqual(len(commands), 2)
-        self.assertIn("--no-cli-pager", commands[0])
-        with self.assertRaisesRegex(RuntimeError, "AccessDenied"):
-            cli.interactive_ssm(GPU, "us-east-1", execute=lambda *a, **kw:
-                                mock.Mock(returncode=254, stderr="AccessDenied"),
-                                sleep=lambda *_: None)
-
-    def test_trusted_owner_refuses_ambiguous_stack_and_foreign_eip(self):
-        with self.assertRaises(ValueError):
-            cli.trusted_owner("different-stack", GPU)
-        address = {"InstanceId": CPU, "Tags": [
-            {"Key": "StudioDcvInstanceId", "Value": CPU}]}
-        with (mock.patch.object(handoff, "_stack_iid", return_value=GPU),
-              mock.patch.object(handoff, "_eip", return_value=address)):
-            with self.assertRaisesRegex(ValueError, "not owned"):
-                cli.trusted_owner(GPU_STACK, GPU)
+    def create(self,profile,name):
+        args=['create','--profile',profile,'--name',name]
+        if profile=='publisher':args+=['--security-group-id','sg-0123456789abcdef0']
+        self.invoke(*args)
+        return inventory.context(self.aws,h.REGION,name)
 
 
+class NamedLifecycleTests(CliFixture):
+    def test_profiles_and_profile_are_read_only_without_aws(self):
+        self.assertEqual(set(json.loads(self.invoke('profiles'))['profiles']),{'cpu','gpu','publisher'})
+        self.assertFalse(json.loads(self.invoke('profile','publisher'))['profiles']['publisher']['desktop'])
+        self.assertEqual(self.aws.calls,[])
 
-class GpuRestartDeadlineTests(unittest.TestCase):
-    """Exercise the real expiration preflight from CLI start with mocked AWS."""
+    def test_generated_names_for_every_profile_are_unique(self):
+        with patch.object(cli,'command') as dispatch:
+            for profile in ('cpu','gpu','publisher'):
+                for _ in range(2):self.invoke('create','--profile',profile)
+            names=[c.args[0].stack for c in dispatch.call_args_list]
+        self.assertEqual(len(set(names)),6)
+        self.assertTrue(all(n.startswith('studio-') for n in names))
 
-    def setUp(self):
-        from test_issue43_hostname_handoff import FakeAWS, NOW
-        self.aws = FakeAWS()
-        self.aws.gpu["State"]["Name"] = "stopped"
-        self.now = NOW
+    def test_removed_flags_missing_or_conflicting_targets_are_rejected(self):
+        for argv in [('create','--volume-cleanup-delay','45m'),('create','--cleanup-token','anything'),
+                     ('create','--allow-public-dcv'),('stop',),('stop','a','--stack','b'),
+                     ('hostname','release','a'),('hostname-return',),('destroy','a')]:
+            with self.subTest(argv=argv),self.assertRaises(SystemExit):self.invoke(*argv)
+        self.assertEqual(self.aws.writes,[])
 
-    def restart(self, *, now=None, manager=None):
-        # Patching only the AWS adapter and downstream EC2 operations keeps
-        # actual preflight + CLI dispatch and ordering under test.
-        actual_preflight = cli.gpu_restart_preflight
-        backend = manager if manager is not None else self.aws
-        now = self.now if now is None else now
-        states = [
-            {"stack": GPU_STACK, "instance": GPU, "state": "stopped"},
-            {"stack": GPU_STACK, "instance": GPU, "state": "running"},
-        ]
-        invoked = []
-        def run(cmd, **kwargs):
-            invoked.append(cmd)
-            return ""
-        output, errors = io.StringIO(), io.StringIO()
-        with (mock.patch.object(cli, "describe", side_effect=states),
-              mock.patch.object(cli, "shared_gpu_source_ready"),
-              mock.patch.object(cli, "gpu_restart_preflight",
-                                side_effect=lambda stack, iid, region:
-                                actual_preflight(stack, iid, region, manager=backend, now=now)),
-              mock.patch.object(cli, "complete_gpu_setup", return_value=TRUSTED) as setup,
-              mock.patch.object(cli, "run", side_effect=run),
-              contextlib.redirect_stdout(output),
-              contextlib.redirect_stderr(errors)):
-            try:
-                cli.main(["start", "--stack", GPU_STACK])
-                success = True
-            except SystemExit as exc:
-                self.assertNotEqual(exc.code, 0)
-                success = False
-        return success, invoked, errors.getvalue(), setup
+    def test_two_gpu_and_cpu_names_select_their_own_stack_and_instance(self):
+        a=self.create('gpu','art');b=self.create('gpu','ai');c=self.create('cpu','edit')
+        self.assertEqual(len({x['stack_id'] for x in (a,b,c)}),3)
+        self.assertEqual(len({x['instance'] for x in (a,b,c)}),3)
+        self.invoke('stop','art')
+        self.assertEqual(self.aws.vms[a['instance']]['State']['Name'],'stopped')
+        self.assertEqual(self.aws.vms[b['instance']]['State']['Name'],'running')
+        self.assertEqual(json.loads(self.invoke('status','--stack',b['stack_id']))['instance'],b['instance'])
+        rows=json.loads(self.invoke('list'))
+        self.assertEqual({r['name'] for r in rows},{'art','ai','edit'})
+        self.assertEqual(sum(r['hostname_owner'] for r in rows),0)
 
-    def assert_no_billing_start(self, *, now=None, manager=None, expected=None):
-        success, invoked, error, setup = self.restart(now=now, manager=manager)
-        self.assertFalse(success)
-        self.assertEqual(invoked, [], "StartInstances/wait must not run on unsafe restart")
-        self.assertEqual(self.aws.writes, [], "A failed preflight must not write to AWS")
-        setup.assert_not_called()
-        if expected:
-            self.assertIn(expected, error)
+    def test_stop_start_preserves_disks_and_does_not_transfer_hostname(self):
+        a=self.create('gpu','art');b=self.create('gpu','ai')
+        self.invoke('hostname','assign','ai')
+        owner=dict(self.aws.address)
+        disks=list(self.aws.volumes)
+        self.invoke('stop','art');self.invoke('start','art')
+        self.assertEqual(list(self.aws.volumes),disks)
+        self.assertEqual(self.aws.address,owner)
+        self.assertNotIn(h.HOST,self.invoke('connect','art'))
+        self.assertIn(h.HOST,self.invoke('connect','ai'))
 
-    def test_valid_120_minute_window_starts_then_sets_up_tls(self):
-        success, invoked, error, setup = self.restart()
-        self.assertTrue(success, error)
-        self.assertEqual(len(invoked), 2)
-        self.assertIn("start-instances", invoked[0])
-        self.assertIn("instance-status-ok", invoked[1])
-        setup.assert_called_once_with(GPU_STACK, "us-east-1", GPU)
+    def test_create_does_not_steal_hostname_or_request_acm(self):
+        a=self.create('cpu','edit');self.invoke('hostname','assign','edit')
+        before=dict(self.aws.address);self.aws.calls=[]
+        self.create('gpu','art')
+        self.assertEqual(self.aws.address,before)
+        self.assertFalse(any(c[1] in ('put-role-policy','update-assume-role-policy','associate-address','disassociate-address') for c in self.aws.calls))
 
-    def test_exactly_80_minutes_is_allowed(self):
-        success, invoked, error, setup = self.restart(
-            now=self.now + dt.timedelta(minutes=40))
-        self.assertTrue(success, error)
-        self.assertIn("start-instances", invoked[0])
-        setup.assert_called_once()
+    def test_failed_readiness_stops_only_the_selected_desktop(self):
+        a=self.create('cpu','edit')
+        cli.wait_gpu_bootstrap.side_effect=RuntimeError('not ready')
+        with self.assertRaises(SystemExit):self.create('gpu','art')
+        b=inventory.context(self.aws,h.REGION,'art')
+        self.assertEqual(b['state'],'stopped')
+        self.assertEqual(self.aws.vms[a['instance']]['State']['Name'],'running')
+        self.assertEqual(len(self.aws.schedules),2)
 
-    def test_79_minutes_is_rejected_before_ec2_start(self):
-        self.assert_no_billing_start(
-            now=self.now + dt.timedelta(minutes=41),
-            expected="fewer than 80 minutes")
+    def test_missing_guard_blocks_restart_but_does_not_block_stop(self):
+        a=self.create('gpu','art');self.aws.schedules.clear()
+        self.invoke('stop','art');self.aws.calls=[]
+        with self.assertRaises(SystemExit):self.invoke('start','art')
+        self.assertFalse(any(c[1]=='start-instances' for c in self.aws.calls))
 
-    def test_expired_schedule_is_rejected_before_ec2_start(self):
-        self.assert_no_billing_start(
-            now=self.now + dt.timedelta(minutes=121),
-            expected="expiration is too near")
+    def test_foreign_eip_does_not_prevent_cost_stopping(self):
+        a=self.create('gpu','art')
+        self.aws.address.update(InstanceId='i-0ffffffffffffffff',AssociationId='foreign',NetworkInterfaceId='foreign')
+        self.invoke('stop','art')
+        self.assertEqual(self.aws.vms[a['instance']]['State']['Name'],'stopped')
+        self.assertEqual(self.aws.address['InstanceId'],'i-0ffffffffffffffff')
 
-    def test_missing_termination_schedule_is_rejected(self):
-        del self.aws.schedules["studio-pr65-i-" + GPU]
-        self.assert_no_billing_start()
+    def test_duplicate_name_never_updates_existing_workstation(self):
+        self.create('gpu','art');self.aws.calls=[]
+        with self.assertRaises(SystemExit):self.create('gpu','art')
+        self.assertEqual(self.aws.writes,[])
 
-    def test_modified_termination_target_is_rejected(self):
-        self.aws.schedules["studio-pr65-i-" + GPU]["Target"]["Input"] = (
-            '{"InstanceIds":["i-00000000000000000"]}')
-        self.assert_no_billing_start(expected="guard mismatch")
+    def test_dry_run_validates_without_creating_any_resource(self):
+        for profile in ('cpu','gpu','publisher'):
+            args=['create','--profile',profile,'--dry-run']
+            if profile=='publisher':args+=['--security-group-id','sg-0123456789abcdef0']
+            self.assertIn('DRY RUN',self.invoke(*args))
+        self.assertEqual(self.aws.writes,[])
 
-    def test_missing_ebs_cleanup_schedule_is_rejected(self):
-        from test_issue43_hostname_handoff import VOLUME
-        del self.aws.schedules["studio-pr65-v-" + VOLUME]
-        self.assert_no_billing_start()
+    def test_wrong_identity_or_profile_fails_before_mutation(self):
+        for kind in ('stack-id','profile','instance-type','iam-profile'):
+            with self.subTest(kind=kind):
+                aws=AWS();c=aws.desktop('art');vm=aws.vms[c['instance']]
+                if kind=='stack-id':next(t for t in vm['Tags'] if t['Key']=='aws:cloudformation:stack-id')['Value']='foreign'
+                if kind=='profile':next(t for t in aws.stacks[c['stack_id']]['Tags'] if t['Key']=='StudioProfile')['Value']='cpu'
+                if kind=='instance-type':vm['InstanceType']='unapproved'
+                if kind=='iam-profile':vm['IamInstanceProfile']['Arn']='foreign'
+                aws.calls=[]
+                with patch.object(cli,'aws',aws),self.assertRaises(SystemExit):self.invoke('stop','art')
+                self.assertEqual(aws.writes,[])
 
-    def test_wrong_ebs_schedule_role_is_rejected(self):
-        from test_issue43_hostname_handoff import VOLUME
-        self.aws.schedules["studio-pr65-v-" + VOLUME]["Target"]["RoleArn"] = (
-            "arn:aws:iam::401233741942:role/foreign")
-        self.assert_no_billing_start(expected="guard mismatch")
-
-    def test_unexpected_resource_ownership_is_rejected(self):
-        self.aws.volume["Tags"][1]["Value"] = "foreign-token"
-        self.assert_no_billing_start()
-
-    def test_changing_cloudformation_instance_is_rejected(self):
-        with mock.patch.object(handoff, "_stack_iid", return_value="i-foreign"):
-            self.assert_no_billing_start(expected="instance identity changed")
-
-    def test_aws_instance_must_still_be_stopped(self):
-        self.aws.gpu["State"]["Name"] = "running"
-        self.assert_no_billing_start(expected="must be stopped")
-
-    def test_scheduler_iam_access_denied_fails_closed(self):
-        original = self.aws
-        def deny_iam(region, *args):
-            if args[:2] == ("iam", "get-role"):
-                raise subprocess.CalledProcessError(
-                    254, "aws", stderr="AccessDenied: scheduler execution role")
-            return original(region, *args)
-        self.assert_no_billing_start(manager=deny_iam, expected="AccessDenied")
-
-
-
-
-class GpuExpirationVisibilityTests(unittest.TestCase):
-    """Read-only expiry reporting never weakens GPU handoff/restart guards."""
-
-    def setUp(self):
-        from test_issue43_hostname_handoff import FakeAWS, NOW
-        self.fake = FakeAWS()
-        self.now = NOW
-
-    def inspect(self, *, now=None):
-        return cli.gpu_expiration_status(
-            GPU_STACK, GPU, "us-east-1", manager=self.fake,
-            now=self.now if now is None else now)
-
-    def test_exact_schedules_report_utc_and_remaining_time_without_writes(self):
-        result = self.inspect()
-        self.assertEqual(result["termination_utc"], "2026-11-02T09:00:00+00:00")
-        self.assertEqual(result["ebs_cleanup_utc"], "2026-11-02T10:00:00+00:00")
-        self.assertEqual(result["remaining_minutes"], 120)
-        self.assertEqual(result["remaining_seconds"], 7200)
-        self.assertEqual(result["status"], "scheduled")
-        self.assertNotIn("warning", result)
-        self.assertEqual(len([x for x in self.fake.calls
-                              if x[1:3] == ("scheduler", "get-schedule")]), 2)
-        self.assertEqual(self.fake.writes, [])
-
-    def test_status_works_with_gpu_stopped_and_cpu_holding_eip(self):
-        self.fake.gpu["State"]["Name"] = "stopped"
-        result = self.inspect()
-        self.assertEqual(result["status"], "scheduled")
-        self.assertEqual(self.fake.writes, [])
-
-    def test_near_expiry_reports_warning_instead_of_rejecting_status(self):
-        result = self.inspect(now=self.now + dt.timedelta(minutes=41))
-        self.assertEqual(result["remaining_minutes"], 79)
-        self.assertEqual(result["status"], "restart_unsafe")
-        self.assertIn("80 minutes", result["warning"])
-        self.assertEqual(self.fake.writes, [])
-
-    def test_deadline_passed_reports_expired_when_schedules_still_exist(self):
-        result = self.inspect(now=self.now + dt.timedelta(minutes=121))
-        self.assertEqual(result["remaining_minutes"], 0)
-        self.assertEqual(result["status"], "expired")
-        self.assertIn("passed", result["warning"])
-
-    def test_invalid_schedule_role_or_disabled_state_never_looks_verified(self):
-        from test_issue43_hostname_handoff import VOLUME
-        name = "studio-pr65-v-" + VOLUME
-        for changed in ("wrong_role", "disabled"):
-            with self.subTest(changed=changed):
-                original = self.fake.schedules[name]
-                self.fake.schedules[name] = __import__("copy").deepcopy(original)
-                if changed == "wrong_role":
-                    self.fake.schedules[name]["Target"]["RoleArn"] = "arn:aws:iam::foreign:role/wrong"
-                else:
-                    self.fake.schedules[name]["State"] = "DISABLED"
-                with self.assertRaisesRegex(ValueError, "guard mismatch"):
-                    self.inspect()
-                self.fake.schedules[name] = original
-        self.assertEqual(self.fake.writes, [])
-
-    def test_missing_schedule_never_reports_a_verified_deadline(self):
-        del self.fake.schedules["studio-pr65-i-" + GPU]
-        with self.assertRaises(KeyError):
-            self.inspect()
-        self.assertEqual(self.fake.writes, [])
-
-    def test_mismatched_instance_or_volume_scope_fails_closed(self):
-        with mock.patch.object(handoff, "_stack_iid", return_value="i-00000000000000000"):
-            with self.assertRaisesRegex(ValueError, "identity mismatch"):
-                self.inspect()
-        self.fake.volume["Tags"][1]["Value"] = "foreign"
-        with self.assertRaisesRegex(ValueError, "ownership"):
-            self.inspect()
-        self.assertEqual(self.fake.writes, [])
-
-    def test_status_cli_displays_expiration_only_for_approved_gpu(self):
-        gpu = {"stack": GPU_STACK, "instance": GPU, "state": "stopped",
-               "public_ip": None, "dcv_url": None}
-        expire = {"termination_utc": "2026-11-02T09:00:00+00:00",
-                  "ebs_cleanup_utc": "2026-11-02T10:00:00+00:00",
-                  "remaining_minutes": 79, "warning": "restart unsafe"}
-        with (mock.patch.object(cli, "describe", return_value=gpu),
-              mock.patch.object(cli, "gpu_expiration_status", return_value=expire) as verify,
-              mock.patch.object(cli, "run") as run,
-              contextlib.redirect_stdout(io.StringIO()) as output):
-            cli.main(["status", "--stack", GPU_STACK])
-        result = __import__("json").loads(output.getvalue())
-        self.assertEqual(result["expiration"], expire)
-        verify.assert_called_once_with(GPU_STACK, GPU, "us-east-1")
-        run.assert_not_called()
-
-        cpu = dict(gpu, stack=CPU_STACK, instance=CPU)
-        cpu.pop("expiration", None)  # First mocked describe object was enriched in-place.
-        with (mock.patch.object(cli, "describe", return_value=cpu),
-              mock.patch.object(cli, "gpu_expiration_status") as verify,
-              contextlib.redirect_stdout(io.StringIO()) as output):
-            cli.main(["status", "--stack", CPU_STACK])
-        self.assertNotIn("expiration", __import__("json").loads(output.getvalue()))
-        verify.assert_not_called()
-
-    def test_status_does_not_suppress_invalid_schedule(self):
-        with (mock.patch.object(cli, "describe",
-                                return_value={"stack": GPU_STACK, "instance": GPU,
-                                              "state": "stopped"}),
-              mock.patch.object(cli, "gpu_expiration_status",
-                                side_effect=ValueError("invalid schedule")),
-              contextlib.redirect_stdout(io.StringIO()) as output,
-              contextlib.redirect_stderr(io.StringIO())):
-            with self.assertRaises(SystemExit):
-                cli.main(["status", "--stack", GPU_STACK])
-        self.assertEqual(output.getvalue(), "")
-
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_publisher_cf_lifecycle_has_no_dcv_or_implicit_promotion(self):
+        p=self.create('publisher','publish')
+        self.assertIsNone(p['dcv_url'])
+        self.assertEqual([r['ResourceType'] for r in p['resources']],['AWS::EC2::Instance'])
+        with self.assertRaises(SystemExit):self.invoke('connect','publish')
+        with patch('runtime.publisher.time.sleep'):
+            self.assertIn('Success',self.invoke('check-ready','publish'))
+            with self.assertRaises(SystemExit):self.invoke('run','publish','--operation','build')
+        self.invoke('stop','publish');self.invoke('start','publish')
+        self.assertEqual(self.aws.address.get('InstanceId'),None)
+        self.invoke('destroy','publish','--delete-stack')
+        self.assertEqual(self.aws.volumes,{})
+        self.assertIn('sg-0123456789abcdef0',self.aws.groups)

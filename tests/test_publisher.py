@@ -42,18 +42,16 @@ def test_build_rejects_unpinned_recipe():
 
 
 def test_create_bootstrap_pins_public_rez_and_iam_mount():
-    captured = {}
-    def aws(region, *args):
-        captured["args"] = args
-        return {"Instances": [{"InstanceId": "i-" + "a"*17}]}
-    result = publisher.command(Namespace(region="us-east-1", action="publisher-create",
-        instance_type="m7i.large", image_id="ami-test", subnet_id="subnet-test",
-        security_group_id="sg-test"), aws)
-    script = captured["args"][captured["args"].index("--user-data") + 1]
+    result = publisher.template(Namespace(security_group_id="sg-test"))
+    props = result["Resources"]["Workstation"]["Properties"]
+    script = props["UserData"]["Fn::Base64"]
     assert "git checkout --detach 2fee37e32a09c337d9486e00bcc2a16c3ff4b0fb" in script
     assert "tls,iam" in script
     assert "studio-rez.git" in script
-    assert result["instance_id"] == "i-" + "a"*17
+    assert props["SecurityGroupIds"] == ["sg-test"]
+    assert props["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"] is True
+    assert props["PropagateTagsToVolumeOnCreation"] is True
+    assert set(result["Resources"]) == {"Workstation"}
 
 
 def test_cli_parses_publisher_commands(monkeypatch):
@@ -66,12 +64,12 @@ def test_cli_parses_publisher_commands(monkeypatch):
     seen = []
     monkeypatch.setattr(module, "command", lambda args: seen.append(args))
     for argv in (
-        ["publisher-create", "--security-group-id", "sg-test"],
-        ["publisher-status", "--instance-id", "i-" + "a"*17],
-        ["publisher-start", "--instance-id", "i-" + "a"*17],
-        ["publisher-stop", "--instance-id", "i-" + "a"*17],
-        ["publisher-run", "--instance-id", "i-" + "a"*17, "--operation", "check"],
-        ["publisher-result", "--instance-id", "i-" + "a"*17, "--command-id",
+        ["create", "--profile", "publisher", "--security-group-id", "sg-test"],
+        ["status", "publish"],
+        ["start", "publish"],
+        ["stop", "publish"],
+        ["run", "publish", "--operation", "check"],
+        ["result", "publish", "--command-id",
          "00000000-0000-0000-0000-000000000000"],
     ):
         module.main(argv)

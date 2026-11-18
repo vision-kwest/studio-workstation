@@ -7,13 +7,8 @@ PROFILE = "StudioEfsCiPublisher"
 REGION = "us-east-1"
 
 
-def command(args, aws):
-    if args.region != REGION:
-        raise ValueError("Publisher is restricted to us-east-1")
-    if args.action == "publisher-create":
-        if args.instance_type != "m7i.large":
-            raise ValueError("Publisher instance type must be m7i.large")
-        script = """#!/bin/bash
+
+BOOTSTRAP = """#!/bin/bash
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -32,16 +27,28 @@ git clone https://github.com/vision-kwest/studio-rez.git /opt/studio/rez
 PYTHONPATH=/opt/studio/rez/python /opt/studio/rez/scripts/studio-rez-promote-package --help >/dev/null
 echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
 """
-        result = aws(REGION, "ec2", "run-instances",
-                     "--image-id", args.image_id, "--instance-type", args.instance_type,
-                     "--subnet-id", args.subnet_id, "--security-group-ids", args.security_group_id,
-                     "--iam-instance-profile", "Name=" + PROFILE,
-                     "--metadata-options", "HttpTokens=required",
-                     "--block-device-mappings", json.dumps([{"DeviceName":"/dev/sda1",
-                         "Ebs":{"VolumeSize":30,"VolumeType":"gp3","Encrypted":True,"DeleteOnTermination":True}}]),
-                     "--user-data", script,
-                     "--tag-specifications", 'ResourceType=instance,Tags=[{Key=StudioRole,Value=Publisher},{Key=Name,Value=studio-publisher}]')
-        return {"instance_id": result["Instances"][0]["InstanceId"]}
+
+
+def template(args):
+    from pathlib import Path
+    definition = json.loads((Path(__file__).parent / "workstation-template.json").read_text())
+    del definition["Resources"]["WorkstationSG"]
+    props = definition["Resources"]["Workstation"]["Properties"]
+    props["SecurityGroupIds"] = [args.security_group_id]
+    props["UserData"] = {"Fn::Base64": BOOTSTRAP}
+    props["PropagateTagsToVolumeOnCreation"] = True
+    props["Tags"] = [{"Key": "Name", "Value": {"Ref": "AWS::StackName"}},
+                     {"Key": "StudioRole", "Value": "Publisher"},
+                     {"Key": "StudioProfile", "Value": "publisher"},
+                     {"Key": "StudioStackId", "Value": {"Ref": "AWS::StackId"}}]
+    definition["Parameters"]["DiskSizeGiB"].update({"MinValue": 30, "Default": 30})
+    definition["Parameters"]["InstanceType"]["AllowedValues"] = ["m7i.large"]
+    definition["Parameters"]["InstanceProfileName"]["Default"] = PROFILE
+    return definition
+
+def command(args, aws):
+    if args.region != REGION:
+        raise ValueError("Publisher is restricted to us-east-1")
     if not args.instance_id or not re.fullmatch(r"i-[0-9a-f]{17}", args.instance_id):
         raise ValueError("Exact publisher instance ID required")
     item = aws(REGION, "ec2", "describe-instances", "--instance-ids", args.instance_id)["Reservations"][0]["Instances"][0]
@@ -49,15 +56,6 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
     if tags.get("StudioRole") != "Publisher" or item.get("IamInstanceProfile", {}).get("Arn", "").split("/")[-1] != PROFILE:
         raise ValueError("Not an owned Studio publisher with the dedicated IAM profile")
     state = item["State"]["Name"]
-    if args.action == "publisher-status":
-        return {"instance_id": args.instance_id, "state": state}
-    if args.action in ("publisher-start", "publisher-stop"):
-        expected = "stopped" if args.action == "publisher-start" else "running"
-        if state != expected:
-            raise ValueError("Expected " + expected + ", got " + state)
-        operation = "start-instances" if args.action == "publisher-start" else "stop-instances"
-        aws(REGION, "ec2", operation, "--instance-ids", args.instance_id)
-        return {"instance_id": args.instance_id, "action": operation}
     if state != "running":
         raise ValueError("Publisher must be running")
     if args.action == "publisher-result":
@@ -71,9 +69,9 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
         commands = ["set -eu", "test -f /var/log/studio-publisher-ready", "id", "test -d /opt/studio/packages",
                     "mountpoint /opt/studio/packages", "test -w /opt/studio/packages/dev"]
     elif args.operation == "build":
-        if not re.fullmatch(r"vision-kwest/[a-z0-9-]+", args.recipe_repo) or not re.fullmatch(r"[0-9a-f]{40}", args.recipe_ref):
+        if not re.fullmatch(r"vision-kwest/[a-z0-9-]+", args.recipe_repo or "") or not re.fullmatch(r"[0-9a-f]{40}", args.recipe_ref or ""):
             raise ValueError("Build requires a pinned commit in a vision-kwest repository")
-        if not re.fullmatch(r"[a-zA-Z0-9_/-]+\.sh", args.recipe_path) or ".." in args.recipe_path.split("/"):
+        if not re.fullmatch(r"[a-zA-Z0-9_/-]+\.sh", args.recipe_path or "") or ".." in args.recipe_path.split("/"):
             raise ValueError("Invalid recipe path")
         commands = ["set -eu", "mountpoint -q /opt/studio/packages",
                     "test -w /opt/studio/packages/dev",
@@ -85,7 +83,7 @@ echo 'PUBLISHER_BOOTSTRAP_READY' > /var/log/studio-publisher-ready
                     "test -f " + args.recipe_path,
                     "STUDIO_PACKAGE_ROOT=/opt/studio/packages bash " + args.recipe_path]
     else:
-        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", args.name) or not re.fullmatch(r"[0-9]+\.[0-9]+", args.version):
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", args.name or "") or not re.fullmatch(r"[0-9]+\.[0-9]+", args.version or ""):
             raise ValueError("Invalid package name/version")
         src, dst = ("dev", "test") if args.operation == "promote-test" else ("test", "prod")
         commands = ["set -eu", "test -x /opt/studio/rez/scripts/studio-rez-promote-package",

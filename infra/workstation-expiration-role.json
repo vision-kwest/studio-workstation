@@ -1,0 +1,76 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Native workstation expiration: stack deletion and instance fallback; no disk deletion.",
+  "Parameters": {
+    "WorkstationStack": {
+      "Type": "String",
+      "AllowedPattern": "[a-zA-Z][a-zA-Z0-9-]{0,127}"
+    },
+    "ScheduleGroup": {
+      "Type": "String",
+      "Default": "studio-task7-pr61",
+      "AllowedPattern": "[a-zA-Z0-9_.-]{1,64}"
+    }
+  },
+  "Resources": {
+    "ExpirationRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Service": "scheduler.amazonaws.com"},
+            "Action": "sts:AssumeRole",
+            "Condition": {
+              "StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}},
+              "ArnEquals": {"aws:SourceArn": {"Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/${ScheduleGroup}"}}
+            }
+          }]
+        },
+        "Policies": [{
+          "PolicyName": "StudioWorkstationExpiry",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Action": "ec2:TerminateInstances",
+              "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"},
+              "Condition": {"StringEquals": {
+                "ec2:ResourceTag/StudioStack": {"Ref": "WorkstationStack"},
+                "ec2:ResourceTag/StudioCleanupToken": {"Fn::Select": [2, {"Fn::Split": ["/", {"Ref": "AWS::StackId"}]}]}
+              }}
+            }, {
+              "Effect": "Allow",
+              "Action": "ec2:DeleteSecurityGroup",
+              "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*"},
+              "Condition": {"StringEquals": {
+                "ec2:ResourceTag/StudioStack": {"Ref": "WorkstationStack"},
+                "ec2:ResourceTag/StudioCleanupToken": {"Fn::Select": [2, {"Fn::Split": ["/", {"Ref": "AWS::StackId"}]}]}
+              }}
+            }, {
+              "Effect": "Allow",
+              "Action": "cloudformation:DeleteStack",
+              "Resource": {"Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${WorkstationStack}/*"},
+              "Condition": {"StringEquals": {
+                "aws:ResourceTag/StudioCleanupToken": {"Fn::Select": [2, {"Fn::Split": ["/", {"Ref": "AWS::StackId"}]}]}
+              }}
+            }, {
+              "Effect": "Allow",
+              "Action": ["ec2:DescribeInstances", "ec2:DescribeInstanceAttribute",
+                         "ec2:DescribeSecurityGroups", "ec2:DescribeNetworkInterfaces",
+                         "ec2:DescribeVolumes", "ec2:DescribeTags", "ec2:DescribeInstanceCreditSpecifications",
+                         "ec2:DescribeLaunchTemplates", "ssm:DescribeAssociation", "ssm:ListAssociations"],
+              "Resource": "*"
+            }]
+          }
+        }]
+      }
+    }
+  },
+  "Outputs": {
+    "ExpirationRoleArn": {"Value": {"Fn::GetAtt": ["ExpirationRole", "Arn"]}},
+    "CleanupToken": {"Value": {"Fn::Select": [2, {"Fn::Split": ["/", {"Ref": "AWS::StackId"}]}]}},
+    "WorkstationStack": {"Value": {"Ref": "WorkstationStack"}}
+  }
+}

@@ -15,27 +15,8 @@ class StudioCliTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             cli.main(argv)
 
-    @mock.patch.object(cli, "run")
-    @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_stop_refuses_wrong_ec2_state(self, describe, run):
-        describe.return_value = dict(STATE, state="stopped")
-        with self.assertRaises(SystemExit):
-            self.invoke(["stop", "--stack", STACK])
-        run.assert_not_called()
 
-    @mock.patch.object(cli, "run")
-    @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_stop_uses_exact_instance_id(self, describe, run):
-        self.invoke(["stop", "--stack", STACK])
-        self.assertEqual(run.call_args_list[0].args[0][0:4],
-                         ["aws", "ec2", "stop-instances", "--instance-ids"])
 
-    @mock.patch.object(cli, "run")
-    @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_start_refuses_running_instance(self, describe, run):
-        with self.assertRaises(SystemExit):
-            self.invoke(["start", "--stack", STACK])
-        run.assert_not_called()
 
     @mock.patch.object(cli, "run")
     @mock.patch.object(cli, "aws")
@@ -46,39 +27,8 @@ class StudioCliTests(unittest.TestCase):
         run.assert_not_called()
         aws.assert_not_called()
 
-    @mock.patch.object(cli, "run")
-    @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_connect_prints_url_without_aws_mutation(self, describe, run):
-        with mock.patch.object(cli, "trusted_url",
-                               return_value="https://dcv.kwesidavis.com:8443") as tls:
-            self.invoke(["connect", "--stack", STACK])
-        tls.assert_called_once_with(STACK, INSTANCE)
-        run.assert_not_called()
 
-    def test_trusted_hostname_connect_uses_verified_stack_identity(self):
-        vm = dict(STATE, public_ip="54.159.180.104", state="running")
-        with mock.patch.object(cli, "describe", return_value=vm), \
-             mock.patch.object(cli, "trusted_url",
-                               return_value="https://dcv.kwesidavis.com:8443") as tls, \
-             mock.patch.object(cli, "run") as run, \
-             contextlib.redirect_stdout(io.StringIO()) as output:
-            cli.main(["connect", "--stack", STACK,
-                      "--hostname", "dcv.kwesidavis.com"])
-        tls.assert_called_once_with(STACK, INSTANCE)
-        self.assertIn("https://dcv.kwesidavis.com:8443", output.getvalue())
-        run.assert_not_called()
 
-    def test_trusted_hostname_rejected_when_stopped(self):
-        vm = dict(STATE, public_ip="54.159.180.104", state="stopped")
-        with mock.patch.object(cli, "describe", return_value=vm), \
-             mock.patch.object(cli, "verified_dcv_hostname") as tls, \
-             mock.patch.object(cli, "run") as run, \
-             contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit):
-                cli.main(["status", "--stack", STACK,
-                          "--hostname", "dcv.kwesidavis.com"])
-        tls.assert_not_called()
-        run.assert_not_called()
 
     def test_trusted_hostname_is_not_allowed_with_ssm(self):
         with mock.patch.object(cli, "describe") as describe, \
@@ -155,46 +105,10 @@ class StudioCliTests(unittest.TestCase):
         self.assertNotIn("--profile", render)
         self.assertNotIn("--lifecycle", render)
 
-    @mock.patch.object(cli, "run")
-    def test_scoped_gpu_refuses_public_ingress(self, run):
-        with self.assertRaises(SystemExit):
-            self.invoke(["create", "--stack", "studio-gpu-cli-test1", "--profile", "gpu",
-                         "--cleanup-token", "unique-test-token-123", "--dry-run"])
-        run.assert_not_called()
 
-    @mock.patch.object(cli, "run")
-    def test_scoped_gpu_requires_guard_compatible_stack_name(self, run):
-        with self.assertRaises(SystemExit):
-            self.invoke(["create", "--stack", "studio-gpu-cli-" + "x" * 40,
-                         "--profile", "gpu", "--cleanup-token", "unique-test-token-123",
-                         "--client-cidr", "127.0.0.1/32"])
-        run.assert_not_called()
 
-    @mock.patch.object(cli, "run")
-    def test_scoped_gpu_accepts_restricted_ingress_dry_run(self, run):
-        self.invoke(["create", "--stack", "studio-gpu-cli-test1", "--profile", "gpu",
-                     "--cleanup-token", "unique-test-token-123",
-                     "--client-cidr", "127.0.0.1/32", "--dry-run"])
-        calls = [c.args[0] for c in run.call_args_list]
-        self.assertTrue(any("--cleanup-token" in c for c in calls))
-        self.assertFalse(any("deploy" in c for c in calls))
 
-    @mock.patch.object(cli, "run")
-    def test_scoped_gpu_explicit_public_dcv_dry_run(self, run):
-        self.invoke(["create", "--stack", "studio-gpu-cli-test1", "--profile", "gpu",
-                     "--cleanup-token", "unique-test-token-123",
-                     "--client-cidr", "0.0.0.0/0", "--allow-public-dcv", "--dry-run"])
-        self.assertFalse(any("deploy" in str(c.args[0]) for c in run.call_args_list))
 
-    @mock.patch.object(cli, "run")
-    @mock.patch.object(cli, "aws")
-    @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_nonapproved_gpu_destroy_fails_before_aws(self, describe, aws, run):
-        with contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit):
-                self.invoke(["destroy", "--stack", "studio-gpu-cli-test1", "--delete-stack"])
-        aws.assert_not_called()
-        run.assert_not_called()
 
     @mock.patch.object(cli.subprocess, "check_output", return_value="{}")
     def test_aws_json_requests_never_open_pager(self, check_output):
@@ -297,119 +211,29 @@ class StudioCliTests(unittest.TestCase):
             cli.gpu_ready(STACK, "us-east-1")
 
 
-class GpuExpirationCliParsingTests(unittest.TestCase):
-    """Task 1 parsing contracts. Never create an AWS resource."""
 
-    def options(self, profile="gpu", expires=None, cleanup=None):
-        from types import SimpleNamespace
-        return SimpleNamespace(profile=profile, expires_in=expires,
-                               volume_cleanup_delay=cleanup)
 
-    def invoke(self, *options):
-        args = ["create", "--profile", "gpu", "--stack",
-                "studio-gpu-cli-accept65", *options]
-        with contextlib.redirect_stdout(io.StringIO()) as output:
-            cli.main(args)
-        return output.getvalue()
-
-    def test_defaults_match_original_pr65_guard(self):
-        self.assertEqual(cli.gpu_expiration_options(self.options()), (150, 45))
-        self.assertEqual(cli.gpu_expiration_options(self.options("cpu")), None)
-
-    def test_bounded_values_include_original_guard_boundaries(self):
-        for expiry in (60, 150, 240):
-            for delay in (30, 45, 120):
-                with self.subTest(expiry=expiry, delay=delay):
-                    self.assertEqual(
-                        cli.gpu_expiration_options(self.options(
-                            expires=expiry, cleanup=delay)), (expiry, delay))
-
-    def test_out_of_bounds_values_fail_before_any_aws_call(self):
-        for value in ("59m", "241m"):
-            with self.subTest(expiry=value), \
-                 mock.patch.object(cli, "run") as run, \
-                 mock.patch.object(cli, "aws") as aws, \
-                 contextlib.redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit):
-                    self.invoke("--expires-in", value, "--dry-run")
-                run.assert_not_called()
-                aws.assert_not_called()
-        for value in ("29m", "121m"):
-            with self.subTest(cleanup=value), \
-                 mock.patch.object(cli, "run") as run, \
-                 contextlib.redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit):
-                    self.invoke("--volume-cleanup-delay", value, "--dry-run")
-                run.assert_not_called()
-
-    def test_duration_requires_explicit_whole_minutes(self):
-        for value in ("180", "3h", "0m", "-1m", "1.5m", "180s", "1M", "5000m"):
-            with self.subTest(value=value), \
-                 mock.patch.object(cli, "run") as run, \
-                 contextlib.redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit):
-                    self.invoke("--expires-in", value, "--dry-run")
-                run.assert_not_called()
-
-    def test_cpu_rejects_both_gpu_only_options(self):
-        for flag in ("--expires-in", "--volume-cleanup-delay"):
-            with self.subTest(flag=flag), \
-                 mock.patch.object(cli, "run") as run, \
-                 contextlib.redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit):
-                    cli.main(["create", "--profile", "cpu", "--stack",
-                              "studio-cpu-test", flag, "90m", "--dry-run"])
-                run.assert_not_called()
-
-    def test_dry_run_accepts_valid_custom_gpu_durations_without_launch(self):
-        with mock.patch.object(cli, "run") as run:
-            self.invoke("--expires-in", "180m", "--volume-cleanup-delay",
-                        "60m", "--dry-run")
-        calls = [x.args[0] for x in run.call_args_list]
-        self.assertTrue(any("validate-template" in cmd for cmd in calls))
-        self.assertFalse(any("create-stack" in cmd or "deploy" in cmd for cmd in calls))
-
-    def test_live_expiration_options_forward_to_guarded_creator(self):
-        from subprocess import CalledProcessError
-        from runtime import pr65_gpu_create as flow
-        scenarios = [
-            ((), (150, 45)),
-            (("--expires-in", "180m"), (180, 45)),
-            (("--volume-cleanup-delay", "60m"), (150, 60)),
-            (("--expires-in", "240m", "--volume-cleanup-delay", "120m"), (240, 120)),
+    @mock.patch.object(cli, "instance_id", return_value=INSTANCE)
+    @mock.patch.object(cli, "aws")
+    @mock.patch("time.sleep")
+    def test_readiness_failure_reports_last_native_check_and_ssm_identity(self, sleep, aws, iid):
+        aws.side_effect = [
+            {"Command": {"CommandId": "readiness-command"}},
+            {"Status": "Failed", "StandardOutputContent":
+             "Checking GDM and DCV services\ninactive\nactive\n",
+             "StandardErrorContent": "service check failed"},
         ]
-        for flags, expected in scenarios:
-            with self.subTest(flags=flags), \
-                 mock.patch.object(cli, "run") as render, \
-                 mock.patch.object(cli, "aws", side_effect=CalledProcessError(
-                     255, "aws", stderr="Stack with id does not exist")) as aws, \
-                 mock.patch.object(cli, "gpu_release_preflight"), \
-                 mock.patch.object(cli, "shared_gpu_source_ready"), \
-                 mock.patch.object(flow, "create_guarded",
-                                   return_value={"guard": {"guard_armed": True,
-                                                            "instance_id": "i-0123456789abcdef0"},
-                                                  "terminate_at": "2026-11-01T20:30:00+00:00",
-                                                  "volume_cleanup_at": "2026-11-01T21:15:00+00:00"}) as guarded, \
-                 mock.patch.object(cli, "complete_gpu_setup",
-                                   return_value="https://dcv.kwesidavis.com:8443") as setup:
-                output = self.invoke(*flags, "--client-cidr", "8.8.8.8/32",
-                                     "--cleanup-token", cli.GPU_ACCEPTANCE_TOKEN)
-                self.assertIn('"expiration"', output)
-                self.assertIn('"termination_utc"', output)
-                self.assertIn('"ebs_cleanup_utc"', output)
-                self.assertIn('"remaining_minutes"', output)
-                guarded.assert_called_once()
-                self.assertEqual(guarded.call_args.kwargs,
-                                 {"minutes": expected[0],
-                                  "volume_delay_minutes": expected[1]})
-                setup.assert_called_once()
-                self.assertFalse(any("deploy" in str(c.args[0]) for c in
-                                     render.call_args_list))
-                aws.assert_called_once()
-
-    def test_explicit_default_values_remain_backward_compatible(self):
-        self.assertEqual(cli.gpu_expiration_options(
-            self.options(expires=150, cleanup=45)), (150, 45))
+        with self.assertRaises(ValueError) as raised:
+            cli.gpu_ready(STACK, "us-east-1")
+        message = str(raised.exception)
+        for expected in (INSTANCE, "readiness-command", "Checking GDM", "inactive", "service check failed"):
+            self.assertIn(expected, message)
+        args = aws.call_args_list[0].args
+        import json
+        checks = json.loads(args[args.index("--parameters") + 1])["commands"]
+        self.assertIn("echo 'Checking RES desktop readiness marker'", checks)
+        self.assertIn("dcv describe-session console", checks)
+        self.assertFalse(any("systemctl restart" in check or "touch " in check for check in checks))
 
 
 if __name__ == "__main__":

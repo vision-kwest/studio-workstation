@@ -47,34 +47,20 @@ class GpuProfileContracts(unittest.TestCase):
             self.assertNotIn("Task7", {tag["Key"] for tag in p["Tags"]})
             self.assertIn("-g NVIDIA", p["UserData"]["Fn::Base64"]["Fn::Sub"])
 
-    def test_scoped_gpu_root_volume_is_tagged_at_launch(self):
+
+    def test_native_volume_tag_propagation_and_disposal(self):
         with tempfile.TemporaryDirectory() as d:
-            out = Path(d) / "scoped.json"
-            with mock.patch.object(sys, "argv", ["render_workstation.py",
-                   "--profile", "gpu", "--lifecycle", "persistent",
-                   "--bucket", "studio-release-bucket",
-                   "--prefix", "releases/task7-pr61-postreboot-a8ec326/res-2026.06",
-                   "--cleanup-token", "unique-test-token-123",
-                   "--test-stack", "studio-gpu-cli-unique-test",
-                   "--output", str(out)]):
+            out = Path(d) / "native.json"
+            with mock.patch.object(sys, "argv", ["render_workstation.py", "--profile", "gpu",
+                   "--lifecycle", "persistent", "--bucket", "studio-release-bucket",
+                   "--prefix", "releases/test/res-2026.06", "--output", str(out)]):
                 render_main()
-            t = json.loads(out.read_text())
-            resources = t["Resources"]
-            lt = resources["CleanupVolumeTagLaunchTemplate"]["Properties"]
-            spec = lt["LaunchTemplateData"]["TagSpecifications"]
-            self.assertEqual(len(spec), 1)
-            self.assertEqual(spec[0]["ResourceType"], "volume")
-            expected = {"StudioCleanupToken": "unique-test-token-123",
-                        "StudioStack": "studio-gpu-cli-unique-test"}
-            self.assertEqual({x["Key"]: x["Value"] for x in spec[0]["Tags"]}, expected)
-            self.assertEqual({x["Key"]: x["Value"] for x in
-                              resources["WorkstationSG"]["Properties"]["Tags"]}, expected)
-            instance = resources["Workstation"]["Properties"]
-            self.assertEqual({x["Key"]: x["Value"] for x in instance["Tags"]
-                              if x["Key"] in expected}, expected)
-            self.assertEqual(instance["LaunchTemplate"]["LaunchTemplateId"],
-                             {"Ref": "CleanupVolumeTagLaunchTemplate"})
-            self.assertTrue(instance["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
+            template = json.loads(out.read_text())
+            self.assertEqual(set(template["Resources"]), {"Workstation", "WorkstationSG"})
+            props = template["Resources"]["Workstation"]["Properties"]
+            self.assertTrue(props["PropagateTagsToVolumeOnCreation"])
+            self.assertTrue(all(m["Ebs"]["DeleteOnTermination"] for m in props["BlockDeviceMappings"]))
+            self.assertIn({"Key": "StudioStackId", "Value": {"Ref": "AWS::StackId"}}, props["Tags"])
 
     def test_unscoped_gpu_does_not_add_launch_template(self):
         with tempfile.TemporaryDirectory() as d:
@@ -162,17 +148,6 @@ class GpuProfileContracts(unittest.TestCase):
         self.assertIn('sha256sum --check --status', source)
         self.assertIn('s3 cp', source)  # Original managed RES path remains.
 
-    def test_scoped_gpu_launch_still_blocked_until_guard_is_ready(self):
-        source = (ROOT / "scripts/studio_workstation_cli.py").read_text()
-        self.assertIn("GPU_ACCEPTANCE_LIVE_ENABLED = True", source)
-        self.assertIn("GPU_ACCEPTANCE_STACK = \"studio-gpu-cli-accept65\"", source)
-        self.assertIn("GPU_ACCEPTANCE_TOKEN = \"pr65-b23c8e5fdf67b683cd35\"", source)
-        self.assertIn("only the approved acceptance stack/token", source)
-        manifest = json.loads((ROOT / "runtime/pr65-staged-release-manifest.json").read_text())
-        self.assertEqual(manifest["status"], "INSTALLER_PUBLISHED_GPU_LAUNCH_NOT_AUTHORIZED")
-        self.assertEqual(manifest["launch_gate"], "SCOPED_GPU_CLEANUP_GUARD_NOT_DEPLOYED_OR_VERIFIED")
-        self.assertEqual(manifest["archives"]["installation-scripts.tar.gz"]["s3_version_id"],
-                         "bN0To3QzfVqVsN5P_6YmTraGIQuHcrtB")
 
     def test_invalid_profile_fails(self):
         with self.assertRaises(ValueError):

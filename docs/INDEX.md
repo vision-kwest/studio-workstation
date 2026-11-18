@@ -1,3 +1,7 @@
+> **Current operations:** [Named Studio CLI](studio-cli.md). Issue #98 retires
+> fixed PR65 names/tokens, the CPU-return hostname model, and separate disk cleanup.
+> Older linked acceptance/design documents are dated evidence, not current commands.
+
 # Documentation index
 
 **Current operating instructions** are separated here from current project plans and historical acceptance records. PR #65 and PR #67 are merged; software-delivery PR #73 and OpenUSD publisher PR #7 remain drafts (status checked 2026-11-05). When an archived note says "NO-GO", "not merged", "not deployed", or "pending", read it as a **statement from the date of that checkpoint**, not a current project-wide prohibition.

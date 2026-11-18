@@ -1,16 +1,11 @@
-"""Issue #68: exact-scope supervised GPU expiration extension.
-
-Uses the existing PR65 ownership/IAM and Issue43 schedule preflights.
-Never runs on import. The --additional-minutes CLI option authorizes the guarded update.
-Extends retained-EBS cleanup first so it can never precede an extended
-termination deadline. On failure, reconciles/rolls back when verifiable.
-"""
+"""Extend native stack expiration and its instance fallback, with verified rollback."""
 import copy
 import datetime as dt
 import json
 
 from runtime import issue43_hostname_handoff as h
-from runtime import pr65_gpu_create
+from runtime import pr65_one_shot_guard as guard
+from runtime.workstation_inventory import context
 
 MIN_CURRENT_HEADROOM = dt.timedelta(minutes=15)
 MIN_NEW_HEADROOM = dt.timedelta(minutes=80)
@@ -36,7 +31,7 @@ def _request(schedule):
 
 def _read(aws, name):
     result = aws(h.REGION, "scheduler", "get-schedule",
-                 "--group-name", h.guard.GROUP, "--name", name)
+                 "--group-name", guard.GROUP, "--name", name)
     return _request(result)
 
 
@@ -53,90 +48,75 @@ def _write(aws, request):
 
 
 def _prepare(aws, stack, region, additional_minutes, now):
-    if (stack, region) != (h.GPU_STACK, h.REGION):
-        raise ValueError("Extension limited to exact PR65 GPU stack and region")
     if type(additional_minutes) is not int or not 1 <= additional_minutes <= MAX_ADDITIONAL_MINUTES:
         raise ValueError("Additional minutes must be an integer in 1..180")
     if now.tzinfo is None or now.utcoffset() != dt.timedelta(0):
         raise ValueError("Require UTC-aware time")
-    iid = h._stack_iid(aws, stack)
-    gpu = h._items(aws, iid)[iid]
-    if gpu.get("State", {}).get("Name") not in ("running", "stopped"):
+    selected = context(aws, region, stack)
+    if selected["state"] not in ("running", "stopped"):
         raise ValueError("GPU must be running or stopped to extend expiration")
-    pr65_gpu_create.preflight(aws, region, stack, h.GPU_TOKEN)
-    deadlines = h._gpu_guard(aws, gpu, now, require_headroom=False)
-    term = dt.datetime.fromisoformat(deadlines["terminate_at"])
-    cleanup = dt.datetime.fromisoformat(deadlines["volume_cleanup_at"])
-    if term - now < MIN_CURRENT_HEADROOM:
-        raise ValueError("Expiration too near or elapsed; need at least 15 minutes to extend safely")
+    current = guard.status(aws, selected, now=now, headroom=15)
+    term = dt.datetime.fromisoformat(current["terminate_at"])
     new_term = term + dt.timedelta(minutes=additional_minutes)
-    new_cleanup = cleanup + dt.timedelta(minutes=additional_minutes)
     if not MIN_NEW_HEADROOM <= new_term - now <= MAX_NEW_HEADROOM:
         raise ValueError("Extended termination must be 80–240 minutes from now")
-    if not dt.timedelta(minutes=30) <= new_cleanup - new_term <= dt.timedelta(minutes=120):
-        raise ValueError("Retained EBS delay outside PR65 bounds")
-    names = ("studio-pr65-i-" + iid, "studio-pr65-v-" + deadlines["root_volume_id"])
-    old_term, old_ebs = (_read(aws, name) for name in names)
-    if (old_term["ScheduleExpression"] != "at(" + term.strftime("%Y-%m-%dT%H:%M:%S") + ")" or
-            old_ebs["ScheduleExpression"] != "at(" + cleanup.strftime("%Y-%m-%dT%H:%M:%S") + ")"):
-        raise ValueError("Expiration schedule changed during preflight")
-    next_term, next_ebs = copy.deepcopy(old_term), copy.deepcopy(old_ebs)
-    next_term["ScheduleExpression"] = "at(" + new_term.strftime("%Y-%m-%dT%H:%M:%S") + ")"
-    next_ebs["ScheduleExpression"] = "at(" + new_cleanup.strftime("%Y-%m-%dT%H:%M:%S") + ")"
-    summary = {
-        "stack": stack, "instance_id": iid, "root_volume_id": deadlines["root_volume_id"],
-        "additional_minutes": additional_minutes,
-        "previous_termination_utc": term.isoformat(),
-        "previous_ebs_cleanup_utc": cleanup.isoformat(),
-        "proposed_termination_utc": new_term.isoformat(),
-        "proposed_ebs_cleanup_utc": new_cleanup.isoformat(),
-    }
-    return (old_term, old_ebs), (next_term, next_ebs), summary
+    original = tuple(_read(aws, current[k]["Name"]) for k in ("termination", "fallback"))
+    for schedule, key in zip(original, ("termination", "fallback")):
+        if {k: v for k, v in schedule.items() if k != "Description"} != current[key]:
+            raise RuntimeError("Expiration changed while preparing extension")
+    proposed = copy.deepcopy(original)
+    for schedule, offset in zip(proposed, (0, guard.FALLBACK_MINUTES)):
+        when = new_term + dt.timedelta(minutes=offset)
+        schedule["ScheduleExpression"] = "at(" + when.strftime("%Y-%m-%dT%H:%M:%S") + ")"
+    return original, proposed, {"stack": stack, "instance_id": selected["instance"],
+                               "previous_termination_utc": term.isoformat(),
+                               "proposed_termination_utc": new_term.isoformat(),
+                               "additional_minutes": additional_minutes}
 
 
 def extend(aws, stack, region, additional_minutes, *, now=None):
-    """Update EBS first, termination second; verify or reconcile both."""
+    """Update fallback first, termination second; verify or reconcile both."""
     now = now or dt.datetime.now(dt.timezone.utc)
     original, proposed, summary = _prepare(aws, stack, region, additional_minutes, now)
-    old_term, old_ebs = original
-    next_term, next_ebs = proposed
+    old_term, old_fallback = original
+    next_term, next_fallback = proposed
 
     # Re-read both exact schedules immediately before any write.
     _verify(aws, old_term)
-    _verify(aws, old_ebs)
+    _verify(aws, old_fallback)
     try:
-        _write(aws, next_ebs)
-        _verify(aws, next_ebs)
+        _write(aws, next_fallback)
+        _verify(aws, next_fallback)
         _verify(aws, old_term)  # Abort if termination changed independently.
         _write(aws, next_term)
         _verify(aws, next_term)
-        _verify(aws, next_ebs)
+        _verify(aws, next_fallback)
     except BaseException as exc:
         try:
             actual_term = _read(aws, old_term["Name"])
-            actual_ebs = _read(aws, old_ebs["Name"])
+            actual_fallback = _read(aws, old_fallback["Name"])
         except BaseException as verify_exc:
             raise RuntimeError(
                 "Extension interrupted; schedule state unverified. "
                 "Inspect both schedules before any further operation.") from verify_exc
-        if actual_term == next_term and actual_ebs == next_ebs:
+        if actual_term == next_term and actual_fallback == next_fallback:
             return {**summary, "extended": True, "recovered_after_error": True}
         if actual_term == old_term:
-            if actual_ebs == next_ebs:
+            if actual_fallback == next_fallback:
                 try:
-                    _write(aws, old_ebs)
-                    _verify(aws, old_ebs)
+                    _write(aws, old_fallback)
+                    _verify(aws, old_fallback)
                 except BaseException as rollback_exc:
                     raise RuntimeError(
-                        "Termination remains at original deadline but EBS rollback "
+                        "Termination remains at original deadline but fallback rollback "
                         "unverified; inspect both schedules manually.") from rollback_exc
-            elif actual_ebs != old_ebs:
+            elif actual_fallback != old_fallback:
                 raise RuntimeError(
-                    "Termination unchanged, EBS schedule unexpected; "
+                    "Termination unchanged, fallback schedule unexpected; "
                     "inspect exact schedules manually.") from exc
             raise RuntimeError(
-                "Extension aborted; original termination and EBS deadlines verified.") from exc
+                "Extension aborted; original termination and fallback deadlines verified.") from exc
         raise RuntimeError(
-            "Partial expiration extension: EC2 and EBS schedule deadlines differ; "
+            "Partial expiration extension: Stack and fallback schedule deadlines differ; "
             "do not resume until manually reconciled.") from exc
     return {**summary, "extended": True, "recovered_after_error": False}

@@ -1,287 +1,255 @@
-"""Offline-only Task 4 destruction checks. No AWS access; all APIs mocked."""
-import contextlib
+"""Disposable workstation teardown: native CloudFormation, exact scope, resumable checks."""
 import copy
-import io
-import json
 import subprocess
 import unittest
-from unittest import mock
+from types import SimpleNamespace
+from unittest.mock import Mock
 
-from runtime import issue43_destroy as destroy
-from runtime import issue43_gpu_acm_setup as acm
-from runtime import issue43_hostname_handoff as h
-from runtime import independent_eip
-from scripts import studio_workstation_cli as cli
-from test_issue43_gpu_acm_setup import IAMFake
-from test_issue43_hostname_handoff import GPU, VOLUME
+from runtime import issue43_destroy as cleanup, pr65_gpu_create as creator, publisher
+from workstation_fake import AWS, NOW, h, inventory, missing, tags
 
 
-class FakeCleanup(IAMFake):
-    def __init__(self):
-        super().__init__()
-        self.gpu["State"]["Name"] = "running"
-        self.volume["Encrypted"] = True
-        self.stack = {"StackName": h.GPU_STACK,
-                      "StackId": "arn:aws:cloudformation:us-east-1:" + h.ACCOUNT +
-                                 ":stack/" + h.GPU_STACK + "/abcdef",
-                      "StackStatus": "CREATE_COMPLETE",
-                      "Tags": [{"Key": "StudioStack", "Value": h.GPU_STACK},
-                               {"Key": "StudioCleanupToken", "Value": h.GPU_TOKEN}]}
-        self.sg = {"GroupId": "sg-0123456789abcdef0",
-                   "Tags": copy.deepcopy(self.volume["Tags"])}
-        self.lt = {"LaunchTemplateId": "lt-0123456789abcdef0",
-                   "Tags": copy.deepcopy(self.volume["Tags"])}
-        self.deleted_volume = False
-        self.deleted_sg = False
-        self.deleted_lt = False
-        self.events = []
-        self.foreign_tagged = False
-        self.stuck_volume = False
-        self.fail_schedule = False
-
-    def __call__(self, region, *args):
-        service, operation = args[:2]
-        if (service, operation) == ("cloudformation", "describe-stacks"):
-            return {"Stacks": [copy.deepcopy(self.stack)]}
-        if (service, operation) == ("cloudformation", "list-stack-resources"):
-            return {"StackResourceSummaries": [
-                {"LogicalResourceId": "Workstation", "ResourceType": "AWS::EC2::Instance",
-                 "PhysicalResourceId": GPU, "ResourceStatus": "CREATE_COMPLETE"},
-                {"LogicalResourceId": "WorkstationSG", "ResourceType": "AWS::EC2::SecurityGroup",
-                 "PhysicalResourceId": self.sg["GroupId"], "ResourceStatus": "CREATE_COMPLETE"},
-                {"LogicalResourceId": "CleanupVolumeTagLaunchTemplate",
-                 "ResourceType": "AWS::EC2::LaunchTemplate",
-                 "PhysicalResourceId": self.lt["LaunchTemplateId"],
-                 "ResourceStatus": "CREATE_COMPLETE"}]}
-        if (service, operation) == ("ec2", "describe-instances") and "--filters" in args:
-            return {"Reservations": [{"Instances": [copy.deepcopy(self.gpu)]}]}
-        if (service, operation) == ("ec2", "describe-volumes"):
-            if "--filters" in args:
-                volumes = [] if self.deleted_volume else [copy.deepcopy(self.volume)]
-                if self.foreign_tagged and self.deleted_volume:
-                    volumes.append({"VolumeId": "vol-99999999999999999"})
-                return {"Volumes": volumes}
-            if self.deleted_volume:
-                raise subprocess.CalledProcessError(254, args, stderr="InvalidVolume.NotFound")
-            return {"Volumes": [copy.deepcopy(self.volume)]}
-        if (service, operation) == ("ec2", "describe-security-groups"):
-            if self.deleted_sg:
-                if "--filters" in args:
-                    return {"SecurityGroups": []}
-                raise subprocess.CalledProcessError(254, args, stderr="InvalidGroup.NotFound")
-            return {"SecurityGroups": [copy.deepcopy(self.sg)]}
-        if (service, operation) == ("ec2", "describe-launch-templates"):
-            if self.deleted_lt:
-                if "--filters" in args:
-                    return {"LaunchTemplates": []}
-                raise subprocess.CalledProcessError(254, args, stderr="InvalidLaunchTemplateId.NotFound")
-            return {"LaunchTemplates": [copy.deepcopy(self.lt)]}
-        if (service, operation) == ("scheduler", "list-schedules"):
-            return {"Schedules": [{"Name": name} for name in self.schedules]}
-        if (service, operation) == ("scheduler", "get-schedule"):
-            name = args[args.index("--name") + 1]
-            if name not in self.schedules:
-                raise subprocess.CalledProcessError(254, args, stderr="ResourceNotFoundException")
-        if service == "iam" and operation in ("delete-role-policy", "update-assume-role-policy"):
-            self.events.append("iam-revoke")
-        if (service, operation) == ("ec2", "disassociate-address"):
-            self.events.append("eip-detach")
-        if (service, operation) == ("ec2", "associate-address"):
-            self.events.append("eip-return")
-        return super().__call__(region, *args)
-
-    def run(self, cmd, *, capture=True):
-        self.events.append(" ".join(cmd[1:3]))
-        if "stop-instances" in cmd:
-            self.gpu["State"]["Name"] = "stopping"
-        elif "instance-stopped" in cmd:
-            self.gpu["State"]["Name"] = "stopped"
-        elif "delete-stack" in cmd:
-            self.stack["StackStatus"] = "DELETE_COMPLETE"
-            self.gpu["State"]["Name"] = "terminated"
-            if not self.stuck_volume:
-                self.deleted_volume = True
-            self.deleted_sg = True
-            self.deleted_lt = True
-        elif "stack-delete-complete" in cmd:
-            assert self.stack["StackStatus"] == "DELETE_COMPLETE"
-        elif "delete-volume" in cmd:
-            assert self.volume["State"] == "available"
-            self.deleted_volume = True
-        elif "delete-schedule" in cmd:
-            name = cmd[cmd.index("--name") + 1]
-            if self.fail_schedule:
-                raise subprocess.CalledProcessError(254, cmd, stderr="AccessDenied")
-            del self.schedules[name]
-        return ""
-
-
-class ScopedDestroyTests(unittest.TestCase):
+class TeardownTests(unittest.TestCase):
     def setUp(self):
-        self.fake = FakeCleanup()
-        self.fake._install = acm._install_grant
-        acm._install_grant(self.fake, GPU)
-        self.fake.events.clear()
+        self.aws=AWS();self.a=self.aws.desktop('gpu-a');self.b=self.aws.desktop('gpu-b')
 
-    def destroy(self):
-        # Existing legacy fixture has no CloudFormation CPU instance tags.
-        # Keep it focused on GPU teardown; independent CPU ownership has
-        # dedicated tests in test_independent_eip.py.
-        def checked_cpu(aws, address):
-            if self.fake.cpu["State"]["Name"] != "stopped":
-                raise ValueError("CPU must remain stopped")
-            return {"instance": h.CPU_ID}
-        with (mock.patch.object(independent_eip, "_cpu_owner",
-                                side_effect=checked_cpu),
-              mock.patch.object(independent_eip, "restore_cpu",
-                                side_effect=self._restore_legacy_cpu),
-              mock.patch.object(acm, "revoke_gpu",
-                                side_effect=self._revoke_legacy_gpu)):
-            return destroy.destroy_gpu(self.fake, self.fake.run, h.GPU_STACK,
-                                       h.REGION, sleep=lambda *_: None)
+    def destroy(self, name='gpu-a'):
+        return cleanup.destroy(self.aws,Mock(),name,h.REGION,sleep=lambda _:None)
 
-    def _restore_legacy_cpu(self, aws, gpu_id):
-        result = h.restore_cpu(aws, gpu_id, allow_live=True)
-        return result
+    def test_native_delete_removes_instance_and_disks_not_other_workstation(self):
+        other=copy.deepcopy(self.aws.vms[self.b['instance']]);shared=copy.deepcopy(self.aws.address)
+        outcome=self.destroy()
+        self.assertEqual(outcome['state'],'DELETE_COMPLETE')
+        self.assertEqual(self.aws.vms[self.a['instance']]['State']['Name'],'terminated')
+        self.assertEqual(self.aws.vms[self.b['instance']],other)
+        self.assertEqual(self.aws.address,shared)
+        self.assertFalse(any(c[1]=='delete-volume' for c in self.aws.calls))
+        self.assertEqual(len(self.aws.schedules),2)
+        self.assertEqual(self.aws.stacks[self.a['safety_stack']]['StackStatus'],'DELETE_COMPLETE')
+        self.assertEqual(self.aws.stacks[self.b['safety_stack']]['StackStatus'],'CREATE_COMPLETE')
 
-    def _revoke_legacy_gpu(self, aws, gpu_id, *, independent=False):
-        return acm._revoke_grant(aws, gpu_id)
+    def test_delete_by_immutable_arn_and_retry_after_success(self):
+        first=self.destroy(self.a['stack_id'])
+        second=self.destroy(self.a['stack_id'])
+        self.assertEqual(first['stack_id'],second['stack_id'])
+        self.assertEqual(second['state'],'DELETE_COMPLETE')
 
+    def test_failed_native_delete_keeps_schedules_and_role_for_retry(self):
+        original=copy.deepcopy(self.aws.schedules)
+        def fail(service,action,args):
+            if (service,action)==('cloudformation','delete-stack'):
+                self.aws.stacks[self.a['stack_id']]['StackStatus']='DELETE_FAILED'
+                raise RuntimeError('injected native failure')
+        self.aws.before=fail
+        with self.assertRaisesRegex(RuntimeError,'native failure'):self.destroy()
+        self.assertEqual(self.aws.schedules,original)
+        self.aws.before=None
+        self.assertEqual(self.destroy()['state'],'DELETE_COMPLETE')
 
-    def test_complete_guarded_destroy_preserves_shared_cpu_and_revokes_gpu(self):
-        # Simulate the GPU owning the shared EIP at shutdown.
-        self.fake.eip["InstanceId"] = GPU
-        self.fake.eip["NetworkInterfaceId"] = self.fake.gpu["NetworkInterfaces"][0]["NetworkInterfaceId"]
-        for tag in self.fake.eip["Tags"]:
-            if tag["Key"] == "StudioDcvInstanceId":
-                tag["Value"] = GPU
-        self.fake.eip["Tags"].append(
-            {"Key": "StudioDcvReturnStack", "Value": h.CPU_STACK})
-        result = self.destroy()
-        self.assertEqual(result["state"], "DELETE_COMPLETE")
-        self.assertEqual(result["eip_owner"], h.CPU_ID)
-        self.assertTrue(self.fake.deleted_volume)
-        self.assertTrue(self.fake.deleted_sg)
-        self.assertTrue(self.fake.deleted_lt)
-        self.assertFalse(self.fake.schedules)
-        self.assertEqual(self.fake.trust["Statement"], [acm._statement(acm.CPU_SESSION)])
-        actions = self.fake.events
-        self.assertLess(actions.index("ec2 stop-instances"), actions.index("eip-detach"))
-        self.assertLess(actions.index("eip-return"), actions.index("iam-revoke"))
-        self.assertLess(actions.index("iam-revoke"), actions.index("cloudformation delete-stack"))
-        self.assertNotIn("ec2 delete-volume", actions)
+    def test_surviving_disk_is_reported_not_managed_by_a_second_deleter(self):
+        self.aws.keep_volume=True
+        original=copy.deepcopy(self.aws.schedules)
+        with self.assertRaisesRegex(RuntimeError,'remaining instances/disks'):self.destroy()
+        self.assertEqual(self.aws.schedules,original)
+        self.assertFalse(any(c[1]=='delete-volume' for c in self.aws.calls))
 
-    def test_previously_stopped_gpu_and_cpu_owned_eip_still_clean(self):
-        self.fake.gpu["State"]["Name"] = "stopped"
-        self.destroy()
-        self.assertNotIn("ec2 stop-instances", self.fake.events)
-        self.assertNotIn("eip-detach", self.fake.events)
-        self.assertFalse(self.fake.schedules)
+    def test_optional_hostname_failure_cannot_prevent_native_cost_teardown(self):
+        from runtime import independent_eip
+        from unittest.mock import patch
+        with patch.object(independent_eip,'release_if_owned',side_effect=ValueError('foreign owner')):
+            with self.assertRaisesRegex(ValueError,'foreign owner'):self.destroy()
+        self.assertEqual(self.aws.vms[self.a['instance']]['State']['Name'],'terminated')
+        self.assertTrue(self.aws.schedules)  # Incomplete cleanup remains visible.
 
-    def test_destroy_without_cpu_preserves_free_eip(self):
-        self.fake.eip.update(InstanceId=None, AssociationId=None, NetworkInterfaceId=None)
-        self.fake.eip["Tags"] = [t for t in self.fake.eip["Tags"] if t["Key"] != "StudioDcvInstanceId"]
-        result = destroy.destroy_gpu(self.fake, self.fake.run, h.GPU_STACK, h.REGION, sleep=lambda _: None)
-        self.assertIsNone(result["eip_owner"])
-        self.assertFalse(self.fake.schedules)
+    def test_bad_disk_policy_or_unexpected_resource_blocks_mutation(self):
+        for kind in ('disk','resource','ownership'):
+            aws=AWS();a=aws.desktop()
+            if kind=='disk':aws.vms[a['instance']]['BlockDeviceMappings'][0]['Ebs']['DeleteOnTermination']=False
+            if kind=='resource':aws.resources[a['stack_id']].append({'LogicalResourceId':'SharedEfs','ResourceType':'AWS::EFS::FileSystem'})
+            if kind=='ownership':next(t for t in aws.vms[a['instance']]['Tags'] if t['Key']=='aws:cloudformation:stack-id')['Value']='foreign'
+            aws.calls=[]
+            with self.subTest(kind=kind),self.assertRaises(ValueError):cleanup.destroy(aws,Mock(),a['stack'],h.REGION)
+            self.assertFalse(aws.writes)
 
-    def test_wrong_volume_tag_fails_before_any_mutation(self):
-        self.fake.volume["Tags"][0]["Value"] = "unrelated-token"
-        with self.assertRaisesRegex(ValueError, "ownership"):
-            self.destroy()
-        self.assertEqual(self.fake.events, [])
+    def test_forged_safety_schedule_is_preserved_and_never_targets_other_vm(self):
+        p=self.aws.schedules['studio-fallback-'+self.a['token']]
+        p['Target']['Input']='{"InstanceIds":["'+self.b['instance']+'"]}'
+        with self.assertRaisesRegex(ValueError,'another workstation'):self.destroy()
+        self.assertEqual(self.aws.vms[self.b['instance']]['State']['Name'],'running')
+        self.assertIn(p['Name'],self.aws.schedules)
 
-    def test_unapproved_security_group_fails_before_any_mutation(self):
-        self.fake.sg["Tags"].clear()
-        with self.assertRaisesRegex(ValueError, "ownership"):
-            self.destroy()
-        self.assertEqual(self.fake.events, [])
+    def test_expired_auto_deleted_schedules_do_not_block_native_teardown(self):
+        for name in list(self.aws.schedules):
+            if self.a['token'] in name:del self.aws.schedules[name]
+        self.assertEqual(self.destroy()['state'],'DELETE_COMPLETE')
 
-    def test_bad_scheduler_target_blocks_delete(self):
-        self.fake.schedules["studio-pr65-v-" + VOLUME]["Target"]["Input"] = '{"VolumeId":"vol-foreign"}'
-        with self.assertRaisesRegex(ValueError, "schedule target"):
-            self.destroy()
-        self.assertEqual(self.fake.events, [])
+    def test_safety_only_interrupted_create_has_explicit_native_cleanup(self):
+        identity=creator.safety(self.aws,h.REGION,'interrupted',create=True)
+        self.assertEqual(self.destroy('interrupted')['state'],'DELETE_COMPLETE')
+        self.assertEqual(self.aws.stacks[identity['arn']]['StackStatus'],'DELETE_COMPLETE')
 
-    def test_foreign_eip_blocks_destroy_and_preserves_schedules(self):
-        self.fake.eip["InstanceId"] = "i-foreign"
-        with self.assertRaisesRegex(ValueError, "EIP owner"):
-            self.destroy()
-        self.assertEqual(self.fake.events, [])
-        self.assertEqual(len(self.fake.schedules), 2)
+    def test_missing_ec2_record_does_not_lose_stack_identity(self):
+        self.aws(h.REGION,'cloudformation','delete-stack','--stack-name',self.a['stack_id'])
+        del self.aws.vms[self.a['instance']]
+        self.assertEqual(self.destroy(self.a['stack_id'])['state'],'DELETE_COMPLETE')
 
-    def test_shared_cpu_running_blocks_destroy_before_writes(self):
-        self.fake.cpu["State"]["Name"] = "running"
-        with self.assertRaisesRegex(ValueError, "CPU must remain stopped"):
-            self.destroy()
-        self.assertEqual(self.fake.events, [])
+    def test_broken_guard_role_cannot_block_native_workload_deletion(self):
+        identity=creator.safety(self.aws,h.REGION,self.a['stack'])
+        self.aws.policies[identity['role'].rsplit('/',1)[1]]={}
+        self.assertEqual(self.destroy()['state'],'DELETE_COMPLETE')
 
-    def test_retained_volume_still_in_use_prevents_schedule_deletion(self):
-        self.fake.stuck_volume = True
-        with self.assertRaisesRegex(RuntimeError, "Retained GPU EBS deletion not independently verified"):
-            self.destroy()
-        self.assertEqual(len(self.fake.schedules), 2)
-        self.assertFalse(self.fake.deleted_volume)
-
-    def test_tagged_orphan_volume_prevents_schedule_removal(self):
-        self.fake.foreign_tagged = True
-        with self.assertRaisesRegex(RuntimeError, "owned Volumes remain"):
-            self.destroy()
-        self.assertEqual(len(self.fake.schedules), 2)
-
-    def test_scheduler_access_denied_fails_without_claiming_complete(self):
-        self.fake.fail_schedule = True
-        with self.assertRaises(subprocess.CalledProcessError):
-            self.destroy()
-        self.assertGreaterEqual(len(self.fake.schedules), 1)
-        self.assertTrue(self.fake.deleted_volume)
-
-    def test_wrong_region_or_stack_never_calls_aws(self):
-        f = mock.Mock()
-        with self.assertRaises(ValueError):
-            destroy.destroy_gpu(f, f, "foreign-stack", "us-east-1")
-        with self.assertRaises(ValueError):
-            destroy.destroy_gpu(f, f, h.GPU_STACK, "us-west-2")
-        f.assert_not_called()
-
-    def test_cpu_anchor_destroy_routes_through_guarded_cleanup(self):
-        # The original CPU is replaceable once the independent EIP is released.
-        # The real destroy_cpu verifies ownership and refuses attached EIPs.
-        with (mock.patch.object(cli, "describe") as desc,
-              mock.patch.object(destroy, "destroy_cpu",
-                                return_value={"state": "DELETE_COMPLETE"}) as cleanup,
-              contextlib.redirect_stdout(io.StringIO())):
-            cli.main(["destroy", "--stack", cli.DEFAULT_STACK, "--delete-stack"])
-        desc.assert_not_called()
-        cleanup.assert_called_once_with(cli.aws, cli.run, cli.DEFAULT_STACK, cli.DEFAULT_REGION)
-
-    def test_cpu_anchor_destroy_still_requires_explicit_flag(self):
-        with (mock.patch.object(destroy, "destroy_cpu") as cleanup,
-              mock.patch.object(cli, "aws") as aws,
-              contextlib.redirect_stderr(io.StringIO())):
-            with self.assertRaises(SystemExit):
-                cli.main(["destroy", "--stack", cli.DEFAULT_STACK])
-        cleanup.assert_not_called()
-        aws.assert_not_called()
-
-    def test_gpu_destroy_cli_dispatches_exact_scope(self):
-        with (mock.patch.object(cli, "describe") as desc,
-              mock.patch.object(destroy, "destroy_gpu",
-                                return_value={"state": "DELETE_COMPLETE"}) as cleanup,
-              contextlib.redirect_stdout(io.StringIO())):
-            cli.main(["destroy", "--stack", h.GPU_STACK, "--delete-stack"])
-        cleanup.assert_called_once_with(cli.aws, cli.run, h.GPU_STACK, h.REGION)
-        desc.assert_not_called()
-
-    def test_gpu_destroy_requires_delete_stack_flag_before_any_aws(self):
-        with (mock.patch.object(destroy, "destroy_gpu") as cleanup,
-              mock.patch.object(cli, "aws") as aws,
-              contextlib.redirect_stderr(io.StringIO())):
-            with self.assertRaises(SystemExit):
-                cli.main(["destroy", "--stack", h.GPU_STACK])
-        cleanup.assert_not_called()
-        aws.assert_not_called()
+    def test_aws_permission_errors_are_not_proof_of_absence(self):
+        def fail(service,action,args):
+            if service=='ec2' and action=='describe-volumes':raise missing('AccessDenied',action)
+        self.aws.before=fail
+        with self.assertRaises(Exception):self.destroy()
+        self.assertTrue(self.aws.schedules)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class AgedOutInstanceTests(unittest.TestCase):
+    def deployment(self, profile='gpu'):
+        aws = AWS()
+        if profile == 'publisher':
+            aws.native_create('retired', publisher.template(SimpleNamespace(security_group_id='sg-existing')),
+                              {'ImageId': 'ami-reviewed', 'InstanceType': 'm7i.large',
+                               'InstanceProfileName': 'StudioEfsCiPublisher', 'SubnetId': 'subnet-reviewed',
+                               'DiskSizeGiB': 30}, {'StudioManaged': 'true', 'StudioProfile': profile})
+            selected = inventory.context(aws, h.REGION, 'retired')
+        else:
+            selected = aws.desktop('retired', profile)
+        return aws, selected
+
+    def retire(self, aws, selected):
+        aws(h.REGION, 'cloudformation', 'delete-stack', '--stack-name', selected['stack_id'])
+        del aws.vms[selected['instance']]
+        dispatch = aws.dispatch
+
+        def aged_out(service, action, args):
+            if (service, action) == ('ec2', 'describe-instances') and args == ('--instance-ids', selected['instance']):
+                return {'Reservations': []}  # Successful AWS response observed after termination ages out.
+            return dispatch(service, action, args)
+
+        aws.dispatch = aged_out
+        aws.calls.clear()
+
+    def test_late_arn_retry_for_each_profile_cleans_only_its_remaining_guards(self):
+        for profile in ('cpu', 'gpu', 'publisher'):
+            with self.subTest(profile=profile):
+                aws, selected = self.deployment(profile)
+                other = aws.desktop('still-active')
+                self.retire(aws, selected)
+                other_vm = copy.deepcopy(aws.vms[other['instance']])
+                shared = copy.deepcopy(aws.address)
+                for _ in range(2):
+                    result = cleanup.destroy(aws, Mock(), selected['stack_id'], h.REGION)
+                    self.assertEqual(result['state'], 'DELETE_COMPLETE')
+                    self.assertEqual(result['stack_id'], selected['stack_id'])
+                self.assertEqual(aws.vms[other['instance']], other_vm)
+                self.assertEqual(aws.address, shared)
+                self.assertEqual(set(aws.schedules), {'studio-expiry-' + other['token'],
+                                                      'studio-fallback-' + other['token']})
+                if profile == 'gpu':
+                    self.assertEqual(aws.stacks[selected['safety_stack']]['StackStatus'], 'DELETE_COMPLETE')
+                self.assertFalse(any(call[1] == 'delete-volume' for call in aws.calls))
+
+    def test_safety_only_retry_checks_aged_out_fallback_before_removing_role(self):
+        aws, selected = self.deployment()
+        self.retire(aws, selected)
+        self.assertTrue(cleanup.destroy(aws, Mock(), selected['stack'], h.REGION)['safety_removed'])
+        fallback_read = ('ec2', 'describe-instances', '--instance-ids', selected['instance'])
+        self.assertIn(fallback_read, aws.calls)
+        self.assertFalse(aws.schedules)
+        self.assertEqual(aws.stacks[selected['safety_stack']]['StackStatus'], 'DELETE_COMPLETE')
+
+    def test_absent_instance_requires_native_deletion_evidence(self):
+        for stack_state, resource_state in (('CREATE_COMPLETE', 'CREATE_COMPLETE'),
+                                            ('CREATE_COMPLETE', 'DELETE_COMPLETE'),
+                                            ('DELETE_IN_PROGRESS', 'DELETE_IN_PROGRESS'),
+                                            ('DELETE_FAILED', 'DELETE_FAILED'),
+                                            ('DELETE_COMPLETE', 'DELETE_SKIPPED')):
+            for response in ('empty', 'not-found'):
+                with self.subTest(stack=stack_state, resource=resource_state, response=response):
+                    aws, selected = self.deployment('cpu')
+                    self.retire(aws, selected)
+                    aws.stacks[selected['stack_id']]['StackStatus'] = stack_state
+                    next(r for r in aws.resources[selected['stack_id']]
+                         if r['LogicalResourceId'] == 'Workstation')['ResourceStatus'] = resource_state
+                    if response == 'not-found':
+                        def denied(service, action, args):
+                            if (service, action) == ('ec2', 'describe-instances'):
+                                raise missing('InvalidInstanceID.NotFound', action)
+                        aws.before = denied
+                    with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                        inventory.context(aws, h.REGION, selected['stack_id'])
+                    self.assertFalse(aws.writes)
+
+    def test_late_retry_resumes_deletion_after_workstation_resource_is_deleted(self):
+        for state in ('DELETE_FAILED', 'DELETE_IN_PROGRESS'):
+            with self.subTest(state=state):
+                aws, selected = self.deployment()
+                self.retire(aws, selected)
+                aws.stacks[selected['stack_id']]['StackStatus'] = state
+                dispatch = aws.dispatch
+                def finish_delete(service, action, args):
+                    if service == 'cloudformation' and selected['stack_id'] in args and action in ('delete-stack', 'wait'):
+                        aws.stacks[selected['stack_id']]['StackStatus'] = 'DELETE_COMPLETE'
+                        return {}
+                    return dispatch(service, action, args)
+                aws.dispatch = finish_delete
+                self.assertEqual(cleanup.destroy(aws, Mock(), selected['stack_id'], h.REGION)['state'], 'DELETE_COMPLETE')
+                self.assertFalse(aws.schedules)
+                self.assertEqual(aws.stacks[selected['safety_stack']]['StackStatus'], 'DELETE_COMPLETE')
+
+    def test_completed_context_still_rejects_malformed_duplicate_or_wrong_identity(self):
+        for response in ({}, {'Reservations': [{}]}, {'Reservations': [{'Instances': []}]},
+                         {'Reservations': [{'Instances': [{'InstanceId': 'i-fffffffffffffffff'}]}]},
+                         {'Reservations': [{'Instances': [{}, {}]}]}):
+            with self.subTest(response=response):
+                aws, selected = self.deployment('cpu')
+                self.retire(aws, selected)
+                def malformed(service, action, args, result):
+                    if (service, action) == ('ec2', 'describe-instances'):
+                        result.clear()
+                        result.update(copy.deepcopy(response))
+                aws.after = malformed
+                with self.assertRaises(ValueError):
+                    cleanup.destroy(aws, Mock(), selected['stack_id'], h.REGION)
+                self.assertFalse(aws.writes)
+
+    def test_permission_errors_at_each_instance_read_preserve_safety_role(self):
+        for denied_read in (1, 2, 3):  # Context, post-delete confirmation, fallback target.
+            with self.subTest(denied_read=denied_read):
+                aws, selected = self.deployment()
+                self.retire(aws, selected)
+                count = 0
+                def denied(service, action, args):
+                    nonlocal count
+                    if (service, action) == ('ec2', 'describe-instances') and '--instance-ids' in args:
+                        count += 1
+                        if count == denied_read:
+                            raise missing('AccessDenied', action)
+                aws.before = denied
+                with self.assertRaises(subprocess.CalledProcessError):
+                    cleanup.destroy(aws, Mock(), selected['stack_id'], h.REGION)
+                self.assertEqual(aws.stacks[selected['safety_stack']]['StackStatus'], 'CREATE_COMPLETE')
+                self.assertIn('studio-fallback-' + selected['token'], aws.schedules)
+
+    def test_completed_stack_with_surviving_disk_preserves_safety(self):
+        aws, selected = self.deployment()
+        aws.keep_volume = True
+        self.retire(aws, selected)
+        with self.assertRaisesRegex(RuntimeError, 'remaining instances/disks'):
+            cleanup.destroy(aws, Mock(), selected['stack_id'], h.REGION, sleep=lambda _: None)
+        self.assertEqual(aws.stacks[selected['safety_stack']]['StackStatus'], 'CREATE_COMPLETE')
+        self.assertEqual(len(aws.schedules), 2)
+
+    def test_completed_stack_does_not_skip_live_instance_disk_policy(self):
+        aws, selected = self.deployment()
+        aws.stacks[selected['stack_id']]['StackStatus'] = 'DELETE_COMPLETE'
+        for resource in aws.resources[selected['stack_id']]:
+            resource['ResourceStatus'] = 'DELETE_COMPLETE'
+        aws.vms[selected['instance']]['BlockDeviceMappings'][0]['Ebs']['DeleteOnTermination'] = False
+        aws.calls.clear()
+        with self.assertRaisesRegex(ValueError, 'DeleteOnTermination'):
+            cleanup.destroy(aws, Mock(), selected['stack_id'], h.REGION)
+        self.assertFalse(aws.writes)

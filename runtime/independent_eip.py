@@ -1,307 +1,204 @@
-"""Independent Studio EIP assignment. Never releases the allocation or edits DNS."""
-import re
+"""Explicit single-owner DCV hostname. No DNS edits, extra EIPs or CPU-return path.
+
+Hostname commands must be serialized by the operator. AWS has no conditional
+EIP reassociation API; repeated ownership checks and no-allow-reassociation
+prevent knowingly seizing an address from an unexpected owner.
+"""
+import subprocess
+import time
 
 from runtime import issue43_hostname_handoff as legacy
+from runtime import issue43_gpu_acm_setup as acm
+from runtime import pr65_one_shot_guard as guard
+from runtime.workstation_inventory import context
+from runtime.dcv_endpoint import resolve
 
-def _target(aws, stack):
-    if not re.fullmatch(r"studio-[a-z0-9-]{1,100}", stack):
-        raise ValueError("Invalid Studio stack")
-    iid = legacy._stack_iid(aws, stack)
-    vm = legacy._items(aws, iid)[iid]
-    if vm.get("State", {}).get("Name") != "running":
-        raise ValueError("Target workstation must be running")
-    if vm.get("IamInstanceProfile", {}).get("Arn") != legacy.BASE_PROFILE:
-        raise ValueError("Unexpected workstation instance profile")
-    if vm.get("VpcId") != "vpc-01bbe5d01838f70b2":
-        raise ValueError("Unexpected workstation VPC")
-    if vm.get("InstanceType") not in ("m7i.large", "m7i.xlarge", "g4dn.xlarge"):
-        raise ValueError("Unsupported workstation type")
-    if vm.get("InstanceType") == "g4dn.xlarge":
-        if stack != legacy.GPU_STACK or vm.get("ImageId") != legacy.GPU_AMI:
-            raise ValueError("GPU target outside guarded acceptance scope")
-        import datetime as dt
-        from runtime import pr65_gpu_create
-        pr65_gpu_create.preflight(aws, legacy.REGION, legacy.GPU_STACK, legacy.GPU_TOKEN)
-        legacy._gpu_guard(aws, vm, dt.datetime.now(dt.timezone.utc))
-    elif stack == legacy.GPU_STACK:
-        raise ValueError("GPU stack cannot contain a CPU target")
-    if len(vm.get("NetworkInterfaces", [])) != 1:
-        raise ValueError("Expected one primary ENI")
-    eni = vm["NetworkInterfaces"][0]
-    if eni.get("Attachment", {}).get("DeviceIndex") != 0:
-        raise ValueError("Unexpected ENI")
-    return iid, eni["NetworkInterfaceId"]
+
+def _target(aws, stack, *, running=True):
+    selected = context(aws, legacy.REGION, stack)
+    vm = selected["vm"]
+    if selected["profile"] not in ("cpu", "gpu") or vm.get("VpcId") != "vpc-01bbe5d01838f70b2":
+        raise ValueError("Hostname requires an owned Studio desktop in the validated VPC")
+    if running and (selected["state"] != "running" or selected["stack_status"] != "CREATE_COMPLETE"):
+        raise ValueError("Destination must be a running, completely created workstation")
+    interfaces = vm.get("NetworkInterfaces", [])
+    if len(interfaces) != 1 or interfaces[0].get("Attachment", {}).get("DeviceIndex") != 0:
+        raise ValueError("DCV handoff requires one primary ENI for native public-IP recovery")
+    if any(not ip.get("Primary") for ip in interfaces[0].get("PrivateIpAddresses", [])):
+        raise ValueError("Secondary private addresses require separate networking review")
+    selected["eni"] = interfaces[0]["NetworkInterfaceId"]
+    return selected
+
 
 def _address(aws):
-    a = legacy._eip(aws)
+    address = legacy._eip(aws)
     legacy._dns(aws)
-    return a
+    return address
 
-def _owner(aws, address, *, require_stopped=True):
+
+def _fingerprint(address):
+    return tuple(address.get(k) for k in ("InstanceId", "AssociationId", "NetworkInterfaceId"))
+
+
+def _owner(aws, address):
     iid = address.get("InstanceId")
-    if not iid:
+    if iid is None:
+        if address.get("AssociationId") or address.get("NetworkInterfaceId"):
+            raise ValueError("Unknown network interface owns the shared EIP")
         return None
     if legacy._tags(address).get("StudioDcvInstanceId") != iid:
-        raise ValueError("EIP owner tag mismatch")
+        raise ValueError("EIP association and owner metadata disagree")
     vm = legacy._items(aws, iid)[iid]
-    if vm.get("VpcId") != "vpc-01bbe5d01838f70b2" or vm.get("IamInstanceProfile", {}).get("Arn") != legacy.BASE_PROFILE:
-        raise ValueError("EIP held by unrecognized instance")
-    state = vm.get("State", {}).get("Name")
-    if require_stopped and state != "stopped":
-        raise ValueError("Stop the current EIP owner before releasing its address")
-    if not require_stopped and state not in ("stopped", "running"):
-        raise ValueError("EIP owner is not in an approved state")
-    return iid
+    selected = _target(aws, legacy._tags(vm)["aws:cloudformation:stack-id"], running=False)
+    if selected["instance"] != iid or selected["eni"] != address.get("NetworkInterfaceId"):
+        raise ValueError("EIP owner no longer matches its CloudFormation identity")
+    return selected
 
 
-def _cpu_owner(aws, address):
-    """Verify a stopped CPU is the current EIP owner, independent of old anchor."""
-    iid = _owner(aws, address)
-    if not iid:
-        if (address.get("AssociationId") or address.get("NetworkInterfaceId") or
-                legacy._tags(address).get("StudioDcvInstanceId") or legacy._tags(address).get("StudioDcvReturnStack")):
-            raise ValueError("Unassociated EIP has stale ownership state")
-        return None
-    eni = address.get("NetworkInterfaceId")
-    vm = legacy._items(aws, iid)[iid]
-    interfaces = vm.get("NetworkInterfaces", [])
-    if (len(interfaces) != 1 or interfaces[0].get("NetworkInterfaceId") != eni
-            or not address.get("AssociationId")):
-        raise ValueError("CPU EIP interface/association mismatch")
-    stack = legacy._tags(vm).get("aws:cloudformation:stack-name", "")
-    if (not re.fullmatch(r"studio-[a-z0-9-]{3,100}", stack)
-            or stack.startswith("studio-gpu-cli-")
-            or vm.get("InstanceType") not in ("m7i.large", "m7i.xlarge")
-            or legacy._stack_iid(aws, stack) != iid):
-        raise ValueError("EIP owner is not a verified Studio CPU stack")
-    return {"instance": iid, "stack": stack, "eni": eni,
-            "association": address["AssociationId"]}
-
-
-def gpu_preview(aws, *, now=None):
-    """Read-only GPU handoff plan using a verified replacement CPU, not CPU_ID."""
-    import datetime as dt
-    from runtime import pr65_gpu_create
-    now = now or dt.datetime.now(dt.timezone.utc)
-    address = _address(aws)
-    cpu = _cpu_owner(aws, address)
-    gpu_id = legacy._stack_iid(aws, legacy.GPU_STACK)
-    gpu = legacy._items(aws, gpu_id)[gpu_id]
-    if (gpu.get("State", {}).get("Name") != "running"
-            or gpu.get("ImageId") != legacy.GPU_AMI
-            or gpu.get("InstanceType") != "g4dn.xlarge"
-            or gpu.get("IamInstanceProfile", {}).get("Arn") != legacy.BASE_PROFILE
-            or gpu.get("VpcId") != "vpc-01bbe5d01838f70b2"
-            or len(gpu.get("NetworkInterfaces", [])) != 1):
-        raise ValueError("Unexpected GPU instance profile, image or network")
-    interface = gpu["NetworkInterfaces"][0]
-    if (interface.get("Attachment", {}).get("DeviceIndex") != 0
-            or interface.get("Attachment", {}).get("Status") != "attached"
-            or interface.get("Association", {}).get("AllocationId")):
-        raise ValueError("GPU ENI identity/attachment mismatch")
-    pr65_gpu_create.preflight(aws, legacy.REGION, legacy.GPU_STACK, legacy.GPU_TOKEN)
-    guard = legacy._gpu_guard(aws, gpu, now)
-    return {"from": cpu["instance"] if cpu else None, "to": gpu_id, "cpu": cpu,
-            "gpu_eni": interface["NetworkInterfaceId"],
-            "old_association": cpu["association"] if cpu else None, "guard": guard}
-
-
-def handoff_gpu(aws, check_public_tls, *, check_guest=None):
-    """Move EIP only after guest ACM and both expiration schedules pass."""
-    from runtime import issue43_hostname_handoff as handoff
-    check_guest = check_guest or handoff.check_gpu_tls
-    pre = gpu_preview(aws)
-    check_guest(aws, pre["to"])
-    fresh = gpu_preview(aws)
-    if (fresh["to"], fresh["old_association"]) != (pre["to"], pre["old_association"]):
-        raise RuntimeError("GPU handoff scope changed")
-    try:
-        if pre["old_association"]:
-            aws(legacy.REGION, "ec2", "disassociate-address", "--association-id", pre["old_association"])
-        current = _address(aws)
-        if current.get("InstanceId") or current.get("AssociationId"):
-            raise RuntimeError("EIP failed to disassociate")
-        result = aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
-                     "--network-interface-id", pre["gpu_eni"], "--no-allow-reassociation")
-        if not result.get("AssociationId"):
-            raise RuntimeError("GPU EIP association missing")
-        aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,
-            "--tags", "Key=StudioDcvInstanceId,Value=" + pre["to"],
-            *(["Key=StudioDcvReturnStack,Value=" + pre["cpu"]["stack"]] if pre["cpu"] else []))
-        actual = _address(aws)
-        if (actual.get("InstanceId") != pre["to"]
-                or actual.get("NetworkInterfaceId") != pre["gpu_eni"]
-                or actual.get("AssociationId") != result["AssociationId"]
-                or legacy._tags(actual).get("StudioDcvInstanceId") != pre["to"]
-                or legacy._tags(actual).get("StudioDcvReturnStack") != (pre["cpu"]["stack"] if pre["cpu"] else None)):
-            raise RuntimeError("GPU EIP owner readback mismatch")
-        check_public_tls(legacy.HOST, legacy.EIP_IP)
-        return {"owner": pre["to"], "previous_cpu": pre["from"],
-                "guard": fresh["guard"], "hostname": legacy.HOST}
-    except BaseException as error:
-        # Never steal an EIP from a third-party owner. Restore only a
-        # demonstrably unassociated allocation or our exact GPU association.
-        current = _address(aws)
-        if current.get("InstanceId") not in (None, pre["to"]):
-            raise RuntimeError("GPU handoff failed; foreign EIP owner, manual recovery") from error
-        if current.get("InstanceId") == pre["to"]:
-            aws(legacy.REGION, "ec2", "disassociate-address", "--association-id", current["AssociationId"])
-        current = _address(aws)
-        if current.get("InstanceId") or current.get("AssociationId"):
-            raise RuntimeError("GPU handoff failed; EIP rollback unverified") from error
-        if not pre["cpu"]:
-            aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID, "--tags", "Key=StudioDcvInstanceId")
-            _cpu_owner(aws, _address(aws))
-            raise RuntimeError("GPU handoff failed; EIP restored to unassociated") from error
-        restored = aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
-                       "--network-interface-id", pre["cpu"]["eni"], "--no-allow-reassociation")
-        aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,
-            "--tags", "Key=StudioDcvInstanceId,Value=" + pre["from"])
-        aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID,
-            "--tags", "Key=StudioDcvReturnStack")
-        actual = _address(aws)
-        if (not restored.get("AssociationId") or actual.get("InstanceId") != pre["from"]
-                or legacy._tags(actual).get("StudioDcvInstanceId") != pre["from"]):
-            raise RuntimeError("GPU handoff failed; replacement CPU rollback unverified") from error
-        raise RuntimeError("GPU handoff failed; EIP restored to replacement CPU") from error
-
-
-
-def restore_cpu(aws, gpu_id):
-    """Return EIP from stopped GPU to the recorded, verified source CPU."""
-    if not re.fullmatch(r"i-[0-9a-f]{8,17}", gpu_id or ""):
-        raise ValueError("Invalid GPU instance ID")
-    address = _address(aws)
-    cpu_stack = legacy._tags(address).get("StudioDcvReturnStack")
-    if not cpu_stack and address.get("InstanceId") in (None, gpu_id) and (not address.get("InstanceId") or address.get("AssociationId")):
-        return release(aws)
-    if (not cpu_stack or not re.fullmatch(r"studio-[a-z0-9-]{3,100}", cpu_stack)
-            or cpu_stack.startswith("studio-gpu-cli-")):
-        raise ValueError("GPU EIP missing verified CPU return stack")
-    cpu_id = legacy._stack_iid(aws, cpu_stack)
-    cpu = legacy._items(aws, cpu_id)[cpu_id]
-    if (cpu.get("State", {}).get("Name") != "stopped"
-            or cpu.get("InstanceType") not in ("m7i.large", "m7i.xlarge")
-            or cpu.get("IamInstanceProfile", {}).get("Arn") != legacy.BASE_PROFILE
-            or cpu.get("VpcId") != "vpc-01bbe5d01838f70b2"
-            or len(cpu.get("NetworkInterfaces", [])) != 1
-            or cpu["NetworkInterfaces"][0].get("Attachment", {}).get("DeviceIndex") != 0):
-        raise ValueError("Replacement CPU is not a verified stopped workstation")
-    eni = cpu["NetworkInterfaces"][0]["NetworkInterfaceId"]
-    owner = address.get("InstanceId")
-    tagged = legacy._tags(address).get("StudioDcvInstanceId")
-    if owner == cpu_id and tagged == cpu_id:
-        if address.get("NetworkInterfaceId") != eni or not address.get("AssociationId"):
-            raise ValueError("CPU EIP association mismatch")
-        return {"owner": cpu_id, "state": "already-restored"}
-    if owner not in (gpu_id, None) or tagged != gpu_id:
-        raise ValueError("EIP is not owned by the expected GPU")
-    if owner:
-        gpu = legacy._items(aws, gpu_id)[gpu_id]
-        if (gpu.get("State", {}).get("Name") not in ("stopped", "terminated")
-                or legacy._tags(gpu).get("StudioStack") != legacy.GPU_STACK
-                or legacy._tags(gpu).get("StudioCleanupToken") != legacy.GPU_TOKEN):
-            raise ValueError("GPU must be stopped and match its cleanup scope")
-        if not address.get("AssociationId"):
-            raise ValueError("GPU association ID missing")
-        aws(legacy.REGION, "ec2", "disassociate-address",
-            "--association-id", address["AssociationId"])
-    current = _address(aws)
-    if current.get("AssociationId") or current.get("InstanceId"):
+def _move(aws, before, destination):
+    """Recheck exact association; never use allow-reassociation to steal ownership."""
+    if _fingerprint(_address(aws)) != _fingerprint(before):
+        raise RuntimeError("Hostname owner changed; operation aborted")
+    if before.get("AssociationId"):
+        aws(legacy.REGION, "ec2", "disassociate-address", "--association-id", before["AssociationId"])
+    if any(_fingerprint(_address(aws))):
         raise RuntimeError("EIP disassociation not verified")
-    result = aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
-                 "--network-interface-id", eni, "--no-allow-reassociation")
-    aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,
-        "--tags", "Key=StudioDcvInstanceId,Value=" + cpu_id)
-    current = _address(aws)
-    if (not result.get("AssociationId") or current.get("InstanceId") != cpu_id
-            or current.get("NetworkInterfaceId") != eni
-            or legacy._tags(current).get("StudioDcvInstanceId") != cpu_id):
-        raise RuntimeError("Replacement CPU EIP restoration unverified")
-    aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID,
-        "--tags", "Key=StudioDcvReturnStack")
-    if legacy._tags(_address(aws)).get("StudioDcvReturnStack"):
-        raise RuntimeError("Stale GPU CPU-return tag after restoration")
-    return {"owner": cpu_id, "state": "restored"}
+    association = None
+    if destination:
+        reply = aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
+                    "--network-interface-id", destination["eni"], "--no-allow-reassociation")
+        association = reply.get("AssociationId")
+        if not association:
+            raise RuntimeError("EIP association response missing")
+        aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,
+            "--tags", "Key=StudioDcvInstanceId,Value=" + destination["instance"])
+    else:
+        aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID, "--tags", "Key=StudioDcvInstanceId")
+    aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID, "--tags", "Key=StudioDcvReturnStack")
+    actual = _address(aws)
+    expected = (destination["instance"], association, destination["eni"]) if destination else (None, None, None)
+    if _fingerprint(actual) != expected or legacy._tags(actual).get("StudioDcvInstanceId") != expected[0]:
+        raise RuntimeError("EIP owner/association readback mismatch")
+    return actual
 
 
-def release(aws):
-    a = _address(aws)
-    owner = _owner(aws, a)
-    if not owner:
-        if a.get("AssociationId") or legacy._tags(a).get("StudioDcvInstanceId"):
-            raise ValueError("Unassociated EIP has stale ownership state")
-        return {"allocation": legacy.EIP_ID, "state": "unassociated"}
-    if not a.get("AssociationId") or not a.get("NetworkInterfaceId"):
-        raise ValueError("Associated EIP missing association identity")
-    aws(legacy.REGION, "ec2", "disassociate-address", "--association-id", a["AssociationId"])
-    current = _address(aws)
-    if current.get("AssociationId") or current.get("InstanceId"):
-        raise RuntimeError("EIP disassociation readback mismatch; ownership tag retained")
-    aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID, "--tags", "Key=StudioDcvInstanceId")
-    current = _address(aws)
-    if current.get("AssociationId") or legacy._tags(current).get("StudioDcvInstanceId"):
-        raise RuntimeError("EIP release readback mismatch")
-    return {"allocation": legacy.EIP_ID, "state": "unassociated", "previous_owner": owner}
+def _reachable(aws, selected, check_tls, *, restart=False, sleep=time.sleep):
+    """Wait for native IP recovery; bounded stop/start only for a verified owned VM."""
+    for cycle in range(2 if restart else 1):
+        for attempt in range(24):
+            fresh = context(aws, legacy.REGION, selected["stack_id"])
+            if fresh["instance"] != selected["instance"]:
+                raise RuntimeError("Workstation changed during hostname recovery")
+            if fresh["state"] != "running":
+                return None  # Only running workstations require a reachable endpoint.
+            try:
+                return resolve(fresh, legacy.REGION, aws, check_tls)
+            except ValueError as exc:
+                if not str(exc).startswith(("No running public", "DCV HTTPS", "Trusted DCV TLS")):
+                    raise
+                failure = exc
+                if attempt < 23:
+                    sleep(5)
+        if not restart or cycle:
+            raise RuntimeError("DCV endpoint recovery failed: " + str(failure)) from failure
+        fresh = _target(aws, selected["stack_id"])
+        if fresh["profile"] == "gpu":
+            guard.status(aws, fresh, headroom=80)  # Never extend expiration implicitly.
+        iid = fresh["instance"]
+        aws(legacy.REGION, "ec2", "stop-instances", "--instance-ids", iid)
+        aws(legacy.REGION, "ec2", "wait", "instance-stopped", "--instance-ids", iid)
+        aws(legacy.REGION, "ec2", "start-instances", "--instance-ids", iid)
+        aws(legacy.REGION, "ec2", "wait", "instance-status-ok", "--instance-ids", iid)
+
+
+def _change(aws, destination, check_tls, *, destroying=False):
+    before = _address(aws)
+    stale = legacy._tags(before).get("StudioDcvInstanceId") if not before.get("InstanceId") else None
+    if stale:
+        if any(_fingerprint(before)):
+            raise ValueError("Unknown association; stale-owner recovery refused")
+        try:
+            vm = legacy._items(aws, stale, allow_missing=True).get(stale)
+        except subprocess.CalledProcessError as exc:
+            if "InvalidInstanceID.NotFound" not in (exc.stderr or ""):
+                raise
+        else:
+            if vm is not None:
+                selected = context(aws, legacy.REGION, legacy._tags(vm)["aws:cloudformation:stack-id"])
+                if selected["instance"] != stale:
+                    raise ValueError("Stale hostname metadata refers to a replaced instance")
+                if selected["state"] == "running" and not destroying:
+                    _reachable(aws, selected, check_tls, restart=True)
+        acm.revoke_gpu(aws, stale)
+        _move(aws, before, None)
+        before = _address(aws)
+    previous = _owner(aws, before)
+    if destination:
+        if destination["profile"] == "gpu":
+            guard.status(aws, destination, headroom=5)
+        if before.get("InstanceId") == destination["instance"]:
+            acm.prepare_gpu(aws, destination["instance"])
+            endpoint = _reachable(aws, destination, check_tls)
+            if endpoint is None:
+                raise RuntimeError("Hostname owner is not running")
+            return {"owner": destination["stack"], "endpoint": endpoint}
+        # Verify its independent endpoint before changing certificate permissions or EIP.
+        _reachable(aws, destination, check_tls)
+        acm.prepare_gpu(aws, destination["instance"])
+    try:
+        moved = _move(aws, before, destination)
+        endpoint = _reachable(aws, destination, check_tls) if destination else None
+        if destination and endpoint is None:
+            raise RuntimeError("Destination stopped during transfer; not a successful DCV assignment")
+        old_endpoint = (_reachable(aws, previous, check_tls, restart=True)
+                        if previous and not destroying else None)
+        if _fingerprint(_address(aws)) != _fingerprint(moved):
+            raise RuntimeError("Hostname owner changed during endpoint verification")
+    except BaseException as exc:
+        current = _address(aws)
+        if _fingerprint(current) != _fingerprint(before):
+            if current.get("InstanceId") not in (None, destination["instance"] if destination else None):
+                raise RuntimeError("Hostname transfer failed; foreign owner, no rollback takeover") from exc
+            _move(aws, current, previous)
+        if previous and not destroying:
+            _reachable(aws, previous, check_tls, restart=True)
+        if destination:
+            _reachable(aws, destination, check_tls, restart=True)
+            acm.revoke_gpu(aws, destination["instance"])
+        raise RuntimeError("Hostname operation failed; original association restored and endpoints checked") from exc
+    if previous and (not destination or previous["instance"] != destination["instance"]):
+        acm.revoke_gpu(aws, previous["instance"])
+    return {"owner": destination["stack"] if destination else None,
+            "hostname": legacy.HOST, "endpoint": endpoint, "previous_endpoint": old_endpoint}
+
 
 def assign(aws, stack, check_tls):
-    iid, eni = _target(aws, stack)
-    a = _address(aws)
-    if a.get("AssociationId") or a.get("InstanceId") or legacy._tags(a).get("StudioDcvInstanceId"):
-        raise ValueError("EIP is not unassociated; release its verified owner first")
-    _guest_tls(aws, iid)
-    # Only after guest TLS/DCV readiness is proven do we move the public address.
-    aws(legacy.REGION, "ec2", "associate-address", "--allocation-id", legacy.EIP_ID,
-        "--network-interface-id", eni, "--no-allow-reassociation")
-    try:
-        aws(legacy.REGION, "ec2", "create-tags", "--resources", legacy.EIP_ID,
-            "--tags", "Key=StudioDcvInstanceId,Value=" + iid)
-        current = _address(aws)
-        if current.get("InstanceId") != iid or current.get("NetworkInterfaceId") != eni:
-            raise RuntimeError("EIP assignment readback mismatch")
-        check_tls(legacy.HOST, legacy.EIP_IP)
-    except BaseException:
-        current = _address(aws)
-        if current.get("InstanceId") == iid and current.get("AssociationId"):
-            aws(legacy.REGION, "ec2", "disassociate-address", "--association-id", current["AssociationId"])
-            aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID, "--tags", "Key=StudioDcvInstanceId")
-        raise
-    return {"allocation": legacy.EIP_ID, "instance": iid, "hostname": legacy.HOST}
+    return _change(aws, _target(aws, stack), check_tls)
 
 
-def _guest_tls(aws, iid, *, sleep=None):
-    """Require DCV, trusted ACM certificate and matching private key locally."""
-    import json
-    import time
-    sleep = sleep or time.sleep
-    commands = [
-        "set -eu",
-        "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
-        "systemctl is-active gdm3 dcvserver >/dev/null",
-        "dcv describe-session console >/dev/null",
-        "openssl x509 -in /etc/dcv/dcv.pem -noout -checkend 3600 >/dev/null",
-        "openssl x509 -in /etc/dcv/dcv.pem -noout -checkhost " + legacy.HOST + " | grep -q 'does match'",
-        "test \"$(openssl x509 -in /etc/dcv/dcv.pem -pubkey -noout | sha256sum | cut -d' ' -f1)\" = \"$(openssl pkey -in /etc/dcv/dcv.key -pubout | sha256sum | cut -d' ' -f1)\"",
-        "timeout 12 openssl s_client -connect 127.0.0.1:8443 -servername " + legacy.HOST + " -verify_hostname " + legacy.HOST + " -verify_return_error -brief </dev/null >/dev/null 2>&1",
-        "echo STUDIO_EIP_TLS_READY",
-    ]
-    result = aws(legacy.REGION, "ssm", "send-command", "--instance-ids", iid,
-                 "--document-name", "AWS-RunShellScript", "--parameters", json.dumps({"commands": commands}),
-                 "--timeout-seconds", "90")
-    cid = result["Command"]["CommandId"]
-    for _ in range(20):
-        sleep(3)
-        try:
-            reply = aws(legacy.REGION, "ssm", "get-command-invocation", "--command-id", cid,
-                        "--instance-id", iid)
-        except Exception as exc:
-            if "InvocationDoesNotExist" in str(exc):
-                continue
-            raise
-        if reply.get("Status") == "Success":
-            if reply.get("ResponseCode") != 0 or "STUDIO_EIP_TLS_READY" not in reply.get("StandardOutputContent", "").splitlines():
-                raise RuntimeError("Guest DCV certificate readiness missing")
-            return
-        if reply.get("Status") in ("Failed", "TimedOut", "Cancelled"):
-            raise RuntimeError("Guest DCV certificate readiness failed")
-    raise RuntimeError("Guest DCV certificate readiness timed out")
+def release(aws, check_tls=None):
+    return _change(aws, None, check_tls)
+
+
+def release_if_owned(aws, selected, check_tls, *, destroying=False):
+    address = legacy._eip(aws)
+    iid = selected["instance"]
+    if address.get("InstanceId") == iid and iid:
+        return _change(aws, None, check_tls, destroying=destroying)
+    if address.get("InstanceId") is None and legacy._tags(address).get("StudioDcvInstanceId") == iid and iid:
+        # Native termination detaches the EIP. Clear only this verified deployment's stale metadata.
+        if address.get("AssociationId") or address.get("NetworkInterfaceId"):
+            raise ValueError("Unassociated EIP has conflicting network identity")
+        aws(legacy.REGION, "ec2", "delete-tags", "--resources", legacy.EIP_ID,
+            "--tags", "Key=StudioDcvInstanceId", "Key=StudioDcvReturnStack")
+    if iid:
+        acm.revoke_gpu(aws, iid)
+    return {"owner": address.get("InstanceId"), "allocation_preserved": True}
+
+
+def status(aws):
+    address = _address(aws)
+    selected = _owner(aws, address)
+    return {"hostname": legacy.HOST, "public_ip": legacy.EIP_IP,
+            "owner": selected["stack"] if selected else None, "instance": address.get("InstanceId"),
+            "stale_owner_tag": legacy._tags(address).get("StudioDcvInstanceId") if not selected else None}
