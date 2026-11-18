@@ -34,7 +34,7 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "describe", return_value=STATE)
     def test_start_refuses_running_instance(self, describe, run):
         with self.assertRaises(SystemExit):
-            self.invoke(["start"])
+            self.invoke(["start", "--stack", STACK])
         run.assert_not_called()
 
     @mock.patch.object(cli, "run")
@@ -51,7 +51,7 @@ class StudioCliTests(unittest.TestCase):
     def test_connect_prints_url_without_aws_mutation(self, describe, run):
         with mock.patch.object(cli, "trusted_url",
                                return_value="https://dcv.kwesidavis.com:8443") as tls:
-            self.invoke(["connect"])
+            self.invoke(["connect", "--stack", STACK])
         tls.assert_called_once_with(STACK, INSTANCE)
         run.assert_not_called()
 

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,15 +100,34 @@ def aws(region, *args):
     # Empty stdout is success only because run() already raises on nonzero exit.
     return json.loads(output) if output.strip() else {}
 
+def workstation_resource(stack, region):
+    detail = aws(region, "cloudformation", "describe-stack-resource",
+                 "--stack-name", stack, "--logical-resource-id", "Workstation")["StackResourceDetail"]
+    if (stack not in (detail.get("StackName"), detail.get("StackId")) or
+            detail.get("LogicalResourceId") != "Workstation" or
+            detail.get("ResourceType") != "AWS::EC2::Instance" or
+            not detail.get("StackId") or
+            not re.fullmatch(r"i-[0-9a-f]{8,17}", detail.get("PhysicalResourceId", ""))):
+        raise ValueError("CloudFormation workstation identity mismatch")
+    return detail
+
+
 def instance_id(stack, region):
-    result = aws(region, "cloudformation", "describe-stack-resource",
-                 "--stack-name", stack, "--logical-resource-id", "Workstation")
-    return result["StackResourceDetail"]["PhysicalResourceId"]
+    return workstation_resource(stack, region)["PhysicalResourceId"]
+
 
 def describe(stack, region):
-    iid = instance_id(stack, region)
-    vm = aws(region, "ec2", "describe-instances", "--instance-ids", iid)["Reservations"][0]["Instances"][0]
-    return {"stack": stack, "instance": iid, "state": vm["State"]["Name"],
+    resource = workstation_resource(stack, region)
+    iid = resource["PhysicalResourceId"]
+    reservations = aws(region, "ec2", "describe-instances", "--instance-ids", iid)["Reservations"]
+    instances = [vm for reservation in reservations for vm in reservation["Instances"]]
+    if len(instances) != 1 or instances[0].get("InstanceId") != iid:
+        raise ValueError("Expected exactly one CloudFormation-owned workstation")
+    vm = instances[0]
+    from runtime.issue43_hostname_handoff import _tags
+    if _tags(vm).get("aws:cloudformation:stack-id") != resource["StackId"]:
+        raise ValueError("EC2 does not belong to the selected CloudFormation stack ID")
+    return {"stack": stack, "stack_id": resource["StackId"], "instance": iid, "state": vm["State"]["Name"],
             "public_ip": vm.get("PublicIpAddress"),
             "dcv_url": f"https://{vm['PublicIpAddress']}:8443" if vm.get("PublicIpAddress") else None}
 
@@ -454,6 +474,10 @@ def wait_cpu_https(stack, instance, *, attempts=30, sleep=time.sleep):
 
 
 def command(args):
+    if args.action == "list":
+        from runtime.workstation_inventory import list_workstations
+        print(json.dumps(list_workstations(aws, args.region), indent=2))
+        return
     if args.action == "extend-expiration":
         from runtime import issue68_expiration_extension as extension
         if args.stack != GPU_ACCEPTANCE_STACK or args.region != DEFAULT_REGION:
@@ -582,6 +606,8 @@ def command(args):
             deploy = ["aws", "cloudformation", "deploy", "--stack-name", args.stack,
                       "--template-file", str(template), "--region", args.region,
                       "--parameter-overrides", *parameters, "--no-fail-on-empty-changeset"]
+            if not gpu:
+                deploy.extend(["--tags", "StudioManaged=true", "StudioProfile=cpu"])
             if gpu and args.cleanup_token:
                 deploy.extend(["--tags", "StudioCleanupToken=" + args.cleanup_token, "StudioStack=" + args.stack])
             print("Stack:", args.stack, "Release:", args.version, "DCV ingress:", args.client_cidr, flush=True)
@@ -710,6 +736,10 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="studio workstation",
                                 description="Validated CPU RES workstation lifecycle wrapper")
     sub = p.add_subparsers(dest="action", required=True)
+    listing = sub.add_parser("list", help="List deployed desktop names and current DCV endpoints")
+    listing.add_argument("--region", default=DEFAULT_REGION)
+    named = {"status", "start", "stop", "connect", "destroy", "check-ready",
+             "hostname-assign", "extend-expiration"}
     for action in ("create", "status", "start", "stop", "connect", "destroy", "check-ready",
                    "hostname-assign", "hostname-release",
                    "hostname-plan", "hostname-iam", "hostname-handoff",
@@ -717,8 +747,11 @@ def main(argv=None):
                    "hostname-acm-prepare", "hostname-acm-revoke",
                    "extend-expiration"):
         s = sub.add_parser(action)
-        s.add_argument("--stack", default=DEFAULT_STACK if action != "create" else None,
-                       required=action == "create")
+        selector = s.add_mutually_exclusive_group()
+        selector.add_argument("--stack", help="CloudFormation stack name (shown by list)")
+        selector.add_argument("--name", dest="stack", help="Alias for --stack")
+        if action in named:
+            s.add_argument("name", nargs="?", help="Workstation stack name")
         s.add_argument("--region", default=DEFAULT_REGION)
         if action in ("hostname-iam", "hostname-return-plan", "hostname-return", "hostname-acm-revoke"):
             s.add_argument("--gpu-instance-id", required=True,
@@ -780,7 +813,17 @@ def main(argv=None):
             s.add_argument("--name", default="usd")
             s.add_argument("--version", default="26.05")
     a = p.parse_args(argv)
+    if a.action in named:
+        if a.name and a.stack:
+            p.error("Use either NAME or --stack/--name, not both")
+        a.stack = a.name or a.stack
+        if not a.stack:
+            p.error("Specify a workstation name; use 'studio workstation list'")
     if a.action == "create":
+        if a.stack is None:
+            if a.profile == "gpu":
+                p.error("GPU naming still requires --stack and the existing scoped guard")
+            a.stack = "studio-cpu-" + uuid.uuid4().hex[:12]
         if a.image_id is None:
             a.image_id = GPU_AMI if a.profile == "gpu" else DEFAULT_AMI
         if a.instance_type is None:
