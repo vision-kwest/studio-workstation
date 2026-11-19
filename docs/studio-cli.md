@@ -2,12 +2,11 @@
 
 ## Evidence and branch status
 
-Issue #98 replaces the fixed PR #65 acceptance name and CPU-return hostname model.
-The implementation is under review in draft PR #116 against `main`, from
-`feature/issue98-unified-lifecycle`. PRs #113–#115 have merged into their respective
-base branches; #116 includes their changes. Browser acceptance status, exact test
-evidence and known limitations belong in the implementation
-PR and Issue #98. Historical acceptance records describe older commands.
+Merged PR #116 implements Issue #98's named lifecycle, replacing the fixed PR #65
+acceptance name and CPU-return hostname model. Its browser acceptance and measured
+test evidence are recorded in PR #116 and Issue #98. Issue #125 tracks automatic
+assignment of a free hostname; later changes require their own acceptance evidence.
+Historical acceptance records describe older commands.
 
 ## Setup and profiles
 
@@ -51,8 +50,12 @@ Create is billable unless `--dry-run` is present. The default DCV TCP/8443 CIDR 
 There is no public-DCV acknowledgment flag and no SSH ingress. A restricted CIDR
 must include the network from which endpoint checks/browser connections run.
 
-Create/start do not acquire the shared hostname or certificate permissions. Every
-running desktop must have a current, reachable HTTPS login page. A non-owner uses
+CPU/GPU create/start claims the shared hostname automatically when unassigned,
+then prepares trusted TLS. An existing owner keeps it, including a stopped owner;
+publishers and dry runs never claim it. Plain `connect NAME` selects the endpoint
+automatically. `--hostname dcv.kwesidavis.com` requires verified ownership and trusted
+TLS; it does not assign the hostname and is unnecessary for ordinary connections.
+Every running desktop must have a current, reachable HTTPS login page. A non-owner uses
 `https://PUBLIC_IPV4:8443`, with an expected certificate/identity warning. The owner
 uses `https://dcv.kwesidavis.com:8443` only after strict DNS/TLS/ownership validation.
 An HTTP HTML response proves reachability, not authenticated desktop login. Browsers
@@ -172,16 +175,22 @@ remaining before billing. Stop never needs healthy optional hostname infrastruct
 ```bash
 python3 studio workstation hostname status
 python3 studio workstation hostname assign art
-python3 studio workstation hostname assign edit
+python3 studio workstation connect art
 python3 studio workstation hostname release
 ```
+
+Use `hostname assign NAME` to intentionally transfer an occupied hostname or retry
+after an automatic-setup warning. Create/start explains whether it claimed the
+hostname or preserved its current owner. A failed automatic attempt prints a
+warning and retry command, then rechecks the current endpoint: a working public-IP
+desktop remains usable; failed endpoint recovery is still an error.
 
 These assignment/release commands write AWS resources immediately. Serialize them;
 there is no distributed lock and AWS EIP association has no compare-and-swap API.
 They preserve the existing allocation and DNS record. No additional permanent EIP,
 second ENI or proxy is created. The hostname owner does not need two public addresses.
 
-Assignment verifies the managed target, primary-only ENI topology, DCV and certificate,
+Explicit assignment verifies the managed target, primary-only ENI topology, DCV and certificate,
 rechecks ownership, moves the EIP, then verifies both the destination and former owner.
 Native public IPv4 reacquisition is attempted first. Bounded previous-owner stop/start
 is a fallback, with temporary interruption; a GPU must still have restart headroom.
@@ -195,7 +204,8 @@ only after successful transfer is previous-owner export access revoked. Cached
 certificates may remain on a former owner, but it has no ongoing export permission.
 Stale grants from terminated owners are reconciled against actual EC2 identity.
 Rollback never steals the EIP from an unexpected new owner. Stop/destroy releases
-the selected owner's association; it does not choose a CPU to receive it.
+the selected owner's association; it does not choose a CPU to receive it. Start
+claims the hostname again if it is free, or keeps another workstation's ownership.
 
 ## Publisher
 
@@ -233,6 +243,6 @@ Offline tests exercise isolation, creation/arming failures, extension rollback,
 expiry, stop/start, incomplete native deletion, hostname failures and recovery.
 Live acceptance separately checks native Scheduler execution, IAM scope, actual
 CPU/GPU/DCV, public-IP reacquisition, persistence and cleanup. User-authenticated
-browser login is a final gate. Consult Issue #98 for observed evidence and limits.
-No merge or production acceptance is implied. Roll back source by reverting the
-integration; remove disposable test stacks only after verifying their exact ownership.
+browser login is a final gate. Consult Issue #98 for lifecycle evidence and Issue #125
+for automatic-assignment evidence. Roll back source by reverting the affected change;
+remove disposable test stacks only after verifying their exact ownership.

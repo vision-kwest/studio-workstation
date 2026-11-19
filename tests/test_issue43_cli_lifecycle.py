@@ -39,7 +39,8 @@ class CliFixture(unittest.TestCase):
 
     def invoke(self,*argv):
         output=io.StringIO()
-        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):cli.main(list(argv))
+        self.errors=io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(self.errors):cli.main(list(argv))
         return output.getvalue()
 
     def create(self,profile,name):
@@ -127,6 +128,8 @@ class NamedLifecycleTests(CliFixture):
         a=self.create('gpu','art');b=self.create('gpu','ai');c=self.create('cpu','edit')
         self.assertEqual(len({x['stack_id'] for x in (a,b,c)}),3)
         self.assertEqual(len({x['instance'] for x in (a,b,c)}),3)
+        self.assertEqual(self.aws.address.get('InstanceId'),a['instance'])
+        self.assertEqual(sum(r['hostname_owner'] for r in json.loads(self.invoke('list'))),1)
         self.invoke('stop','art')
         self.assertEqual(self.aws.vms[a['instance']]['State']['Name'],'stopped')
         self.assertEqual(self.aws.vms[b['instance']]['State']['Name'],'running')
@@ -147,11 +150,58 @@ class NamedLifecycleTests(CliFixture):
         self.assertIn(h.HOST,self.invoke('connect','ai'))
 
     def test_create_does_not_steal_hostname_or_request_acm(self):
-        a=self.create('cpu','edit');self.invoke('hostname','assign','edit')
+        a=self.create('cpu','edit')
         before=dict(self.aws.address);self.aws.calls=[]
-        self.create('gpu','art')
+        for profile in ('cpu','gpu'):
+            result=json.loads(self.invoke('create','--profile',profile,'--name',profile+'-other'))
+            self.assertNotIn(h.HOST,result['dcv_url'])
+            self.assertIn('already assigned',self.errors.getvalue())
         self.assertEqual(self.aws.address,before)
         self.assertFalse(any(c[1] in ('put-role-policy','update-assume-role-policy','associate-address','disassociate-address') for c in self.aws.calls))
+
+    def test_first_cpu_and_gpu_claim_free_hostname_and_reclaim_after_stop(self):
+        for profile in ('cpu','gpu'):
+            with self.subTest(profile=profile):
+                name=profile+'-first'
+                created=json.loads(self.invoke('create','--profile',profile,'--name',name))
+                self.assertEqual(created['dcv_url'],'https://'+h.HOST+':8443')
+                self.assertEqual(self.aws.address['InstanceId'],created['instance'])
+                self.assertIn(h.HOST,self.invoke('connect',name))
+                self.invoke('stop',name)
+                self.assertIsNone(self.aws.address.get('InstanceId'))
+                if profile=='cpu':self.aws.lookup(name)['StackStatus']='UPDATE_COMPLETE'
+                started=json.loads(self.invoke('start',name))
+                self.assertEqual(started['dcv_url'],created['dcv_url'])
+                self.assertEqual(self.aws.address['InstanceId'],created['instance'])
+                self.invoke('stop',name)
+
+    def test_optional_hostname_failure_preserves_checked_desktop_on_create_and_start(self):
+        with patch.object(eip.acm,'prepare_gpu',side_effect=RuntimeError('certificate unavailable')):
+            for action in ('create','start'):
+                with self.subTest(action=action):
+                    args=('create','--profile','cpu','--name','desktop') if action=='create' else ('start','desktop')
+                    result=json.loads(self.invoke(*args))
+                    self.assertEqual(result['state'],'running')
+                    self.assertNotIn(h.HOST,result['dcv_url'])
+                    self.assertIn('hostname assign desktop',self.errors.getvalue())
+                    self.assertIsNone(self.aws.address.get('InstanceId'))
+                    self.assertFalse(any(c[1]=='stop-instances' for c in self.aws.calls))
+                    self.assertIn(result['dcv_url'],self.invoke('connect','desktop'))
+                    self.invoke('stop','desktop');self.aws.calls=[]
+
+    def test_failed_endpoint_after_hostname_error_is_not_reported_as_ready(self):
+        with (patch.object(eip,'assign',side_effect=RuntimeError('hostname unavailable')),
+              patch.object(cli,'wait_dcv',side_effect=[{'url':'https://203.0.113.1:8443'},ValueError('DCV HTTPS unreachable')])):
+            with self.assertRaises(SystemExit):self.create('cpu','failed')
+        self.assertEqual(inventory.context(self.aws,h.REGION,'failed')['state'],'stopped')
+
+    def test_publisher_and_dry_runs_never_attempt_hostname_assignment(self):
+        with patch.object(eip,'assign') as assign:
+            self.create('publisher','publisher-only')
+            self.invoke('stop','publisher-only');self.invoke('start','publisher-only')
+            for profile in ('cpu','gpu'):
+                self.invoke('create','--profile',profile,'--dry-run')
+        assign.assert_not_called()
 
     def test_failed_readiness_stops_only_the_selected_desktop(self):
         a=self.create('cpu','edit')

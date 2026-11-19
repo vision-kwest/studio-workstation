@@ -1,4 +1,4 @@
-"""One explicit hostname owner; all running desktops remain reachable after transfers."""
+"""One hostname owner; automatic claims and explicit transfers preserve reachability."""
 import copy
 import datetime as dt
 import unittest
@@ -37,8 +37,86 @@ class HostnameTests(unittest.TestCase):
 
     def test_create_or_start_never_steals_an_existing_owner(self):
         self.assign(self.a['stack']);before=copy.deepcopy(self.aws.address)
-        self.aws.desktop('third-gpu')
+        self.aws.calls=[]
+        self.assertIsNone(eip.assign(self.aws,'ai',self.tls,only_if_unassigned=True))
         self.assertEqual(self.aws.address,before)
+        self.assertEqual(self.aws.writes,[])
+
+    def test_automatic_claim_skips_unknown_or_partial_associations(self):
+        unassigned=copy.deepcopy(self.aws.address)
+        for identity in ({'InstanceId':'i-0ffffffffffffffff'}, {'AssociationId':'foreign'},
+                         {'NetworkInterfaceId':'eni-foreign'}):
+            with self.subTest(identity=identity):
+                self.aws.address={**unassigned,**identity};self.aws.calls=[]
+                self.assertIsNone(eip.assign(self.aws,'ai',self.tls,only_if_unassigned=True))
+                self.assertEqual(self.aws.address,{**unassigned,**identity})
+                self.assertEqual(self.aws.writes,[])
+
+    def test_competing_claim_never_detaches_winner_or_prepares_losing_certificate(self):
+        unassigned=copy.deepcopy(self.aws.address)
+        for owner in ('i-0ffffffffffffffff',None):
+            with self.subTest(owner=owner):
+                self.aws.address=copy.deepcopy(unassigned);self.aws.calls=[]
+                winner={'AssociationId':'foreign','NetworkInterfaceId':'eni-foreign'}
+                if owner:winner['InstanceId']=owner
+                def race(service,action,args):
+                    if action=='associate-address':
+                        self.aws.address.update(winner)
+                        raise missing('Resource.AlreadyAssociated',action)
+                self.aws.before=race
+                with patch.object(acm,'prepare_gpu') as prepare,self.assertRaises(RuntimeError):
+                    eip.assign(self.aws,'edit',self.tls,only_if_unassigned=True)
+                prepare.assert_not_called();self.aws.before=None
+                self.assertEqual(self.aws.address,{**unassigned,**winner})
+                self.assertFalse(any(c[1]=='disassociate-address' or c[0] in ('iam','ssm') for c in self.aws.calls))
+
+    def test_automatic_claim_rechecks_owner_after_stale_metadata_cleanup(self):
+        self.assign('art');self.aws.detach()
+        real_move=eip._move
+        winner={'InstanceId':'i-0ffffffffffffffff','AssociationId':'foreign','NetworkInterfaceId':'eni-foreign'}
+        def race(aws,before,destination):
+            result=real_move(aws,before,destination)
+            if destination is None:aws.address.update(winner)
+            return result
+        with patch.object(eip,'_move',side_effect=race),patch.object(acm,'prepare_gpu') as prepare:
+            self.assertIsNone(eip.assign(self.aws,'ai',self.tls,only_if_unassigned=True))
+        prepare.assert_not_called()
+        self.assertEqual({k:self.aws.address[k] for k in winner},winner)
+
+    def test_automatic_certificate_or_tls_failure_releases_only_own_claim_and_grant(self):
+        real_prepare=acm.prepare_gpu
+        for failure in ('certificate','tls'):
+            with self.subTest(failure=failure):
+                def prepare(aws,iid):
+                    self.assertEqual(aws.address.get('InstanceId'),iid)
+                    if failure=='certificate':
+                        acm._install_grant(aws,iid)
+                        raise RuntimeError('certificate unavailable')
+                    return real_prepare(aws,iid)
+                def tls(host,ip):
+                    if failure=='tls':raise ValueError('Trusted DCV TLS failure')
+                    return self.tls(host,ip)
+                with patch.object(acm,'prepare_gpu',side_effect=prepare),self.assertRaises(RuntimeError):
+                    eip.assign(self.aws,'ai',tls,only_if_unassigned=True)
+                self.assertIsNone(self.aws.address.get('InstanceId'))
+                self.assertEqual(acm._grants(self.aws)[0],set())
+                result=eip.resolve(inventory.context(self.aws,h.REGION,'ai'),h.REGION,self.aws,self.tls)
+                self.assertTrue(result['reachable']);self.assertFalse(result['trusted'])
+
+    def test_automatic_claim_lost_during_certificate_preparation_preserves_winner(self):
+        def prepare(aws,iid):
+            acm._install_grant(aws,iid)
+            acm._install_grant(aws,self.b['instance'])
+            aws.detach()
+            aws.address.update(InstanceId=self.b['instance'],AssociationId='foreign',
+                               NetworkInterfaceId=aws.vms[self.b['instance']]['NetworkInterfaces'][0]['NetworkInterfaceId'])
+            next(t for t in aws.address['Tags'] if t['Key']=='StudioDcvInstanceId')['Value']=self.b['instance']
+            raise RuntimeError('owner changed during certificate preparation')
+        with patch.object(acm,'prepare_gpu',side_effect=prepare),self.assertRaisesRegex(RuntimeError,'foreign owner'):
+            eip.assign(self.aws,'edit',self.tls,only_if_unassigned=True)
+        self.assertEqual(self.aws.address['InstanceId'],self.b['instance'])
+        self.assertFalse(any(c[1]=='disassociate-address' for c in self.aws.writes))
+        self.assertEqual(acm._grants(self.aws)[0],{self.b['instance']})
 
     def test_release_preserves_allocation_and_native_public_access(self):
         self.assign('art');result=eip.release(self.aws,self.tls)

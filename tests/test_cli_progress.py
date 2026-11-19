@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from runtime import cli_progress as progress, publisher, pr65_one_shot_guard as guard
+from runtime import cli_progress as progress, dcv_endpoint, publisher, pr65_one_shot_guard as guard
 from scripts import studio_workstation_cli as cli
 from test_issue43_cli_lifecycle import CliFixture
 from workstation_fake import AWS, NOW, h, tags
@@ -180,7 +180,9 @@ def test_progress_never_changes_lifecycle_aws_calls_or_guards(profile):
 
         with patch.object(cli.subprocess, "check_output", side_effect=execute), \
              patch.object(cli, "wait_gpu_bootstrap"), \
-             patch.object(cli, "wait_dcv", return_value={"url": "https://203.0.113.200:8443"}), \
+             patch.object(dcv_endpoint, "_probe"), \
+             patch.object(cli, "verified_dcv_hostname", return_value="https://" + h.HOST + ":8443"), \
+             patch.object(h, "check_gpu_tls"), \
              patch.object(guard, "status", side_effect=lambda *a, **kw: real_status(*a, now=NOW, **kw)), \
              contextlib.redirect_stderr(stderr):
             for action in ("stop", "start", "destroy"):
