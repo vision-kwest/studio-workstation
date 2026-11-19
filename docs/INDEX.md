@@ -11,6 +11,7 @@
 | Page | Purpose |
 |---|---|
 | [Main README / Quick Start](../README.md) | Project state, first commands, key costs and access risks |
+| [Software packaging guide](software-packaging-guide.md) | **15-step tutorial** for preparing, validating, publishing, promoting and consuming Rez applications; living Issue #94 acceptance recipe |
 | [Studio CLI](studio-cli.md) | **Canonical create, preview, check-ready, connect, stop, start, destroy commands** |
 | [Shared application menus](shared-applications.md) | MenuLibre GUI workflow, shared launchers, migration and refresh |
 | [Shared EFS setup](efs-helper-install.md) | Writable `/studio`, EFS helper and dated CPU storage acceptance |
