@@ -1,6 +1,12 @@
-# Standalone RES 2026.06 GPU/DCV runtime — validated implementation
+# Standalone RES 2026.06 GPU/DCV runtime — provenance and acceptance records
 
-**Current after merged PR #65 (November 2026): GPU runtime and persistent CLI acceptance validated.** On baked GPU AMI `ami-027c98f85b155c2ac` in `us-east-1`, the original RES cloud-init installer, reboot continuation, Supervisor and `ideavirtualdesktop` bootstrap (with narrow standalone guards) passed live testing. PR #61 and PR #65 are merged; the GPU Image Builder **pipeline** remains disabled and points to recipe 0.1.10.
+**Current operations:** [Studio CLI](../docs/studio-cli.md) provides named
+workstations. Ordinary GPU expiration stops EC2 and preserves its stack and EBS;
+explicit destroy removes local resources. The dated Task 7 / PR #65 termination
+and retained-volume cleanup below describe supervised test history, not the
+current timer contract. See Issue #68 for automatic-stop validation.
+
+**PR #65 acceptance checkpoint (November 1, 2026): GPU runtime and persistent CLI acceptance validated.** On baked GPU AMI `ami-027c98f85b155c2ac` in `us-east-1`, the original RES cloud-init installer, reboot continuation, Supervisor and `ideavirtualdesktop` bootstrap (with narrow standalone guards) passed live testing. PR #61 and PR #65 merged; the GPU Image Builder **pipeline** remained disabled and pointed to recipe 0.1.10 at this checkpoint.
 
 ## Architecture and provenance
 
@@ -60,7 +66,7 @@ The GPU renderer deliberately uses two distinct S3 prefixes, embedding the new b
 
 The accepted GPU CLI launched the exact scoped `studio-gpu-cli-accept65` test stack. The user confirmed interactive DCV password login. EC2 was stopped and restarted with the **same instance and 100 GiB retained root EBS**; a file under `/home/workstation/` retained the exact original SHA-256. After restart, RES semaphore readiness, GDM, Xorg, Tesla T4 hardware OpenGL, DCV console and local HTTPS 200 were verified. The public IPv4 changed on stop/start; a second browser login after restart was not separately confirmed.
 
-CloudFormation then reached `DELETE_COMPLETE`; AWS returned not found for the test EBS volume, SG and launch template, and both one-shot Scheduler actions were subsequently removed and independently checked absent. The dedicated IAM role remains. The GPU CLI currently accepts only the exact approved stack/token with one-shot expiration—not arbitrary GPU workstations or a permanent production control plane.
+CloudFormation then reached `DELETE_COMPLETE`; AWS returned not found for the test EBS volume, SG and launch template, and both one-shot Scheduler actions were subsequently removed and independently checked absent. At that November 1 checkpoint, the dedicated IAM role remained and the GPU CLI accepted only the exact approved stack/token with one-shot test expiration. Issue #98 subsequently replaced the fixed-name lifecycle.
 
 ## Issue #100 — new RES-first GPU installer (November 15, 2026)
 

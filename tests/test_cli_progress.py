@@ -164,7 +164,7 @@ def test_progress_never_changes_lifecycle_aws_calls_or_guards(profile):
                             NetworkInterfaceId=baseline.vms[selected["instance"]]["NetworkInterfaces"][0]["NetworkInterfaceId"])
     baseline.address["Tags"] += tags({"StudioDcvInstanceId": selected["instance"]})
     baseline.vms[selected["instance"]]["PublicIpAddress"] = h.EIP_IP
-    real_status = guard.status
+    real_utc = guard._utc
     records = []
     for quiet in (False, True):
         aws, results, stderr = copy.deepcopy(baseline), [], io.StringIO()
@@ -181,7 +181,7 @@ def test_progress_never_changes_lifecycle_aws_calls_or_guards(profile):
         with patch.object(cli.subprocess, "check_output", side_effect=execute), \
              patch.object(cli, "wait_gpu_bootstrap"), \
              patch.object(cli, "wait_dcv", return_value={"url": "https://203.0.113.200:8443"}), \
-             patch.object(guard, "status", side_effect=lambda *a, **kw: real_status(*a, now=NOW, **kw)), \
+             patch.object(guard, "_utc", side_effect=lambda value=None: real_utc(NOW if value is None else value)), \
              contextlib.redirect_stderr(stderr):
             for action in ("stop", "start", "destroy"):
                 stdout = io.StringIO()

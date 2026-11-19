@@ -24,7 +24,7 @@ class TeardownTests(unittest.TestCase):
         self.assertEqual(self.aws.vms[self.b['instance']],other)
         self.assertEqual(self.aws.address,shared)
         self.assertFalse(any(c[1]=='delete-volume' for c in self.aws.calls))
-        self.assertEqual(len(self.aws.schedules),2)
+        self.assertEqual(len(self.aws.schedules),1)
         self.assertEqual(self.aws.stacks[self.a['safety_stack']]['StackStatus'],'DELETE_COMPLETE')
         self.assertEqual(self.aws.stacks[self.b['safety_stack']]['StackStatus'],'CREATE_COMPLETE')
 
@@ -48,9 +48,10 @@ class TeardownTests(unittest.TestCase):
 
     def test_surviving_disk_is_reported_not_managed_by_a_second_deleter(self):
         self.aws.keep_volume=True
-        original=copy.deepcopy(self.aws.schedules)
+        other=copy.deepcopy(self.aws.schedules['studio-stop-'+self.b['token']])
         with self.assertRaisesRegex(RuntimeError,'remaining instances/disks'):self.destroy()
-        self.assertEqual(self.aws.schedules,original)
+        self.assertEqual(self.aws.schedules, {other['Name']: other})
+        self.assertEqual(self.aws.stacks[self.a['safety_stack']]['StackStatus'], 'CREATE_COMPLETE')
         self.assertFalse(any(c[1]=='delete-volume' for c in self.aws.calls))
 
     def test_optional_hostname_failure_cannot_prevent_native_cost_teardown(self):
@@ -71,14 +72,16 @@ class TeardownTests(unittest.TestCase):
             with self.subTest(kind=kind),self.assertRaises(ValueError):cleanup.destroy(aws,Mock(),a['stack'],h.REGION)
             self.assertFalse(aws.writes)
 
-    def test_forged_safety_schedule_is_preserved_and_never_targets_other_vm(self):
-        p=self.aws.schedules['studio-fallback-'+self.a['token']]
-        p['Target']['Input']='{"InstanceIds":["'+self.b['instance']+'"]}'
-        with self.assertRaisesRegex(ValueError,'another workstation'):self.destroy()
-        self.assertEqual(self.aws.vms[self.b['instance']]['State']['Name'],'running')
-        self.assertIn(p['Name'],self.aws.schedules)
+    def test_forged_legacy_timer_is_preserved_and_never_targets_other_vm(self):
+        legacy = self.aws.legacy_desktop('legacy')
+        p = self.aws.schedules['studio-fallback-' + legacy['token']]
+        p['Target']['Input'] = '{"InstanceIds":["' + self.b['instance'] + '"]}'
+        with self.assertRaisesRegex(ValueError, 'another workstation'):
+            self.destroy('legacy')
+        self.assertEqual(self.aws.vms[self.b['instance']]['State']['Name'], 'running')
+        self.assertIn(p['Name'], self.aws.schedules)
 
-    def test_expired_auto_deleted_schedules_do_not_block_native_teardown(self):
+    def test_missing_managed_schedule_does_not_block_native_teardown(self):
         for name in list(self.aws.schedules):
             if self.a['token'] in name:del self.aws.schedules[name]
         self.assertEqual(self.destroy()['state'],'DELETE_COMPLETE')
@@ -107,7 +110,7 @@ class TeardownTests(unittest.TestCase):
 
 
 class AgedOutInstanceTests(unittest.TestCase):
-    def deployment(self, profile='gpu'):
+    def deployment(self, profile='gpu', *, legacy=False):
         aws = AWS()
         if profile == 'publisher':
             aws.native_create('retired', publisher.template(SimpleNamespace(security_group_id='sg-existing')),
@@ -115,6 +118,8 @@ class AgedOutInstanceTests(unittest.TestCase):
                                'InstanceProfileName': 'StudioEfsCiPublisher', 'SubnetId': 'subnet-reviewed',
                                'DiskSizeGiB': 30}, {'StudioManaged': 'true', 'StudioProfile': profile})
             selected = inventory.context(aws, h.REGION, 'retired')
+        elif legacy:
+            selected = aws.legacy_desktop('retired')
         else:
             selected = aws.desktop('retired', profile)
         return aws, selected
@@ -146,14 +151,13 @@ class AgedOutInstanceTests(unittest.TestCase):
                     self.assertEqual(result['stack_id'], selected['stack_id'])
                 self.assertEqual(aws.vms[other['instance']], other_vm)
                 self.assertEqual(aws.address, shared)
-                self.assertEqual(set(aws.schedules), {'studio-expiry-' + other['token'],
-                                                      'studio-fallback-' + other['token']})
+                self.assertEqual(set(aws.schedules), {'studio-stop-' + other['token']})
                 if profile == 'gpu':
                     self.assertEqual(aws.stacks[selected['safety_stack']]['StackStatus'], 'DELETE_COMPLETE')
                 self.assertFalse(any(call[1] == 'delete-volume' for call in aws.calls))
 
-    def test_safety_only_retry_checks_aged_out_fallback_before_removing_role(self):
-        aws, selected = self.deployment()
+    def test_legacy_safety_only_retry_checks_aged_out_fallback_before_removing_role(self):
+        aws, selected = self.deployment(legacy=True)
         self.retire(aws, selected)
         self.assertTrue(cleanup.destroy(aws, Mock(), selected['stack'], h.REGION)['safety_removed'])
         fallback_read = ('ec2', 'describe-instances', '--instance-ids', selected['instance'])
@@ -216,10 +220,10 @@ class AgedOutInstanceTests(unittest.TestCase):
                     cleanup.destroy(aws, Mock(), selected['stack_id'], h.REGION)
                 self.assertFalse(aws.writes)
 
-    def test_permission_errors_at_each_instance_read_preserve_safety_role(self):
+    def test_legacy_permission_errors_at_each_instance_read_preserve_safety_role(self):
         for denied_read in (1, 2, 3):  # Context, post-delete confirmation, fallback target.
             with self.subTest(denied_read=denied_read):
-                aws, selected = self.deployment()
+                aws, selected = self.deployment(legacy=True)
                 self.retire(aws, selected)
                 count = 0
                 def denied(service, action, args):
@@ -234,8 +238,8 @@ class AgedOutInstanceTests(unittest.TestCase):
                 self.assertEqual(aws.stacks[selected['safety_stack']]['StackStatus'], 'CREATE_COMPLETE')
                 self.assertIn('studio-fallback-' + selected['token'], aws.schedules)
 
-    def test_completed_stack_with_surviving_disk_preserves_safety(self):
-        aws, selected = self.deployment()
+    def test_completed_legacy_stack_with_surviving_disk_preserves_safety(self):
+        aws, selected = self.deployment(legacy=True)
         aws.keep_volume = True
         self.retire(aws, selected)
         with self.assertRaisesRegex(RuntimeError, 'remaining instances/disks'):
