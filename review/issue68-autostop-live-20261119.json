@@ -1,0 +1,369 @@
+{
+  "scope": "Native AWS auto-stop/persistence integration; no GUI acceptance",
+  "repository_head": "fdd9f0e454050b4d872560324b1594e6827f96ee",
+  "status": "passed",
+  "workstation_stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-autostop-accept-20261119-2328/457e79b0-e471-11f1-bcce-12fff690cd89",
+  "safety_stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-9ebe93dccf5681a3d4c2/f0a102f0-e470-11f1-8eb8-12ffc0906c65",
+  "safety_role": "arn:aws:iam::401233741942:role/studio-expiry-9ebe93dccf5681a3d4c2-ExpirationRole-cHS28v7vshIS",
+  "external_test_cleanup_control_stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-autostop-test-guard-20261119-2328/15b72ec0-e471-11f1-92e2-12ffd800b5af",
+  "external_test_cleanup_role": "arn:aws:iam::401233741942:role/studio-autostop-test-guard-20261119-232-CleanupRole-GinnA8HV6ysL",
+  "cleanup": {
+    "name": "studio-autostop-test-cleanup-20261119-2328",
+    "when": "at(2026-11-20T00:15:56)",
+    "target": {
+      "Arn": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack",
+      "RoleArn": "arn:aws:iam::401233741942:role/studio-autostop-test-guard-20261119-232-CleanupRole-GinnA8HV6ysL",
+      "Input": "{\"StackName\":\"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-autostop-accept-20261119-2328/457e79b0-e471-11f1-bcce-12fff690cd89\"}",
+      "RetryPolicy": {
+        "MaximumRetryAttempts": 3,
+        "MaximumEventAgeInSeconds": 60
+      }
+    }
+  },
+  "protected_instance": "i-03d7699a7a84f97bf",
+  "protected_workstation": "comfyUi2",
+  "expected_file_sha256": "a3d9a896a8adfd18a267102038cdb3ba8ff2483a0105c9391f38eaeb9569f9ad",
+  "instance_id": "i-040e82b8821d9e572",
+  "security_group_id": "sg-0c4bf7fa60f06bab1",
+  "volume_id": "vol-06dda60f4cd3bafba",
+  "iam_checks": {
+    "now_utc": "2026-11-19T23:33:07.438673+00:00",
+    "owned_policy": [
+      {
+        "action": "ec2:StopInstances",
+        "decision": "allowed"
+      },
+      {
+        "action": "ec2:TerminateInstances",
+        "decision": "implicitDeny"
+      },
+      {
+        "action": "cloudformation:DeleteStack",
+        "decision": "implicitDeny"
+      }
+    ],
+    "foreign_policy": [
+      {
+        "action": "ec2:StopInstances",
+        "decision": "implicitDeny"
+      }
+    ],
+    "sentinel_command": "335aa031-6abe-4923-8be5-7a3d26c8d440",
+    "cleanup_immutable_target": {
+      "StackName": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-autostop-accept-20261119-2328/457e79b0-e471-11f1-bcce-12fff690cd89"
+    }
+  },
+  "timer_and_sentinel_checks": {
+    "now_utc": "2026-11-19T23:33:57.445733+00:00",
+    "sentinel_before": {
+      "command_id": "335aa031-6abe-4923-8be5-7a3d26c8d440",
+      "status": "Success",
+      "sha256": "a3d9a896a8adfd18a267102038cdb3ba8ff2483a0105c9391f38eaeb9569f9ad"
+    },
+    "long_duration_readbacks": [
+      {
+        "case": "long",
+        "when": "at(2026-11-20T07:33:43)",
+        "duration": "Studio auto-stop after 480 minutes"
+      },
+      {
+        "case": "extended",
+        "when": "at(2026-11-20T17:33:43)",
+        "duration": "Studio auto-stop after 480 minutes"
+      }
+    ],
+    "short_stop": {
+      "Name": "studio-stop-f0a102f0-e470-11f1-8eb8-12ffc0906c65",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-19T23:35:56)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "NONE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:ec2:stopInstances",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-expiry-9ebe93dccf5681a3d4c2-ExpirationRole-cHS28v7vshIS",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 2
+        },
+        "Input": "{\"InstanceIds\":[\"i-040e82b8821d9e572\"]}"
+      },
+      "Description": "Studio auto-stop after 2 minutes"
+    }
+  },
+  "external_test_fallback": {
+    "name": "studio-autostop-test-fallback-20261119-2328",
+    "when": "at(2026-11-20T00:20:56)"
+  },
+  "observed_stop_transition": {
+    "checked_at": "2026-11-19T23:37:11.670458+00:00",
+    "instance": {
+      "id": "i-040e82b8821d9e572",
+      "state": "stopping",
+      "transition": "User initiated (2026-11-19 23:36:26 GMT)",
+      "root": [
+        {
+          "DeviceName": "/dev/sda1",
+          "Ebs": {
+            "AttachTime": "2026-11-19T23:31:07.987000+00:00",
+            "DeleteOnTermination": true,
+            "Status": "attached",
+            "VolumeId": "vol-06dda60f4cd3bafba",
+            "EbsCardIndex": 0
+          }
+        }
+      ]
+    },
+    "stack": {
+      "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-autostop-accept-20261119-2328/457e79b0-e471-11f1-bcce-12fff690cd89",
+      "status": "CREATE_COMPLETE"
+    },
+    "volume": {
+      "id": "vol-06dda60f4cd3bafba",
+      "state": "in-use",
+      "attachments": [
+        {
+          "DeleteOnTermination": true,
+          "EbsCardIndex": 0,
+          "VolumeId": "vol-06dda60f4cd3bafba",
+          "InstanceId": "i-040e82b8821d9e572",
+          "Device": "/dev/sda1",
+          "State": "attached",
+          "AttachTime": "2026-11-19T23:31:07+00:00"
+        }
+      ]
+    },
+    "schedule": {
+      "name": "studio-stop-f0a102f0-e470-11f1-8eb8-12ffc0906c65",
+      "when": "at(2026-11-19T23:35:56)",
+      "state": "ENABLED",
+      "target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:ec2:stopInstances",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-expiry-9ebe93dccf5681a3d4c2-ExpirationRole-cHS28v7vshIS",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 2
+        },
+        "Input": "{\"InstanceIds\":[\"i-040e82b8821d9e572\"]}"
+      },
+      "after": "NONE"
+    }
+  },
+  "late_extension_attempt_skipped": {
+    "reason": "Test request reached AWS after the original deadline; assertion prevented UpdateSchedule.",
+    "raw_error": "AssertionError: Expected a final-minute extension test; got remaining seconds -31.570875",
+    "mutation_performed": false
+  },
+  "scheduler_delivery": [
+    {
+      "event_id": "5bb21392-8464-4a2d-91a8-77ccfff107cf",
+      "event_time": "2026-11-19T23:36:26+00:00",
+      "action": "StopInstances",
+      "execution_role": "arn:aws:iam::401233741942:role/studio-expiry-9ebe93dccf5681a3d4c2-ExpirationRole-cHS28v7vshIS",
+      "request": {
+        "instancesSet": {
+          "items": [
+            {
+              "instanceId": "i-040e82b8821d9e572"
+            }
+          ]
+        },
+        "force": false,
+        "skipOsShutdown": false
+      },
+      "response": {
+        "requestId": "240e1990-950b-441b-839b-87bce4e7be15",
+        "instancesSet": {
+          "items": [
+            {
+              "instanceId": "i-040e82b8821d9e572",
+              "currentState": {
+                "code": 64,
+                "name": "stopping"
+              },
+              "previousState": {
+                "code": 16,
+                "name": "running"
+              }
+            }
+          ]
+        }
+      },
+      "error": null
+    }
+  ],
+  "guest_shutdown": {
+    "observed_at": "2026-11-19T23:40:42.924290+00:00",
+    "powered_down": true
+  },
+  "stop_and_rearm": {
+    "checked_at": "2026-11-19T23:43:21.643413+00:00",
+    "state_before": "stopped",
+    "stack_status": "CREATE_COMPLETE",
+    "volume_id": "vol-06dda60f4cd3bafba",
+    "fresh_timer_verified_before_start": {
+      "when": "at(2026-11-19T23:46:21)",
+      "description": "Studio auto-stop after 3 minutes",
+      "verified_at": "2026-11-19T23:43:22.160570+00:00"
+    },
+    "start": {
+      "StartingInstances": [
+        {
+          "InstanceId": "i-040e82b8821d9e572",
+          "CurrentState": {
+            "Code": 0,
+            "Name": "pending"
+          },
+          "PreviousState": {
+            "Code": 80,
+            "Name": "stopped"
+          }
+        }
+      ]
+    }
+  },
+  "restart_running": {
+    "checked_at": "2026-11-19T23:44:01.798555+00:00",
+    "state": "running",
+    "instance": "i-040e82b8821d9e572",
+    "volumes": [
+      {
+        "DeviceName": "/dev/sda1",
+        "Ebs": {
+          "AttachTime": "2026-11-19T23:31:07.987000+00:00",
+          "DeleteOnTermination": true,
+          "Status": "attached",
+          "VolumeId": "vol-06dda60f4cd3bafba",
+          "EbsCardIndex": 0
+        }
+      }
+    ],
+    "ssm": [
+      {
+        "ping": "Online",
+        "last": "2026-11-19T23:43:37.796000+00:00"
+      }
+    ],
+    "sentinel_command": "a814202a-45a7-4567-b651-d1d5035452b3"
+  },
+  "sentinel_after_restart": {
+    "checked_at": "2026-11-19T23:44:25.830692+00:00",
+    "command_id": "a814202a-45a7-4567-b651-d1d5035452b3",
+    "status": "Success",
+    "sha256": "a3d9a896a8adfd18a267102038cdb3ba8ff2483a0105c9391f38eaeb9569f9ad",
+    "stack_status": "CREATE_COMPLETE"
+  },
+  "last_minute_extension": {
+    "checked_at": "2026-11-19T23:45:41.812883+00:00",
+    "remaining_seconds_at_update": 43.257499,
+    "previous": "at(2026-11-19T23:46:21)",
+    "new": "at(2026-11-20T09:46:21)",
+    "additional_minutes": 600,
+    "duration": "Studio auto-stop after 3 minutes",
+    "state_after": "running",
+    "instance_id": "i-040e82b8821d9e572"
+  },
+  "explicit_cleanup_request": {
+    "requested_at": "2026-11-19T23:46:05.407539+00:00",
+    "stack_id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-autostop-accept-20261119-2328/457e79b0-e471-11f1-bcce-12fff690cd89",
+    "verified_resources": {
+      "AutoStopSchedule": [
+        "AWS::Scheduler::Schedule",
+        "studio-stop-f0a102f0-e470-11f1-8eb8-12ffc0906c65"
+      ],
+      "Workstation": [
+        "AWS::EC2::Instance",
+        "i-040e82b8821d9e572"
+      ],
+      "WorkstationSG": [
+        "AWS::EC2::SecurityGroup",
+        "sg-0c4bf7fa60f06bab1"
+      ]
+    },
+    "delete_request": {},
+    "external_cleanup_schedules": "remain armed until independent absence verification"
+  },
+  "method": "Native AWS MCP calls using production-helper schedule/template structures; Python CLI routing and failure paths exercised by offline tests. No full live Studio CLI or DCV/browser acceptance claimed.",
+  "region": "us-east-1",
+  "instance_type": "g4dn.xlarge",
+  "root_volume": {
+    "id": "vol-06dda60f4cd3bafba",
+    "size_gib": 8,
+    "type": "gp3",
+    "encrypted": true
+  },
+  "limitations": [
+    "Automatic stop preserves saved EBS files, not unsaved RAM or instance-store data.",
+    "Native schedule updates cannot retract a StopInstances request already dispatched.",
+    "The first final-minute test request arrived after its deadline and performed no update; a subsequent test succeeded with 43.257499 seconds remaining.",
+    "CloudTrail confirmed the scheduled StopInstances request at 23:36:26 UTC; EC2 was first observed stopped at 23:43:21 UTC. No force-stop was issued.",
+    "Existing comfyUi2 was excluded from mutations; no automatic replacement timer was installed for it."
+  ],
+  "protected_workstation_verification": {
+    "checked_at": "2026-11-19T23:54:11.642807+00:00",
+    "workstation": "comfyUi2",
+    "instance": "i-03d7699a7a84f97bf",
+    "state": "running",
+    "volume_id": "vol-04cfea9fc49d43a18",
+    "original_root_attached": true,
+    "timers": [
+      {
+        "name": "studio-expiry-44c962e0-e463-11f1-b2d2-0efff16b89b3",
+        "state": "DISABLED"
+      },
+      {
+        "name": "studio-fallback-44c962e0-e463-11f1-b2d2-0efff16b89b3",
+        "state": "DISABLED"
+      }
+    ],
+    "mutations": "none"
+  },
+  "completed_at": "2026-11-19T23:54:11.642807+00:00",
+  "cleanup_verification": {
+    "workload_checked_at": "2026-11-19T23:53:34.325704+00:00",
+    "stack_status": "DELETE_COMPLETE",
+    "instance_state": "terminated",
+    "root_volume_absent": true,
+    "security_group_absent": true,
+    "native_schedule_absent": true,
+    "control_cleanup_requested": {
+      "at": "2026-11-19T23:53:36.910507+00:00",
+      "deleted_external_schedules": [
+        "studio-autostop-test-cleanup-20261119-2328",
+        "studio-autostop-test-fallback-20261119-2328"
+      ],
+      "role_stack_deletions": [
+        "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-9ebe93dccf5681a3d4c2/f0a102f0-e470-11f1-8eb8-12ffc0906c65",
+        "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-autostop-test-guard-20261119-2328/15b72ec0-e471-11f1-92e2-12ffd800b5af"
+      ]
+    },
+    "final_checked_at": "2026-11-19T23:54:11.642807+00:00",
+    "control_stacks": [
+      {
+        "stack_id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-9ebe93dccf5681a3d4c2/f0a102f0-e470-11f1-8eb8-12ffc0906c65",
+        "status": "DELETE_COMPLETE"
+      },
+      {
+        "stack_id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-autostop-test-guard-20261119-2328/15b72ec0-e471-11f1-92e2-12ffd800b5af",
+        "status": "DELETE_COMPLETE"
+      }
+    ],
+    "timer_roles_absent": [
+      "arn:aws:iam::401233741942:role/studio-expiry-9ebe93dccf5681a3d4c2-ExpirationRole-cHS28v7vshIS",
+      "arn:aws:iam::401233741942:role/studio-autostop-test-guard-20261119-232-CleanupRole-GinnA8HV6ysL"
+    ],
+    "external_schedules_absent": [
+      "studio-autostop-test-cleanup-20261119-2328",
+      "studio-autostop-test-fallback-20261119-2328"
+    ],
+    "absence_error_codes": {
+      "roles": "NoSuchEntity",
+      "schedules": "ResourceNotFoundException",
+      "root_volume": "InvalidVolume.NotFound",
+      "security_group": "InvalidGroup.NotFound"
+    }
+  }
+}
