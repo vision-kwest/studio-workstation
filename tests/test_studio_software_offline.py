@@ -103,6 +103,7 @@ class SoftwareRetryCases(unittest.TestCase):
         """Run the real storage setup with only host/mount operations substituted."""
         code = "command -v mount.efs" + self.source.split("command -v mount.efs", 1)[1]
         for source, target in [("/opt/studio/packages", "packages"), ("/etc/fstab", "fstab"),
+                               ("/etc/apparmor.d/studio-vscode", "vscode.apparmor"),
                                ("/etc/studio-software-release.env", "absent-release.env"),
                                ("/studio", "studio")]:
             code = code.replace(source, str(self.root / target))
@@ -122,6 +123,8 @@ getent() { printf 'workstation:x:2000:2000::/home/workstation:/bin/bash\\n'; }
 runuser() { HOME="$TEST_HOME" bash -se; }
 menulibre() { :; }
 desktop-file-validate() { :; }
+chown() { :; }
+apparmor_parser() { :; }
 aws() { echo 'Unexpected Rez download' >&2; return 99; }
 ''' + code
 
@@ -141,6 +144,7 @@ aws() { echo 'Unexpected Rez download' >&2; return 99; }
         (self.root / "read-only").touch()
         result = self.run_storage(code)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / "vscode.apparmor").stat().st_mode & 0o777, 0o644)
         self.assertEqual(studio.resolve(), shared)
         calls = (self.root / "calls").read_text()
         self.assertIn("-o remount,rw", calls)

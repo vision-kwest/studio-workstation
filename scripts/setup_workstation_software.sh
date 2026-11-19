@@ -66,6 +66,18 @@ if ! command -v menulibre >/dev/null || ! command -v desktop-file-validate >/dev
   apt-get -o DPkg::Lock::Timeout=300 update
   DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends menulibre desktop-file-utils
 fi
+# Permit VS Code's own sandbox at the resolved EFS path, including future versions.
+cat >/etc/apparmor.d/studio-vscode <<'STUDIO_VSCODE_APPARMOR'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile studio-vscode /opt/studio/packages/shared/apps/vscode/**/code flags=(unconfined) {
+  userns,
+}
+STUDIO_VSCODE_APPARMOR
+chown root:root /etc/apparmor.d/studio-vscode
+chmod 0644 /etc/apparmor.d/studio-vscode
+apparmor_parser -r /etc/apparmor.d/studio-vscode
 test -f /etc/studio-software-release.env || exit 0
 . /etc/studio-software-release.env
 dir=$(mktemp -d)
