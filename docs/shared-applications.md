@@ -36,6 +36,22 @@ An application may already supply a `.desktop` file: copy it into `/studio/share
 
 Create entries with their working applications. If a launcher must remain installed while its executable is absent, **Advanced → Try Exec** can name that executable; missing/nonexecutable targets may hide the entry. `Hidden` and **Hide from menus** are explicit visibility settings, not installation checks.
 
+## VS Code with shared extensions
+
+[Issue #123](https://github.com/vision-kwest/studio-workstation/issues/123) covers the GUI-installed shared VS Code workflow. Download the official Linux x64 `.tar.gz`, extract it under `/studio/apps/vscode`, and make `/studio/apps/vscode/current` a symlink to the directory containing `code`, `bin` and `resources`. Keep the extracted version directory so an upgrade can select a new target for `current`.
+
+Create `/studio/apps/vscode/extensions` as the ordinary desktop user. The shared Menu Editor entry uses:
+
+```text
+/studio/apps/vscode/current/bin/code --extensions-dir /studio/apps/vscode/extensions %F
+```
+
+Use `/studio/apps/vscode/current/resources/app/resources/linux/code.png` for its icon. Omit `%F` for a terminal launch. Keep VS Code's **Default** profile: its extension catalog is stored in the selected extensions directory. Personal preferences and session state stay local. Do not create `current/data`, which activates portable mode and overrides `--extensions-dir`.
+
+Ubuntu 24.04 restricts unprivileged user namespaces. Its packaged VS Code AppArmor rule covers `/usr/share/code`, so an archive extracted on EFS can crash while creating Chromium's sandbox. Workstation setup installs and loads `/etc/apparmor.d/studio-vscode`, granting `userns` to executables named `code` below the resolved `/opt/studio/packages/shared/apps/vscode/` path. This follows Ubuntu's `flags=(unconfined)` compatibility approach; it is not a complete confinement policy. The application keeps its own sandbox, and the system-wide namespace setting remains enabled.
+
+The profile is installed before VS Code needs to exist, independently of optional Rez. AppArmor reloads it at boot; replacement CPU/GPU workstations receive it from the same software-setup script. Existing workstations need the updated setup before retrying a failed launch. The actual GUI launch, extension use and replacement-workstation checks remain the acceptance criteria in #123.
+
 ## Readiness and refresh
 
 Wait for **Menu Editor** to appear before managing launchers. From a desktop terminal, these optional checks show the integration and service state:
@@ -59,3 +75,5 @@ For a running workstation, first stop and disable `studio-software-setup.service
 - [Ubuntu 24.04 MenuLibre package](https://packages.ubuntu.com/en/noble/menulibre); [MenuLibre 2.4.0 save paths](https://github.com/bluesabre/menulibre/blob/menulibre-2.4.0/menulibre/util.py).
 - [XDG data directories](https://specifications.freedesktop.org/basedir/latest/); [desktop-entry keys](https://specifications.freedesktop.org/desktop-entry/latest/recognized-keys.html) and [command syntax](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html).
 - [Linux inotify limitations](https://man7.org/linux/man-pages/man7/inotify.7.html); [Ubuntu MIME-cache utility](https://manpages.ubuntu.com/manpages/noble/man1/update-desktop-database.1.html).
+- [VS Code downloads](https://code.visualstudio.com/download), [extension directory](https://code.visualstudio.com/docs/configure/extensions/extension-marketplace), and [portable-mode behavior](https://code.visualstudio.com/docs/setup/portable).
+- [Ubuntu 24.04 user-namespace compatibility profiles](https://documentation.ubuntu.com/release-notes/24.04/#unprivileged-user-namespace-restrictions); [AppArmor attachment patterns](https://manpages.ubuntu.com/manpages/noble/man5/apparmor.d.5.html).
