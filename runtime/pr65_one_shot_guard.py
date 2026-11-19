@@ -144,8 +144,16 @@ def status(aws, context, *, now=None, headroom=0):
     deadline = dt.datetime.strptime(expr[3:-1], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
     now = now or dt.datetime.now(dt.timezone.utc)
     remaining = (deadline - now).total_seconds()
-    if remaining > 240 * 60 or (headroom and remaining < headroom * 60):
-        raise ValueError("Expiration outside safe remaining-time bounds")
+    time_left = (f"{remaining / 60:.2f} minutes remaining" if remaining >= 0 else
+                 f"expired {-remaining / 60:.2f} minutes ago")
+    timing = f"deadline {deadline:%Y-%m-%d %H:%M:%S} UTC; {time_left}"
+    if remaining > 240 * 60:
+        raise ValueError(f"Expiration outside safe remaining-time bounds: {timing}; maximum is 240 minutes")
+    if headroom and remaining < headroom * 60:
+        cutoff = deadline - dt.timedelta(minutes=headroom)
+        raise ValueError(f"Expiration outside safe remaining-time bounds: {timing}. "
+                         f"This operation requires at least {headroom} minutes. "
+                         f"Latest allowed time: {cutoff:%Y-%m-%d %H:%M:%S} UTC")
     proposal = plan(context["vm"], context["stack"], identity["token"], now,
                     role=identity["role"], stack_id=context["stack_id"], terminate_at=deadline)
     for label in ("termination", "fallback"):

@@ -48,6 +48,20 @@ class ExtensionTests(unittest.TestCase):
                         with self.assertRaisesRegex(RuntimeError,'aborted'):extension.extend(aws,a['stack'],h.REGION,30,now=NOW)
                         self.assertEqual(aws.schedules,original)
 
+    def test_near_expiry_error_explains_cutoff_before_considering_added_minutes(self):
+        self.aws.calls=[]
+        original=copy.deepcopy(self.aws.schedules)
+        for additional in (120,60):
+            with self.subTest(additional=additional),self.assertRaises(ValueError) as error:
+                extension.extend(self.aws,self.a['stack'],h.REGION,additional,
+                                 now=NOW+dt.timedelta(minutes=142,seconds=31))
+            message=str(error.exception)
+            for detail in ('deadline 2026-11-16 20:30:00 UTC','7.48 minutes remaining',
+                           'at least 15 minutes','Latest allowed time: 2026-11-16 20:15:00 UTC'):
+                self.assertIn(detail,message)
+        self.assertEqual(self.aws.schedules,original)
+        self.assertFalse(self.aws.writes)
+
     def test_external_change_between_scope_check_and_prepare_is_rejected(self):
         reads=[]
         def mutate(service,action,args,result):

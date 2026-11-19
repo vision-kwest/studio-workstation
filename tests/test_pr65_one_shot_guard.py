@@ -73,6 +73,22 @@ class GuardTests(unittest.TestCase):
             with self.assertRaises(ValueError):guard.arm(scheduler,ec2,p)
             scheduler.create_schedule.assert_not_called();ec2.terminate_instances.assert_not_called()
 
+    def test_time_bound_errors_distinguish_upper_limit_expiry_and_operation_headroom(self):
+        self.aws.calls=[]
+        with self.assertRaisesRegex(ValueError,'250.00 minutes remaining; maximum is 240 minutes'):
+            guard.status(self.aws,self.selected,now=NOW-dt.timedelta(minutes=100),headroom=15)
+        for headroom in (5,15,80):
+            cutoff=NOW+dt.timedelta(minutes=150-headroom)
+            with self.subTest(headroom=headroom):
+                guard.status(self.aws,self.selected,now=cutoff,headroom=headroom)
+                with self.assertRaises(ValueError) as error:
+                    guard.status(self.aws,self.selected,now=cutoff+dt.timedelta(minutes=1),headroom=headroom)
+                self.assertIn(f'requires at least {headroom} minutes',str(error.exception))
+                self.assertIn(f'Latest allowed time: {cutoff:%Y-%m-%d %H:%M:%S} UTC',str(error.exception))
+        with self.assertRaisesRegex(ValueError,'expired 1.00 minutes ago'):
+            guard.status(self.aws,self.selected,now=NOW+dt.timedelta(minutes=151),headroom=15)
+        self.assertFalse(self.aws.writes)
+
     def test_arming_failure_terminates_only_owned_instance_and_reports_double_failure(self):
         for double in (False,True):
             scheduler=Mock();scheduler.create_schedule.side_effect=RuntimeError('injected')

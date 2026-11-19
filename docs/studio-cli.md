@@ -163,6 +163,9 @@ python3 studio workstation extend-expiration art --additional-minutes 60
 
 An extension is an immediate authorized schedule change. It requires at least
 15 minutes before the current deadline and a resulting 80–240 minutes remaining.
+Inside that final 15-minute window, every extension amount is rejected before any
+schedule update. The error reports the deadline, remaining time and extension cutoff
+in UTC; reducing `--additional-minutes` cannot move that cutoff.
 The fallback is moved first; both targets/roles are read back and failures are
 reconciled without changing the selected deployment. Start requires 80 minutes
 remaining before billing. Stop never needs healthy optional hostname infrastructure.
