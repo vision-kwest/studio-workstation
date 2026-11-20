@@ -2,10 +2,12 @@
 
 ## Evidence and branch status
 
-Issue #98 replaces the fixed PR #65 acceptance name and CPU-return hostname model.
-Issue #68 changes ordinary GPU expiration to stop EC2 while preserving its stack
-and disk, and permits user-selected durations. This guide describes that source
-behavior; exact offline/live validation belongs in its implementation PR.
+Merged PR #116 implements Issue #98's named lifecycle, replacing the fixed PR #65
+acceptance name and CPU-return hostname model. Its browser acceptance and measured
+test evidence are recorded in PR #116 and Issue #98. Issue #68 changes ordinary GPU
+expiration to stop EC2 while preserving its stack and disk, with user-selected
+durations. Issue #125 adds automatic assignment of a free hostname. Each change's
+implementation PR records its own offline/live validation.
 Historical acceptance records describe older commands and test-only cleanup.
 Existing deployments are not automatically converted by updating the CLI.
 
@@ -51,8 +53,12 @@ Create is billable unless `--dry-run` is present. The default DCV TCP/8443 CIDR 
 There is no public-DCV acknowledgment flag and no SSH ingress. A restricted CIDR
 must include the network from which endpoint checks/browser connections run.
 
-Create/start do not acquire the shared hostname or certificate permissions. Every
-running desktop must have a current, reachable HTTPS login page. A non-owner uses
+CPU/GPU create/start claims the shared hostname automatically when unassigned,
+then prepares trusted TLS. An existing owner keeps it, including a stopped owner;
+publishers and dry runs never claim it. Plain `connect NAME` selects the endpoint
+automatically. `--hostname dcv.kwesidavis.com` requires verified ownership and trusted
+TLS; it does not assign the hostname and is unnecessary for ordinary connections.
+Every running desktop must have a current, reachable HTTPS login page. A non-owner uses
 `https://PUBLIC_IPV4:8443`, with an expected certificate/identity warning. The owner
 uses `https://dcv.kwesidavis.com:8443` only after strict DNS/TLS/ownership validation.
 An HTTP HTML response proves reachability, not authenticated desktop login. Browsers
@@ -203,16 +209,22 @@ migration of a running workstation or its active installation.
 ```bash
 python3 studio workstation hostname status
 python3 studio workstation hostname assign art
-python3 studio workstation hostname assign edit
+python3 studio workstation connect art
 python3 studio workstation hostname release
 ```
+
+Use `hostname assign NAME` to intentionally transfer an occupied hostname or retry
+after an automatic-setup warning. Create/start explains whether it claimed the
+hostname or preserved its current owner. A failed automatic attempt prints a
+warning and retry command, then rechecks the current endpoint: a working public-IP
+desktop remains usable; failed endpoint recovery is still an error.
 
 These assignment/release commands write AWS resources immediately. Serialize them;
 there is no distributed lock and AWS EIP association has no compare-and-swap API.
 They preserve the existing allocation and DNS record. No additional permanent EIP,
 second ENI or proxy is created. The hostname owner does not need two public addresses.
 
-Assignment verifies the managed target, primary-only ENI topology, DCV and certificate,
+Explicit assignment verifies the managed target, primary-only ENI topology, DCV and certificate,
 rechecks ownership, moves the EIP, then verifies both the destination and former owner.
 Native public IPv4 reacquisition is attempted first. Bounded previous-owner stop/start
 is a fallback, with temporary interruption; a GPU rearms and verifies its stop
@@ -225,8 +237,12 @@ and pending destination. The existing pinned AWCP installer and activation are r
 only after successful transfer is previous-owner export access revoked. Cached
 certificates may remain on a former owner, but it has no ongoing export permission.
 Stale grants from terminated owners are reconciled against actual EC2 identity.
-Rollback never steals the EIP from an unexpected new owner. Stop/destroy releases
-the selected owner's association; it does not choose a CPU to receive it.
+Rollback never steals the EIP from an unexpected new owner. CLI stop/destroy releases
+the selected owner's association; it does not choose a CPU to receive it. Native
+automatic stop keeps the association and certificate permission, so another desktop
+will not claim that stopped owner's hostname. Start reuses its own assignment or
+claims a free hostname. Use explicit assignment/release to change a stopped owner's
+hostname when needed.
 
 ## Publisher
 
@@ -264,8 +280,8 @@ Offline tests exercise isolation, creation/arming failures, verified extensions,
 automatic stop/rearm, incomplete native deletion, hostname failures and recovery.
 Live acceptance separately checks native Scheduler execution, IAM scope, actual
 CPU/GPU/DCV, public-IP reacquisition, persistence and cleanup. User-authenticated
-browser login is a final gate. Consult Issues #68 and #98 for observed evidence and limits.
-No merge or production acceptance is implied. Roll back source by reverting the
-integration; source rollback does not migrate deployed timers. Destructive live-test
+browser login is a final gate. Consult Issues #68, #98 and #125 for observed evidence
+and limits. Roll back source by reverting the affected change; source rollback does
+not migrate deployed timers. Destructive live-test
 safeguards may be created separately for explicitly selected disposable test resources;
 they are not a mode or default of the ordinary Studio CLI.

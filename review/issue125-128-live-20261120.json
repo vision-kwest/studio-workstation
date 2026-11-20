@@ -1,0 +1,1873 @@
+{
+  "status": "live_accepted_cleanup_verified",
+  "scope": "Actual Studio CLI combined PR126/128 live acceptance",
+  "source_commit": "b0d0757fb64271c9bd69581a246c79f12fbd7cda",
+  "source_tree": "d83d339a25ba97fb0376f5f6c7645cc7b5949336",
+  "base_main": "dfe390465baa31e5689511d8f5cd3500caf9e506",
+  "names": {
+    "client": "studio-cli-client-20261120-1725",
+    "cpu": "studio-live126-cpu-20261120-1725",
+    "gpu": "studio-live128-gpu-20261120-1725",
+    "safety": "studio-expiry-234792decfc2403f7c48",
+    "guard": "studio-live126128-guard-20261120",
+    "clientIam": "studio-live126128-client-iam-20261120"
+  },
+  "guard_stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126128-guard-20261120/d296dc70-e507-11f1-a9e2-0afff3da9dc5",
+  "protected": {
+    "stack": "comfyUi2",
+    "instance": "i-03d7699a7a84f97bf",
+    "volume": "vol-04cfea9fc49d43a18",
+    "state": "stopped",
+    "legacy_timers": "both DISABLED",
+    "shared_eip": "eipalloc-0879a34aa1a1298dd",
+    "hostname": "dcv.kwesidavis.com",
+    "hostname_initially_unassigned": true
+  },
+  "planned_cutoffs": {
+    "workstation_stack_delete_utc": "2026-11-20T19:15:00Z",
+    "workstation_terminate_fallback_utc": "2026-11-20T19:20:00Z",
+    "client_stack_delete_utc": "2026-11-20T19:21:00Z",
+    "client_terminate_fallback_utc": "2026-11-20T19:22:00Z",
+    "client_management_policy_expiry_utc": "2026-11-20T19:25:00Z"
+  },
+  "offline": {
+    "tests": 311,
+    "subtests": 235,
+    "canonical_res_tests": "in CI"
+  },
+  "created_compute": [
+    {
+      "profile": "client",
+      "id": "i-0fef4795526d4efb2",
+      "state": "running",
+      "ip": "100.31.205.184",
+      "volumes": [
+        {
+          "DeviceName": "/dev/sda1",
+          "Ebs": {
+            "AttachTime": "2026-11-20T17:35:28.571000+00:00",
+            "DeleteOnTermination": true,
+            "Status": "attached",
+            "VolumeId": "vol-032007295eec678c0",
+            "EbsCardIndex": 0
+          }
+        }
+      ],
+      "eni": [
+        "eni-0e4763e585922061f"
+      ],
+      "launch": "2026-11-20T17:35:28+00:00",
+      "stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-cli-client-20261120-1725/c13c2740-e508-11f1-ac23-12fff5aab171",
+      "sg": "sg-0fcbd7234317a5fb5"
+    },
+    {
+      "profile": "cpu",
+      "id": "i-05883164f07cbc4ca",
+      "state": "running",
+      "volumes": [
+        {
+          "DeviceName": "/dev/sda1",
+          "Ebs": {
+            "AttachTime": "2026-11-20T17:38:21.915000+00:00",
+            "DeleteOnTermination": true,
+            "Status": "attached",
+            "VolumeId": "vol-032f14ec203d7f8cd",
+            "EbsCardIndex": 0
+          }
+        }
+      ],
+      "eni": [
+        "eni-0b41750615ebe178b"
+      ],
+      "stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad",
+      "sg": "sg-05eecaff7f791095b"
+    },
+    {
+      "profile": "gpu",
+      "id": "i-00f7cc7ba7458f405",
+      "eni": "eni-05f3edc6410e81859",
+      "stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb",
+      "root_volume": "vol-003294486f7e71384",
+      "sg": "sg-0e967d6133ec42b0a",
+      "launch_utc": "2026-11-20T17:51:45Z"
+    }
+  ],
+  "guard_role": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+  "client_iam_stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126128-client-iam-20261120/2ddec7f0-e508-11f1-8b2f-12fff898354f",
+  "client_iam_outputs": {
+    "ClientRoleArn": "arn:aws:iam::401233741942:role/studio-live126128-client-iam-20261120-ClientRole-5JQ513B0S2d6",
+    "TestPolicy2": "arn:aws:iam::401233741942:policy/studio-live126128-client-iam-20261120-TestPolicy2-Lmv6ItVqZvKJ",
+    "TestPolicy3": "arn:aws:iam::401233741942:policy/studio-live126128-client-iam-20261120-TestPolicy3-UYMRJb6UocKo",
+    "TestPolicy1": "arn:aws:iam::401233741942:policy/studio-live126128-client-iam-20261120-TestPolicy1-YHsdQr4Tf3Js",
+    "ClientProfileArn": "arn:aws:iam::401233741942:instance-profile/studio-live126128-client-iam-20261120-ClientProfile-aHGFi0hAW4g8",
+    "ClientProfileName": "studio-live126128-client-iam-20261120-ClientProfile-aHGFi0hAW4g8"
+  },
+  "external_cleanup": [
+    {
+      "Name": "studio-live126128-cleanup-cpu-20261120",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-20T19:15:00)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "DELETE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+        "Input": "{\"StackName\": \"studio-live126-cpu-20261120-1725\"}",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 3
+        }
+      }
+    },
+    {
+      "Name": "studio-live126128-cleanup-gpu-20261120",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-20T19:15:00)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "DELETE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+        "Input": "{\"StackName\": \"studio-live128-gpu-20261120-1725\"}",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 3
+        }
+      }
+    },
+    {
+      "Name": "studio-live126128-cleanup-client-20261120",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-20T19:21:00)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "DELETE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+        "Input": "{\"StackName\": \"studio-cli-client-20261120-1725\"}",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 3
+        }
+      }
+    }
+  ],
+  "client_guards": {
+    "primary": {
+      "Name": "studio-live126128-cleanup-client-20261120",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-20T19:21:00)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "DELETE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+        "Input": "{\"StackName\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-cli-client-20261120-1725/c13c2740-e508-11f1-ac23-12fff5aab171\"}",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 3
+        }
+      }
+    },
+    "fallback": {
+      "Name": "studio-live126128-fallback-client-20261120",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-20T19:22:00)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "DELETE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:ec2:terminateInstances",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+        "Input": "{\"InstanceIds\": [\"i-0fef4795526d4efb2\"]}",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 3
+        }
+      }
+    },
+    "ssm": [
+      {
+        "InstanceId": "i-0fef4795526d4efb2",
+        "PingStatus": "Online",
+        "LastPingDateTime": "2026-11-20T17:36:11.509000+00:00",
+        "AgentVersion": "3.3.4793.0",
+        "IsLatestVersion": false,
+        "PlatformType": "Linux",
+        "PlatformName": "Ubuntu",
+        "PlatformVersion": "24.04",
+        "ResourceType": "EC2Instance",
+        "IPAddress": "172.31.6.175",
+        "ComputerName": "ip-172-31-6-175.ec2.internal",
+        "SourceId": "i-0fef4795526d4efb2",
+        "SourceType": "AWS::EC2::Instance"
+      }
+    ],
+    "checked_at": "2026-11-20T17:36:37.160076+00:00"
+  },
+  "cpu_create_command": {
+    "command_id": "ad0bb86d-2024-4dbe-bb16-8a29bf185b16",
+    "status": "Pending",
+    "submitted_at": "2026-11-20T17:37:58.699899+00:00"
+  },
+  "cpu_guards": {
+    "cpu_primary": {
+      "Name": "studio-live126128-cleanup-cpu-20261120",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-20T19:15:00)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "DELETE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+        "Input": "{\"StackName\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\"}",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 3
+        }
+      }
+    },
+    "cpu_fallback": {
+      "Name": "studio-live126128-fallback-cpu-20261120",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-20T19:20:00)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "DELETE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:ec2:terminateInstances",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+        "Input": "{\"InstanceIds\": [\"i-05883164f07cbc4ca\"]}",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 3
+        }
+      }
+    },
+    "progress_command": "ef96907f-7f53-4f35-9bd9-1d8024f15076",
+    "checked_at": "2026-11-20T17:39:13.255666+00:00"
+  },
+  "client_ready": {
+    "status": "Success",
+    "code": 0,
+    "stdout": "b0d0757fb64271c9bd69581a246c79f12fbd7cda\nd83d339a25ba97fb0376f5f6c7645cc7b5949336\naws-cli/2.41.2 Python/3.14.10 Linux/7.0.0-1014-aws exe/x86_64.ubuntu.24\narn:aws:sts::401233741942:assumed-role/studio-live126128-client-iam-20261120-ClientRole-5JQ513B0S2d6/i-0fef4795526d4efb2\nDRY RUN: validated template; deployment not executed.\nDRY RUN: validated template; deployment not executed.\nSTUDIO_COMBINED_CLIENT_READY\n",
+    "stderr": "[2026-11-20T17:36:59+00:00] create scope=studio-live126-cpu-20261120-1725 elapsed=0.0s stage=Validating request last=not observed | started\n[2026-11-20T17:36:59+00:00] create scope=studio-live126-cpu-20261120-1725 elapsed=0.0s stage=Rendering and validating workstation template last=not observed | progress\n[2026-11-20T17:37:01+00:00] create scope=studio-live126-cpu-20261120-1725 elapsed=1.2s stage=Shared /studio and Rez setup requested after DCV last=not observed | progress\nWARNING: DCV login will be publicly accessible on TCP 8443.\n[2026-11-20T17:37:01+00:00] create scope=studio-live126-cpu-20261120-1725 elapsed=1.2s stage=Shared /studio and Rez setup requested after DCV last=not observed | command finished\n[2026-11-20T17:37:01+00:00] create scope=studio-live128-gpu-20261120-1725 elapsed=0.0s stage=Validating request last=not observed | started\n[2026-11-20T17:37:01+00:00] create scope=studio-live128-gpu-20261120-1725 elapsed=0.1s stage=Rendering and validating workstation template last=not observed | progress\n[2026-11-20T17:37:03+00:00] create scope=studio-live128-gpu-20261120-1725 elapsed=2.5s stage=Shared /studio and Rez setup requested after DCV last=not observed | progress\nWARNING: DCV login will be publicly accessible on TCP 8443.\n[2026-11-20T17:37:03+00:00] create scope=studio-live128-gpu-20261120-1725 elapsed=2.5s stage=Shared /studio and Rez setup requested after DCV last=not observed | command finished\n"
+  },
+  "gpu_create_command": {
+    "command_id": "696ee167-f7d6-4b61-8ea8-9bd07b5affa8",
+    "status": "Pending",
+    "submitted_at": "2026-11-20T17:50:37.824593+00:00"
+  },
+  "live_acceptance": [
+    {
+      "gate": "GPU create accepts 8h and arms native StopInstances schedule",
+      "status": "passed",
+      "evidence": {
+        "Name": "studio-stop-ebac5750-e50a-11f1-8168-0affd2542b87",
+        "State": "ENABLED",
+        "ScheduleExpression": "at(2026-11-21T01:52:13)",
+        "Target": {
+          "Arn": "arn:aws:scheduler:::aws-sdk:ec2:stopInstances",
+          "RoleArn": "arn:aws:iam::401233741942:role/studio-expiry-234792decfc2403f7c48-ExpirationRole-KP3SlH209fRA",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 2
+          },
+          "Input": "{\"InstanceIds\":[\"i-00f7cc7ba7458f405\"]}"
+        },
+        "ActionAfterCompletion": "NONE"
+      }
+    },
+    {
+      "gate": "Actual CLI accepts additional 600 minutes while GPU runs",
+      "status": "passed",
+      "command_id": "66b05cf5-8a94-4b3b-a5d4-5ef952b01390",
+      "output": {
+        "stack": "studio-live128-gpu-20261120-1725",
+        "instance_id": "i-00f7cc7ba7458f405",
+        "previous_stop_utc": "2026-11-21T01:52:13+00:00",
+        "proposed_stop_utc": "2026-11-21T11:52:13+00:00",
+        "additional_minutes": 600,
+        "extended": true,
+        "recovered_after_error": false,
+        "state": "running"
+      }
+    },
+    {
+      "gate": "Extension preserves eight-hour remembered restart duration",
+      "status": "passed",
+      "output": {
+        "stack": "studio-live128-gpu-20261120-1725",
+        "stack_id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb",
+        "profile": "gpu",
+        "stack_status": "CREATE_COMPLETE",
+        "instance": "i-00f7cc7ba7458f405",
+        "safety_stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87",
+        "state": "running",
+        "public_ip": "54.236.42.139",
+        "dcv_url": "https://54.236.42.139:8443",
+        "expiration": {
+          "stop_at": "2026-11-21T11:52:13+00:00",
+          "duration_minutes": 480,
+          "remaining_seconds": 64308,
+          "status": "scheduled"
+        }
+      }
+    },
+    {
+      "gate": "CPU create remains usable after optional hostname IAM denial",
+      "status": "passed",
+      "command_id": "ad0bb86d-2024-4dbe-bb16-8a29bf185b16",
+      "output": {
+        "stack": "studio-live126-cpu-20261120-1725",
+        "stack_id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad",
+        "profile": "cpu",
+        "stack_status": "CREATE_COMPLETE",
+        "instance": "i-05883164f07cbc4ca",
+        "safety_stack": null,
+        "state": "running",
+        "public_ip": "18.213.111.0",
+        "dcv_url": "https://18.213.111.0:8443"
+      }
+    },
+    {
+      "gate": "GPU create automatically claims free trusted hostname",
+      "status": "passed",
+      "output": {
+        "stack": "studio-live128-gpu-20261120-1725",
+        "stack_id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb",
+        "profile": "gpu",
+        "stack_status": "CREATE_COMPLETE",
+        "instance": "i-00f7cc7ba7458f405",
+        "safety_stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87",
+        "state": "running",
+        "public_ip": "54.159.180.104",
+        "dcv_url": "https://dcv.kwesidavis.com:8443",
+        "expiration": {
+          "stop_at": "2026-11-21T11:52:13+00:00",
+          "duration_minutes": 480,
+          "remaining_seconds": 63699,
+          "status": "scheduled"
+        }
+      }
+    },
+    {
+      "gate": "Plain CLI connect automatically returns verified trusted hostname",
+      "status": "passed",
+      "output": "https://dcv.kwesidavis.com:8443\nReachable HTTPS login page; trusted certificate verified.\n"
+    },
+    {
+      "gate": "CPU start preserves running GPU hostname owner and returns public IP",
+      "status": "passed",
+      "output": "{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"stopped\",\n  \"public_ip\": null,\n  \"dcv_url\": null\n}\n{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"running\",\n  \"public_ip\": \"52.205.41.136\",\n  \"dcv_url\": \"https://52.205.41.136:8443\"\n}\n"
+    },
+    {
+      "gate": "Explicit CLI GPU stop releases shared hostname and preserves allocation/base tags",
+      "status": "passed",
+      "observed_utc": "2026-11-20T18:22:15.157387Z",
+      "allocation": "eipalloc-0879a34aa1a1298dd",
+      "hostname_status": {
+        "owner": null,
+        "instance": null,
+        "stale_owner_tag": null
+      }
+    },
+    {
+      "gate": "CPU start automatically claims newly available hostname with trusted TLS",
+      "status": "passed",
+      "command_id": "0a1047c8-2d63-4afc-b295-ac59212a4048",
+      "output": "https://52.205.41.136:8443\nReachable HTTPS login page; IP certificate warning expected; identity is not TLS-verified.\n{\n  \"stack\": \"studio-live128-gpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb\",\n  \"profile\": \"gpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-00f7cc7ba7458f405\",\n  \"safety_stack\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87\",\n  \"state\": \"stopped\",\n  \"public_ip\": null,\n  \"dcv_url\": null\n}\n{\n  \"hostname\": \"dcv.kwesidavis.com\",\n  \"public_ip\": \"54.159.180.104\",\n  \"owner\": null,\n  \"instance\": null,\n  \"stale_owner_tag\": null\n}\n{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"stopped\",\n  \"public_ip\": null,\n  \"dcv_url\": null\n}\n{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"running\",\n  \"public_ip\": \"54.159.180.104\",\n  \"dcv_url\": \"https://dcv.kwesidavis.com:8443\"\n}\n"
+    },
+    {
+      "gate": "Actual CLI rearmed a ten-minute native stop schedule before starting EC2",
+      "status": "passed",
+      "schedule_modified_utc": "2026-11-20T18:30:54.822Z",
+      "ec2_launch_utc": "2026-11-20T18:30:57Z",
+      "initial_stop_utc": "2026-11-20T18:40:53Z",
+      "instance": "i-00f7cc7ba7458f405",
+      "volume": "vol-003294486f7e71384"
+    },
+    {
+      "gate": "CPU start preserves stopped GPU hostname owner",
+      "status": "passed",
+      "command_id": "3d15fb47-1aca-457d-88fd-c080480cf787",
+      "hostname_check_utc": "2026-11-20T18:50:54Z",
+      "stopped_owner": "i-00f7cc7ba7458f405",
+      "eip_association": "eipassoc-0d92500ba9f36b763",
+      "cpu_endpoint": "https://100.48.220.45:8443"
+    },
+    {
+      "gate": "Native scheduled stop preserves stack, root EBS and hostname",
+      "status": "passed",
+      "event_id": "7e882afc-193e-4da6-b142-a564f02f822d",
+      "stopped_observed_utc": "2026-11-20T18:49:41.155408Z"
+    },
+    {
+      "gate": "Actual CLI start without override rearms remembered ten minutes before EC2 start",
+      "status": "passed",
+      "command_id": "bf156e06-3031-410b-a908-cb011c34c11f",
+      "schedule_modified_utc": "2026-11-20T18:52:01.240Z",
+      "ec2_launch_utc": "2026-11-20T18:52:06Z",
+      "fresh_stop_utc": "2026-11-20T19:01:58Z",
+      "duration_minutes": 10,
+      "endpoint": "https://dcv.kwesidavis.com:8443"
+    },
+    {
+      "gate": "Local file and EBS survive scheduled stop and restart; DCV/T4 available",
+      "status": "passed",
+      "command_id": "3d9c8b0a-7fa4-4fa4-aeeb-6f4f62d0662f",
+      "root_volume": "vol-003294486f7e71384",
+      "sha256_matches_initial": true
+    },
+    {
+      "gate": "Plain connect after scheduled stop/restart returns verified trusted hostname",
+      "status": "passed",
+      "command_id": "bf156e06-3031-410b-a908-cb011c34c11f"
+    },
+    {
+      "gate": "Authenticated graphical desktop in browser",
+      "status": "passed",
+      "evidence": "User confirmation and screenshot showing the test GPU desktop at the trusted hostname"
+    },
+    {
+      "gate": "Real CLI near-deadline extension",
+      "status": "passed",
+      "remaining_seconds": 49.99983,
+      "additional_minutes": 1,
+      "previous_deadline_utc": "2026-11-20T18:40:53Z",
+      "new_deadline_utc": "2026-11-20T18:41:53Z"
+    },
+    {
+      "gate": "Explicit cleanup and protected-resource invariants",
+      "status": "passed",
+      "evidence": "final_resources, final_shared_resources and cleanup sections"
+    }
+  ],
+  "temporary_login_parameter": {
+    "parameter_name": "/studio/live-tests/pr126128-20261120/dcv-password",
+    "version": 1,
+    "type": "SecureString",
+    "created_at": "2026-11-20T17:50:54.695197+00:00"
+  },
+  "gpu_guards": {
+    "primary": {
+      "Name": "studio-live126128-cleanup-gpu-20261120",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-20T19:15:00)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "DELETE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 3
+        },
+        "Input": "{\"StackName\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb\"}"
+      }
+    },
+    "fallback": {
+      "Name": "studio-live126128-fallback-gpu-20261120",
+      "GroupName": "studio-task7-pr61",
+      "State": "ENABLED",
+      "ScheduleExpression": "at(2026-11-20T19:20:00)",
+      "ScheduleExpressionTimezone": "UTC",
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "DELETE",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:ec2:terminateInstances",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-live126128-guard-20261120-CleanupRole-uTcGjxKxS2y4",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 3
+        },
+        "Input": "{\"InstanceIds\": [\"i-00f7cc7ba7458f405\"]}"
+      }
+    },
+    "checked_at": "2026-11-20T17:52:25.950034+00:00"
+  },
+  "gpu_native_safety": {
+    "stack": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87",
+    "role": "arn:aws:iam::401233741942:role/studio-expiry-234792decfc2403f7c48-ExpirationRole-KP3SlH209fRA",
+    "schedule": "studio-stop-ebac5750-e50a-11f1-8168-0affd2542b87",
+    "group": "studio-task7-pr61"
+  },
+  "iam_narrowing": {
+    "client": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126128-client-iam-20261120/2ddec7f0-e508-11f1-8b2f-12fff898354f",
+    "guard": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126128-guard-20261120/d296dc70-e507-11f1-a9e2-0afff3da9dc5",
+    "narrowed_schedule": "arn:aws:scheduler:us-east-1:401233741942:schedule/studio-task7-pr61/studio-stop-ebac5750-e50a-11f1-8168-0affd2542b87",
+    "narrowed_enis": [
+      "eni-0b41750615ebe178b",
+      "eni-05f3edc6410e81859"
+    ],
+    "updated_at": "2026-11-20T17:53:01.995028+00:00"
+  },
+  "native_timer_iam": {
+    "inline": [
+      {
+        "RoleName": "studio-expiry-234792decfc2403f7c48-ExpirationRole-KP3SlH209fRA",
+        "PolicyName": "StudioWorkstationExpiry",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Condition": {
+                "StringEquals": {
+                  "ec2:ResourceTag/StudioCleanupToken": "ebac5750-e50a-11f1-8168-0affd2542b87",
+                  "ec2:ResourceTag/StudioStack": "studio-live128-gpu-20261120-1725"
+                }
+              },
+              "Action": "ec2:StopInstances",
+              "Resource": "arn:aws:ec2:us-east-1:401233741942:instance/*",
+              "Effect": "Allow"
+            }
+          ]
+        }
+      }
+    ],
+    "attached": []
+  },
+  "cpu_create_result": {
+    "Status": "Success",
+    "ResponseCode": 0,
+    "StandardOutputContent": "{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"running\",\n  \"public_ip\": \"18.213.111.0\",\n  \"dcv_url\": \"https://18.213.111.0:8443\"\n}\n",
+    "StandardErrorContent": ""
+  },
+  "test_harness_corrections": [
+    {
+      "finding": "DeleteTags of absent optional EIP metadata omitted aws:TagKeys, so the test role's Null=false guard denied the no-op. Automatic hostname assignment rolled back; desktop remained usable at verified public-IP URL.",
+      "scope": "Temporary client IAM only",
+      "resolved": true
+    },
+    {
+      "finding": "Temporary test role omitted AWS-ConfigureAWSPackage document required by the existing default EFS helper path.",
+      "scope": "Temporary client IAM only",
+      "resolved": true
+    }
+  ],
+  "persistence": {
+    "path": "/home/workstation/studio-pr126128-local-work.bin",
+    "initial_sha256": "3914680c0b71ba1dbfde81964b0614e96c327fd5400e11e09c4b45953484f387",
+    "storage": "/dev/nvme1n1p1 ext4",
+    "root_volume": "vol-003294486f7e71384",
+    "initial_command": "de554d41-f10d-4b3f-81b5-69d13fa925d5",
+    "after_explicit_restart_sha256": "3914680c0b71ba1dbfde81964b0614e96c327fd5400e11e09c4b45953484f387",
+    "after_explicit_restart_matches": true,
+    "before_expiration_evidence": {
+      "Status": "Success",
+      "ResponseCode": 0,
+      "StandardOutputContent": "3914680c0b71ba1dbfde81964b0614e96c327fd5400e11e09c4b45953484f387  /home/workstation/studio-pr126128-local-work.bin\n/dev/nvme0n1p1 ext4\nloop0   \nloop1   \nloop2   \nloop3   \nloop4   \nloop5   \nloop6   \nloop7   \nloop8   \nloop9   \nloop10  \nloop11  \nloop12  \nnvme0n1 vol003294486f7e71384\nnvme1n1 AWS2514EAC990A448A16\nSession: \n\tid: console\n\towner: workstation\n\tdisplay layout: 2560x1600+0+0\nGPU 0: Tesla T4 (UUID: GPU-37648c37-db0b-e77f-d652-f52624a89791)\n",
+      "StandardErrorContent": ""
+    },
+    "after_automatic_restart_command": {
+      "command_id": "3d9c8b0a-7fa4-4fa4-aeeb-6f4f62d0662f",
+      "requested_at": "2026-11-20T18:54:56.532000+00:00"
+    },
+    "after_automatic_restart_readback": {
+      "checked_at": "2026-11-20T18:55:37.341471+00:00",
+      "persistence": {
+        "Status": "Success",
+        "ResponseCode": 0,
+        "StandardOutputContent": "{\"path\": \"/home/workstation/studio-pr126128-local-work.bin\", \"sha256\": \"3914680c0b71ba1dbfde81964b0614e96c327fd5400e11e09c4b45953484f387\", \"matches_initial\": true, \"size\": 65576, \"owner_uid\": 2000}\nFilesystem     Mounted on\n/dev/root      /\nNAME    SERIAL\nloop0   \nloop1   \nloop2   \nloop3   \nloop4   \nloop5   \nloop6   \nloop7   \nloop8   \nloop9   \nloop10  \nloop11  \nloop12  \nnvme1n1 AWS22187DAC7DEE67E2C\nnvme0n1 vol003294486f7e71384\nactive\nSession: 'console' (owner:workstation type:console)\nGPU 0: Tesla T4 (UUID: GPU-e1c06887-c2d9-7d87-d281-55866164fb6d)\n",
+        "StandardErrorContent": ""
+      },
+      "gpu_restart": {
+        "Status": "InProgress",
+        "ResponseCode": -1,
+        "StandardOutputContent": "",
+        "StandardErrorContent": ""
+      }
+    },
+    "after_automatic_restart_sha256": "3914680c0b71ba1dbfde81964b0614e96c327fd5400e11e09c4b45953484f387",
+    "after_automatic_restart_matches": true
+  },
+  "gpu_create_result": {
+    "Status": "Success",
+    "ResponseCode": 0,
+    "StandardOutputContent": "{\n  \"stack\": \"studio-live128-gpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb\",\n  \"profile\": \"gpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-00f7cc7ba7458f405\",\n  \"safety_stack\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87\",\n  \"state\": \"running\",\n  \"public_ip\": \"54.159.180.104\",\n  \"dcv_url\": \"https://dcv.kwesidavis.com:8443\",\n  \"expiration\": {\n    \"stop_at\": \"2026-11-21T11:52:13+00:00\",\n    \"duration_minutes\": 480,\n    \"remaining_seconds\": 63699,\n    \"status\": \"scheduled\"\n  }\n}\n",
+    "StandardErrorContent": ""
+  },
+  "browser_acceptance": {
+    "trusted_login_page": "loaded in cloud browser at https://dcv.kwesidavis.com:8443/ without certificate interstitial, including after native auto-stop/restart",
+    "secure_sign_in": "first secure submission returned to login without visible error; fresh-page secure submission advanced to the instance-titled DCV connection screen",
+    "connection_title": "ip-172-31-10-48 - Amazon DCV",
+    "authenticated_desktop": "passed: user explicitly confirmed login and supplied screenshot of the rendered Ubuntu desktop",
+    "credentials": "user supplied through browserAuth secure form; never read or logged by the agent",
+    "test_login_parameter_cleanup": "deleted",
+    "cloud_browser_rendering": "blocked by WEBGL not available after secure sign-in advanced to the instance connection screen",
+    "user_evidence": {
+      "confirmation": "I was able to login with the temp password",
+      "screenshot_filename": "Screenshot 2026-11-20 at 11.09.33\u202fAM.png",
+      "screenshot_sha256": "678fc2e9aa06a13f8e3c42e4f41282150f8a51f3cd493f6df2ed79c77f278352",
+      "visible_url": "dcv.kwesidavis.com:8443",
+      "visible_session_host": "ip-172-31-10-48",
+      "matches_test_gpu_private_ip": "172.31.10.48",
+      "visible_desktop": "Ubuntu desktop and first-login welcome screen",
+      "visible_banner": "Network connection is unstable",
+      "scope": "Confirms authenticated graphical desktop. Does not constitute a sustained network-performance test.",
+      "image_publication": "original screenshot retained in conversation; image not added to repository"
+    },
+    "cloud_browser_rendering_error": "The connection has been closed. WEBGL not available",
+    "cloud_browser_issue_id": "86f44c2c-0978-4f86-9243-18e7c430ec5e"
+  },
+  "cpu_restart1_result": {
+    "Status": "Success",
+    "StandardOutputContent": "{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"stopped\",\n  \"public_ip\": null,\n  \"dcv_url\": null\n}\n{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"running\",\n  \"public_ip\": \"52.205.41.136\",\n  \"dcv_url\": \"https://52.205.41.136:8443\"\n}\n",
+    "StandardErrorContent": ""
+  },
+  "ci": {
+    "source_commit": "b0d0757fb64271c9bd69581a246c79f12fbd7cda",
+    "status": "six canonical workflows passed",
+    "workflow_run_ids": [
+      44783352781,
+      44783352666,
+      44783352607,
+      44783352653,
+      44783352975,
+      44783352810
+    ]
+  },
+  "graceful_stop": {
+    "request_utc": "2026-11-20T18:14:13Z",
+    "observed_stopped_by_utc": "2026-11-20T18:20:52Z",
+    "force_used": false,
+    "console": "Guest reported reboot: Power down; NVIDIA DRM warning trace also observed. No root cause or panic inferred.",
+    "cli_stop_and_hostname_cleanup_complete_utc": "2026-11-20T18:21:32Z"
+  },
+  "hostname_release_reclaim_result": {
+    "Status": "Success",
+    "StandardOutputContent": "https://52.205.41.136:8443\nReachable HTTPS login page; IP certificate warning expected; identity is not TLS-verified.\n{\n  \"stack\": \"studio-live128-gpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb\",\n  \"profile\": \"gpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-00f7cc7ba7458f405\",\n  \"safety_stack\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87\",\n  \"state\": \"stopped\",\n  \"public_ip\": null,\n  \"dcv_url\": null\n}\n{\n  \"hostname\": \"dcv.kwesidavis.com\",\n  \"public_ip\": \"54.159.180.104\",\n  \"owner\": null,\n  \"instance\": null,\n  \"stale_owner_tag\": null\n}\n{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"stopped\",\n  \"public_ip\": null,\n  \"dcv_url\": null\n}\n{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"running\",\n  \"public_ip\": \"54.159.180.104\",\n  \"dcv_url\": \"https://dcv.kwesidavis.com:8443\"\n}\n",
+    "StandardErrorContent": ""
+  },
+  "short_timer_command": {
+    "command_id": "973e4128-18cc-48fb-a93b-868cb6ecd97e",
+    "submitted_at": "2026-11-20T18:29:27.902167+00:00"
+  },
+  "test_harness_permission_limitations": [
+    "DeleteTags with absent aws:TagKeys satisfies ForAllValues; pinned CLI explicit tag arguments and final original-base-tag comparison remain required.",
+    "Shared base-role inline-policy writes and export-role trust edits are resource-scoped, not IAM-content constrained; final cleanup compares shared policy documents with the captured pre-cleanup snapshot and verifies the expected original policy inventory and deny-only export trust; a full pre-test policy snapshot was not retained."
+  ],
+  "short_timer_armed": {
+    "progress_command": "2e6473af-1e3d-4cbf-95c6-91222e8faa73",
+    "schedule": {
+      "ScheduleExpression": "at(2026-11-20T18:40:53)",
+      "LastModificationDate": "2026-11-20T18:30:54.822000+00:00",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:ec2:stopInstances",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-expiry-234792decfc2403f7c48-ExpirationRole-KP3SlH209fRA",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 2
+        },
+        "Input": "{\"InstanceIds\":[\"i-00f7cc7ba7458f405\"]}"
+      },
+      "State": "ENABLED"
+    },
+    "gpu": [
+      {
+        "InstanceId": "i-00f7cc7ba7458f405",
+        "State": {
+          "Code": 16,
+          "Name": "running"
+        },
+        "LaunchTime": "2026-11-20T18:30:57+00:00",
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "AttachTime": "2026-11-20T17:51:45.388000+00:00",
+              "DeleteOnTermination": true,
+              "Status": "attached",
+              "VolumeId": "vol-003294486f7e71384",
+              "EbsCardIndex": 0
+            }
+          }
+        ]
+      }
+    ],
+    "checked_at": "2026-11-20T18:31:51.814962+00:00"
+  },
+  "near_deadline_extension": {
+    "command_id": "973e4128-18cc-48fb-a93b-868cb6ecd97e",
+    "started_at": "2026-11-20T18:40:03.000170+00:00",
+    "remaining_seconds_at_invocation": 49.99983,
+    "returncode": 0,
+    "previous_stop_utc": "2026-11-20T18:40:53+00:00",
+    "proposed_stop_utc": "2026-11-20T18:41:53+00:00",
+    "additional_minutes": 1,
+    "extended": true,
+    "duration_minutes_unchanged": 10,
+    "schedule_last_modified": "2026-11-20T18:40:16.590000+00:00"
+  },
+  "native_auto_stop": {
+    "status": "stopped",
+    "event_id": "7e882afc-193e-4da6-b142-a564f02f822d",
+    "event_time": "2026-11-20T18:42:12Z",
+    "event_name": "StopInstances",
+    "issuer": "arn:aws:iam::401233741942:role/studio-expiry-234792decfc2403f7c48-ExpirationRole-KP3SlH209fRA",
+    "user_agent": "AmazonEventBridgeScheduler",
+    "target_instance": "i-00f7cc7ba7458f405",
+    "force": false,
+    "skip_os_shutdown": false,
+    "previous_state": "running",
+    "retained_root_volume": "vol-003294486f7e71384",
+    "retained_eip_association": "eipassoc-0d92500ba9f36b763",
+    "workload_stack_status": "CREATE_COMPLETE",
+    "safety_stack_status": "CREATE_COMPLETE",
+    "stopped_observed_at": "2026-11-20T18:49:41.155408+00:00",
+    "stopped_readback": [
+      {
+        "id": "i-00f7cc7ba7458f405",
+        "state": {
+          "Code": 80,
+          "Name": "stopped"
+        },
+        "root": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "AttachTime": "2026-11-20T17:51:45.388000+00:00",
+              "DeleteOnTermination": true,
+              "Status": "attached",
+              "VolumeId": "vol-003294486f7e71384",
+              "EbsCardIndex": 0
+            }
+          }
+        ],
+        "ip": "54.159.180.104"
+      }
+    ],
+    "stop_event_readback_at": "2026-11-20T18:45:13.835279+00:00",
+    "event_response_state": "stopping"
+  },
+  "stopped_owner_cpu_start": {
+    "command_id": "3d15fb47-1aca-457d-88fd-c080480cf787",
+    "requested_at": "2026-11-20T18:45:44.794Z",
+    "status": "passed",
+    "final_command_result": {
+      "Status": "Success",
+      "ResponseCode": 0,
+      "StandardOutputContent": "{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"running\",\n  \"public_ip\": \"100.48.220.45\",\n  \"dcv_url\": \"https://100.48.220.45:8443\"\n}\n",
+      "StandardErrorContent": ""
+    }
+  },
+  "pre_cleanup_readback": {
+    "checked_at": "2026-11-20T18:48:22.399061+00:00",
+    "gpu": [
+      {
+        "id": "i-00f7cc7ba7458f405",
+        "state": {
+          "Code": 64,
+          "Name": "stopping"
+        },
+        "root": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "AttachTime": "2026-11-20T17:51:45.388000+00:00",
+              "DeleteOnTermination": true,
+              "Status": "attached",
+              "VolumeId": "vol-003294486f7e71384",
+              "EbsCardIndex": 0
+            }
+          }
+        ],
+        "ip": "54.159.180.104"
+      }
+    ],
+    "cpu_start": {
+      "Status": "InProgress",
+      "ResponseCode": -1,
+      "StandardOutputContent": "",
+      "StandardErrorContent": ""
+    },
+    "base_inline": {
+      "PolicyNames": [
+        "StudioDcv-i-00f7cc7ba7458f405",
+        "StudioEfsSharedWrite",
+        "StudioPinnedRezBundleRead",
+        "StudioRes202606NvidiaGridRead",
+        "StudioWorkstationPr65VersionRead",
+        "StudioWorkstationReleaseRead"
+      ]
+    },
+    "base_attached": {
+      "AttachedPolicies": [
+        {
+          "PolicyName": "AmazonSSMManagedInstanceCore",
+          "PolicyArn": "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        }
+      ]
+    },
+    "export_role": {
+      "arn": "arn:aws:iam::401233741942:role/studio-issue43-dcv-acm-export",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::401233741942:role/StudioWorkstationSSMRole"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+              "StringEquals": {
+                "aws:userid": "AROAV223FBB3JOQHYPKDX:i-00f7cc7ba7458f405"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "export_inline": {
+      "PolicyNames": [
+        "StudioIssue43ExactAcMExport"
+      ]
+    },
+    "export_attached": {
+      "AttachedPolicies": []
+    }
+  },
+  "stopped_owner_readback": {
+    "checked_at": "2026-11-20T18:50:43.188329+00:00",
+    "stopped_status": {
+      "Status": "Success",
+      "ResponseCode": 0,
+      "StandardOutputContent": "{\n  \"stack\": \"studio-live128-gpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb\",\n  \"profile\": \"gpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-00f7cc7ba7458f405\",\n  \"safety_stack\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87\",\n  \"state\": \"stopped\",\n  \"public_ip\": \"54.159.180.104\",\n  \"dcv_url\": \"https://54.159.180.104:8443\",\n  \"expiration\": {\n    \"stop_at\": \"2026-11-20T18:41:53+00:00\",\n    \"duration_minutes\": 10,\n    \"remaining_seconds\": 0,\n    \"status\": \"expired\"\n  }\n}\n[2026-11-20T18:49:05+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=200.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:49:15+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=210.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:49:25+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=220.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:49:35+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=230.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:49:45+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=240.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:49:55+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=250.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:50:05+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=260.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:50:15+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=270.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:50:25+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=280.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:50:35+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=290.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n",
+      "StandardErrorContent": ""
+    },
+    "cpu_start": {
+      "Status": "InProgress",
+      "ResponseCode": -1,
+      "StandardOutputContent": "",
+      "StandardErrorContent": ""
+    },
+    "address": {
+      "Addresses": [
+        {
+          "AllocationId": "eipalloc-0879a34aa1a1298dd",
+          "AssociationId": "eipassoc-0d92500ba9f36b763",
+          "Domain": "vpc",
+          "NetworkInterfaceId": "eni-05f3edc6410e81859",
+          "NetworkInterfaceOwnerId": "401233741942",
+          "PrivateIpAddress": "172.31.10.48",
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "studio-dcv-kwesidavis-cpu"
+            },
+            {
+              "Key": "StudioOwnerStack",
+              "Value": "studio-independent-dcv"
+            },
+            {
+              "Key": "StudioDcvInstanceId",
+              "Value": "i-00f7cc7ba7458f405"
+            },
+            {
+              "Key": "StudioDcvHostname",
+              "Value": "dcv.kwesidavis.com"
+            },
+            {
+              "Key": "StudioIssue",
+              "Value": "43"
+            }
+          ],
+          "PublicIpv4Pool": "amazon",
+          "NetworkBorderGroup": "us-east-1",
+          "InstanceId": "i-00f7cc7ba7458f405",
+          "PublicIp": "54.159.180.104"
+        }
+      ]
+    }
+  },
+  "final_lifecycle_commands": {
+    "checked_at": "2026-11-20T18:51:43.774053+00:00",
+    "stopped_owner_preserved": {
+      "instance": "i-00f7cc7ba7458f405",
+      "state": "stopped",
+      "eip_association": "eipassoc-0d92500ba9f36b763"
+    },
+    "gpu_restart_command": {
+      "id": "bf156e06-3031-410b-a908-cb011c34c11f",
+      "requested_at": "2026-11-20T18:51:43.441000+00:00"
+    },
+    "cpu_destroy_command": {
+      "id": "8fda8e0b-b6b2-46f4-943c-016f2b685347",
+      "requested_at": "2026-11-20T18:51:43.694000+00:00"
+    }
+  },
+  "remembered_rearm_readback": {
+    "checked_at": "2026-11-20T18:52:16.389713+00:00",
+    "schedule": {
+      "Arn": "arn:aws:scheduler:us-east-1:401233741942:schedule/studio-task7-pr61/studio-stop-ebac5750-e50a-11f1-8168-0affd2542b87",
+      "GroupName": "studio-task7-pr61",
+      "Name": "studio-stop-ebac5750-e50a-11f1-8168-0affd2542b87",
+      "ScheduleExpression": "at(2026-11-20T19:01:58)",
+      "Description": "Studio auto-stop after 10 minutes",
+      "ScheduleExpressionTimezone": "UTC",
+      "State": "ENABLED",
+      "CreationDate": "2026-11-20T17:51:50.196000+00:00",
+      "LastModificationDate": "2026-11-20T18:52:01.240000+00:00",
+      "Target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:ec2:stopInstances",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-expiry-234792decfc2403f7c48-ExpirationRole-KP3SlH209fRA",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 60,
+          "MaximumRetryAttempts": 2
+        },
+        "Input": "{\"InstanceIds\":[\"i-00f7cc7ba7458f405\"]}"
+      },
+      "FlexibleTimeWindow": {
+        "Mode": "OFF"
+      },
+      "ActionAfterCompletion": "NONE"
+    },
+    "gpu": [
+      {
+        "id": "i-00f7cc7ba7458f405",
+        "state": {
+          "Code": 16,
+          "Name": "running"
+        },
+        "root": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "AttachTime": "2026-11-20T17:51:45.388000+00:00",
+              "DeleteOnTermination": true,
+              "Status": "attached",
+              "VolumeId": "vol-003294486f7e71384",
+              "EbsCardIndex": 0
+            }
+          }
+        ],
+        "launch": "2026-11-20T18:52:06+00:00",
+        "ip": "54.159.180.104"
+      }
+    ],
+    "cpu_destroy": {
+      "Status": "InProgress",
+      "ResponseCode": -1,
+      "StandardOutputContent": "",
+      "StandardErrorContent": ""
+    },
+    "gpu_ssm": {
+      "InstanceInformationList": []
+    }
+  },
+  "pre_cleanup_policy_documents": {
+    "checked_at": "2026-11-20T18:52:42.394259+00:00",
+    "policies": {
+      "StudioWorkstationSSMRole/StudioDcv-i-00f7cc7ba7458f405": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "sts:AssumeRole",
+            "Resource": "arn:aws:iam::401233741942:role/studio-issue43-dcv-acm-export",
+            "Condition": {
+              "StringEquals": {
+                "aws:userid": "AROAV223FBB3JOQHYPKDX:i-00f7cc7ba7458f405"
+              }
+            }
+          }
+        ]
+      },
+      "StudioWorkstationSSMRole/StudioEfsSharedWrite": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "StudioSharedEfsWrite",
+            "Effect": "Allow",
+            "Action": [
+              "elasticfilesystem:ClientMount",
+              "elasticfilesystem:ClientWrite"
+            ],
+            "Resource": "arn:aws:elasticfilesystem:us-east-1:401233741942:file-system/fs-054fd0b72429f4569",
+            "Condition": {
+              "Bool": {
+                "aws:SecureTransport": "true",
+                "elasticfilesystem:AccessedViaMountTarget": "true"
+              }
+            }
+          }
+        ]
+      },
+      "StudioWorkstationSSMRole/StudioPinnedRezBundleRead": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadPinnedRezBundle",
+            "Effect": "Allow",
+            "Action": "s3:GetObjectVersion",
+            "Resource": "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/software/rez/3.4.0/studio-rez-ubuntu2404.tar.gz"
+          }
+        ]
+      },
+      "StudioWorkstationSSMRole/StudioRes202606NvidiaGridRead": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ListOnlyResNvidiaGridLatest",
+            "Effect": "Allow",
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::ec2-linux-nvidia-drivers",
+            "Condition": {
+              "StringLike": {
+                "s3:prefix": [
+                  "latest/",
+                  "latest/*"
+                ]
+              }
+            }
+          },
+          {
+            "Sid": "ReadOnlyResNvidiaGrid5959107",
+            "Effect": "Allow",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::ec2-linux-nvidia-drivers/latest/NVIDIA-Linux-x86_64-595.91.07-grid-aws.run"
+          }
+        ]
+      },
+      "StudioWorkstationSSMRole/StudioWorkstationPr65VersionRead": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadExactPinnedGpuReleaseVersions",
+            "Effect": "Allow",
+            "Action": "s3:GetObjectVersion",
+            "Resource": [
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz",
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz",
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz"
+            ]
+          }
+        ]
+      },
+      "StudioWorkstationSSMRole/StudioWorkstationReleaseRead": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadPinnedStudioRelease",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetObject"
+            ],
+            "Resource": [
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/*/res-2026.06/installation-scripts.tar.gz",
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/*/res-2026.06/virtual-desktop.tar.gz"
+            ]
+          }
+        ]
+      },
+      "studio-issue43-dcv-acm-export/StudioIssue43ExactAcMExport": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ExportOnlyOneDcvCertificate",
+            "Effect": "Allow",
+            "Action": "acm:ExportCertificate",
+            "Resource": "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243"
+          }
+        ]
+      }
+    }
+  },
+  "final_progress_readback": {
+    "checked_at": "2026-11-20T18:54:32.584572+00:00",
+    "progress": {
+      "Status": "Success",
+      "ResponseCode": 0,
+      "StandardOutputContent": "[2026-11-20T18:52:06+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=22.6s stage=Waiting for ec2 instance-status-ok last=ec2:pending | progress\n[2026-11-20T18:52:13+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=30.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:52:23+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=40.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:52:33+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=50.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:52:43+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=60.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:52:53+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=70.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:53:03+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=80.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:53:13+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=90.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:53:23+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=100.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:53:33+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=110.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:53:43+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=120.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:53:53+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=130.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:52:34+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=50.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T18:52:44+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=60.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T18:52:54+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=70.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T18:53:04+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=80.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T18:53:06+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=82.6s stage=AWS waiter confirmed: cloudformation stack-delete-complete last=ec2:running | progress\n[2026-11-20T18:53:07+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=83.5s stage=AWS waiter confirmed: cloudformation stack-delete-complete last=cloudformation:DELETE_COMPLETE | observed\n[2026-11-20T18:53:07+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=83.5s stage=Verifying workstation resource removal last=cloudformation:DELETE_COMPLETE | progress\n[2026-11-20T18:53:08+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=84.7s stage=Verifying workstation resource removal last=ec2:terminated | observed\n[2026-11-20T18:53:13+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=89.6s stage=Checking independent DCV EIP release last=ec2:terminated | progress\n[2026-11-20T18:53:14+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=90.0s stage=Checking independent DCV EIP release last=ec2:terminated | heartbeat\n[2026-11-20T18:53:14+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=90.8s stage=Revoking former hostname certificate access last=ec2:terminated | progress\n[2026-11-20T18:53:22+00:00] destroy scope=studio-live126-cpu-20261120-1725 elapsed=98.4s stage=Revoking former hostname certificate access last=ec2:terminated | command finished\n",
+      "StandardErrorContent": ""
+    },
+    "cpu_destroy": {
+      "Status": "Success",
+      "ResponseCode": 0,
+      "StandardOutputContent": "[2026-11-20T18:50:35+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=290.0s stage=Waiting for ec2 instance-status-ok last=ec2:pending | heartbeat\n[2026-11-20T18:50:37+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=292.7s stage=AWS waiter confirmed: ec2 instance-status-ok last=ec2:pending | progress\n[2026-11-20T18:50:37+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=292.7s stage=Checking RES and DCV readiness via SSM last=ec2:pending | progress\n[2026-11-20T18:50:39+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=294.6s stage=Checking RES and DCV readiness via SSM last=ssm:Pending | observed\n[2026-11-20T18:50:45+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=300.0s stage=Checking RES and DCV readiness via SSM last=ssm:Pending | heartbeat\n[2026-11-20T18:50:45+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=300.6s stage=Checking RES and DCV readiness via SSM last=ssm:Success | observed\n[2026-11-20T18:50:45+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=300.6s stage=Ready: RES, GDM and DCV last=ssm:Success | progress\n[2026-11-20T18:50:45+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=300.6s stage=Checking DCV HTTPS endpoint last=ssm:Success | progress\n[2026-11-20T18:50:48+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=303.8s stage=Checking DCV HTTPS endpoint last=ec2:running | observed\n[2026-11-20T18:50:52+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=306.9s stage=Checking independent DCV hostname ownership last=ec2:running | progress\n[2026-11-20T18:50:54+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=309.0s stage=Shared hostname already assigned; preserving its current owner last=ec2:running | progress\n[2026-11-20T18:50:54+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=309.0s stage=Checking DCV HTTPS endpoint last=ec2:running | progress\n[2026-11-20T18:50:55+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=310.0s stage=Checking DCV HTTPS endpoint last=ec2:running | heartbeat\n[2026-11-20T18:50:57+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=312.2s stage=DCV ready: https://100.48.220.45:8443 last=ec2:running | progress\n[2026-11-20T18:50:57+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=312.2s stage=IP certificate warning expected. To assign or transfer the trusted hostname: python3 studio workstation hostname assign studio-live126-cpu-20261120-1725 last=ec2:running | progress\n[2026-11-20T18:51:00+00:00] start scope=studio-live126-cpu-20261120-1725 elapsed=315.4s stage=IP certificate warning expected. To assign or transfer the trusted hostname: python3 studio workstation hostname assign studio-live126-cpu-20261120-1725 last=ec2:running | command finished\n{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"state\": \"DELETE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"native_disks_removed\": true,\n  \"recovered_warnings\": []\n}\n",
+      "StandardErrorContent": ""
+    },
+    "cpu_start": {
+      "Status": "Success",
+      "ResponseCode": 0,
+      "StandardOutputContent": "{\n  \"stack\": \"studio-live126-cpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad\",\n  \"profile\": \"cpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-05883164f07cbc4ca\",\n  \"safety_stack\": null,\n  \"state\": \"running\",\n  \"public_ip\": \"100.48.220.45\",\n  \"dcv_url\": \"https://100.48.220.45:8443\"\n}\n",
+      "StandardErrorContent": ""
+    },
+    "gpu_ssm": {
+      "InstanceInformationList": [
+        {
+          "InstanceId": "i-00f7cc7ba7458f405",
+          "PingStatus": "Online",
+          "LastPingDateTime": "2026-11-20T18:54:22.496000+00:00",
+          "AgentVersion": "3.3.4793.0",
+          "IsLatestVersion": false,
+          "PlatformType": "Linux",
+          "PlatformName": "Ubuntu",
+          "PlatformVersion": "24.04",
+          "ResourceType": "EC2Instance",
+          "IPAddress": "172.31.10.48",
+          "ComputerName": "ip-172-31-10-48.ec2.internal",
+          "SourceId": "i-00f7cc7ba7458f405",
+          "SourceType": "AWS::EC2::Instance"
+        }
+      ]
+    }
+  },
+  "after_auto_stop_restart_result": {
+    "checked_at": "2026-11-20T19:04:10.125280+00:00",
+    "gpu_restart": {
+      "Status": "Success",
+      "ResponseCode": 0,
+      "StandardOutputContent": "{\n  \"stack\": \"studio-live128-gpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb\",\n  \"profile\": \"gpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-00f7cc7ba7458f405\",\n  \"safety_stack\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87\",\n  \"state\": \"running\",\n  \"public_ip\": \"54.159.180.104\",\n  \"dcv_url\": \"https://dcv.kwesidavis.com:8443\",\n  \"expiration\": {\n    \"stop_at\": \"2026-11-20T19:01:58+00:00\",\n    \"duration_minutes\": 10,\n    \"remaining_seconds\": 224,\n    \"status\": \"scheduled\"\n  }\n}\n{\n  \"stack\": \"studio-live128-gpu-20261120-1725\",\n  \"instance_id\": \"i-00f7cc7ba7458f405\",\n  \"previous_stop_utc\": \"2026-11-20T19:01:58+00:00\",\n  \"proposed_stop_utc\": \"2026-11-20T19:11:58+00:00\",\n  \"additional_minutes\": 10,\n  \"extended\": true,\n  \"recovered_after_error\": false,\n  \"state\": \"running\"\n}\nhttps://dcv.kwesidavis.com:8443\nReachable HTTPS login page; trusted certificate verified.\n",
+      "StandardErrorContent": ""
+    },
+    "gpu": [
+      {
+        "id": "i-00f7cc7ba7458f405",
+        "state": {
+          "Code": 16,
+          "Name": "running"
+        },
+        "ip": "54.159.180.104"
+      }
+    ]
+  },
+  "gpu_destroy_command": {
+    "command_id": "883a9781-d8ad-4064-86cc-921d513623a6",
+    "requested_at": "2026-11-20T19:05:55.082000+00:00",
+    "destroy_not_before_utc": "2026-11-20T19:11:00Z"
+  },
+  "observation_note": "Resource lists and command states are historical observations at their recorded times. The final_resources and cleanup sections describe the ending state.",
+  "gpu_cleanup_advanced": {
+    "old_command_status": "Cancelled",
+    "checked_at": "2026-11-20T19:08:55.324601+00:00",
+    "gpu_destroy_command": {
+      "id": "d9fe29ce-b3e3-4d8d-8901-f72dfd5d32e7",
+      "requested_at": "2026-11-20T19:08:55.615000+00:00"
+    }
+  },
+  "cleanup_progress": {
+    "checked_at": "2026-11-20T19:09:51.105355+00:00",
+    "gpu_destroy": {
+      "Status": "InProgress",
+      "ResponseCode": -1,
+      "StandardOutputContent": "",
+      "StandardErrorContent": ""
+    },
+    "test_instances": [
+      {
+        "id": "i-00f7cc7ba7458f405",
+        "state": {
+          "Code": 32,
+          "Name": "shutting-down"
+        }
+      },
+      {
+        "id": "i-05883164f07cbc4ca",
+        "state": {
+          "Code": 48,
+          "Name": "terminated"
+        }
+      }
+    ],
+    "cpu_disk": {
+      "Volumes": []
+    },
+    "cpu_sg": {
+      "SecurityGroups": []
+    },
+    "address": {
+      "Addresses": [
+        {
+          "AllocationId": "eipalloc-0879a34aa1a1298dd",
+          "Domain": "vpc",
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "studio-dcv-kwesidavis-cpu"
+            },
+            {
+              "Key": "StudioOwnerStack",
+              "Value": "studio-independent-dcv"
+            },
+            {
+              "Key": "StudioDcvHostname",
+              "Value": "dcv.kwesidavis.com"
+            },
+            {
+              "Key": "StudioIssue",
+              "Value": "43"
+            }
+          ],
+          "PublicIpv4Pool": "amazon",
+          "NetworkBorderGroup": "us-east-1",
+          "PublicIp": "54.159.180.104"
+        }
+      ]
+    }
+  },
+  "cleanup_intermediate_protected_check": {
+    "checked_at": "2026-11-20T19:10:36.926093+00:00",
+    "temporary_login_parameter_deleted": true,
+    "gpu_destroy": {
+      "Status": "InProgress",
+      "ResponseCode": -1,
+      "StandardOutputContent": "",
+      "StandardErrorContent": ""
+    },
+    "gpu_stack": [
+      {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb",
+        "status": "DELETE_IN_PROGRESS"
+      }
+    ],
+    "safety_stack": [
+      {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87",
+        "status": "CREATE_COMPLETE"
+      }
+    ],
+    "protected": [
+      {
+        "id": "i-03d7699a7a84f97bf",
+        "state": {
+          "Code": 80,
+          "Name": "stopped"
+        },
+        "volumes": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "AttachTime": "2026-11-19T21:51:38.864000+00:00",
+              "DeleteOnTermination": true,
+              "Status": "attached",
+              "VolumeId": "vol-04cfea9fc49d43a18",
+              "EbsCardIndex": 0
+            }
+          }
+        ],
+        "sg": [
+          {
+            "GroupId": "sg-01d12aaf0614aa889",
+            "GroupName": "comfyUi2-WorkstationSG-Q5g9QiGzdIUi"
+          },
+          {
+            "GroupId": "sg-058f2babb18747976",
+            "GroupName": "instance-sg-1"
+          }
+        ]
+      }
+    ],
+    "legacy_primary": {
+      "name": "studio-expiry-44c962e0-e463-11f1-b2d2-0efff16b89b3",
+      "state": "DISABLED",
+      "target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-expiry-61c4cab3869d94009e40-ExpirationRole-pdVjk1r2SEDB",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 3600,
+          "MaximumRetryAttempts": 3
+        },
+        "Input": "{\"StackName\":\"arn:aws:cloudformation:us-east-1:401233741942:stack/comfyUi2/5c17b9b0-e463-11f1-83ce-12ffd573e3f9\"}"
+      },
+      "expression": "at(2026-11-20T01:50:42)"
+    },
+    "legacy_fallback": {
+      "name": "studio-fallback-44c962e0-e463-11f1-b2d2-0efff16b89b3",
+      "state": "DISABLED",
+      "target": {
+        "Arn": "arn:aws:scheduler:::aws-sdk:ec2:terminateInstances",
+        "RoleArn": "arn:aws:iam::401233741942:role/studio-expiry-61c4cab3869d94009e40-ExpirationRole-pdVjk1r2SEDB",
+        "RetryPolicy": {
+          "MaximumEventAgeInSeconds": 3600,
+          "MaximumRetryAttempts": 3
+        },
+        "Input": "{\"InstanceIds\":[\"i-03d7699a7a84f97bf\"]}"
+      },
+      "expression": "at(2026-11-20T01:55:42)"
+    }
+  },
+  "gpu_cleanup_readback": {
+    "checked_at": "2026-11-20T19:11:59.526603+00:00",
+    "gpu_destroy": {
+      "Status": "InProgress",
+      "ResponseCode": -1,
+      "StandardOutputContent": "",
+      "StandardErrorContent": ""
+    },
+    "gpu_stack": [
+      {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb",
+        "status": "DELETE_IN_PROGRESS"
+      }
+    ],
+    "safety_stack": [
+      {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87",
+        "status": "CREATE_COMPLETE"
+      }
+    ],
+    "gpu": [
+      {
+        "id": "i-00f7cc7ba7458f405",
+        "state": {
+          "Code": 32,
+          "Name": "shutting-down"
+        }
+      }
+    ]
+  },
+  "final_shared_resources": {
+    "checked_at": "2026-11-20T19:12:49.428307+00:00",
+    "base_inline": {
+      "PolicyNames": [
+        "StudioEfsSharedWrite",
+        "StudioPinnedRezBundleRead",
+        "StudioRes202606NvidiaGridRead",
+        "StudioWorkstationPr65VersionRead",
+        "StudioWorkstationReleaseRead"
+      ]
+    },
+    "base_attached": {
+      "AttachedPolicies": [
+        {
+          "PolicyName": "AmazonSSMManagedInstanceCore",
+          "PolicyArn": "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        }
+      ]
+    },
+    "export_role": {
+      "arn": "arn:aws:iam::401233741942:role/studio-issue43-dcv-acm-export",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Deny",
+            "Principal": {
+              "AWS": "arn:aws:iam::401233741942:role/StudioWorkstationSSMRole"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+    },
+    "export_inline": {
+      "PolicyNames": [
+        "StudioIssue43ExactAcMExport"
+      ]
+    },
+    "export_attached": {
+      "AttachedPolicies": []
+    },
+    "dns": [
+      {
+        "Name": "dcv.kwesidavis.com.",
+        "Type": "A",
+        "TTL": 300,
+        "ResourceRecords": [
+          {
+            "Value": "54.159.180.104"
+          }
+        ]
+      },
+      {
+        "Name": "dcv.kwesidavis.com.",
+        "Type": "NS",
+        "TTL": 172800,
+        "ResourceRecords": [
+          {
+            "Value": "ns-517.awsdns-00.net."
+          },
+          {
+            "Value": "ns-1588.awsdns-06.co.uk."
+          },
+          {
+            "Value": "ns-252.awsdns-31.com."
+          },
+          {
+            "Value": "ns-1374.awsdns-43.org."
+          }
+        ]
+      },
+      {
+        "Name": "dcv.kwesidavis.com.",
+        "Type": "SOA",
+        "TTL": 900,
+        "ResourceRecords": [
+          {
+            "Value": "ns-517.awsdns-00.net. awsdns-hostmaster.amazon.com. 1 7200 900 1209600 86400"
+          }
+        ]
+      },
+      {
+        "Name": "_20c57ecf24474ce9d94e7d4c3dcf91fb.dcv.kwesidavis.com.",
+        "Type": "CNAME",
+        "TTL": 300,
+        "ResourceRecords": [
+          {
+            "Value": "_4e04c3f88921dbe651941c99854d906f.wzccmgtwzk.acm-validations.aws."
+          }
+        ]
+      }
+    ],
+    "certificate": {
+      "arn": "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243",
+      "domain": "dcv.kwesidavis.com",
+      "status": "ISSUED",
+      "expires": "2027-05-18T23:59:59+00:00"
+    },
+    "efs": [
+      {
+        "id": "fs-054fd0b72429f4569",
+        "state": "available",
+        "encrypted": true
+      }
+    ],
+    "password_parameter": {
+      "Parameters": []
+    },
+    "address": {
+      "Addresses": [
+        {
+          "AllocationId": "eipalloc-0879a34aa1a1298dd",
+          "Domain": "vpc",
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "studio-dcv-kwesidavis-cpu"
+            },
+            {
+              "Key": "StudioOwnerStack",
+              "Value": "studio-independent-dcv"
+            },
+            {
+              "Key": "StudioDcvHostname",
+              "Value": "dcv.kwesidavis.com"
+            },
+            {
+              "Key": "StudioIssue",
+              "Value": "43"
+            }
+          ],
+          "PublicIpv4Pool": "amazon",
+          "NetworkBorderGroup": "us-east-1",
+          "PublicIp": "54.159.180.104"
+        }
+      ]
+    },
+    "inline_policy_documents": {
+      "StudioWorkstationSSMRole/StudioEfsSharedWrite": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "StudioSharedEfsWrite",
+            "Effect": "Allow",
+            "Action": [
+              "elasticfilesystem:ClientMount",
+              "elasticfilesystem:ClientWrite"
+            ],
+            "Resource": "arn:aws:elasticfilesystem:us-east-1:401233741942:file-system/fs-054fd0b72429f4569",
+            "Condition": {
+              "Bool": {
+                "aws:SecureTransport": "true",
+                "elasticfilesystem:AccessedViaMountTarget": "true"
+              }
+            }
+          }
+        ]
+      },
+      "StudioWorkstationSSMRole/StudioPinnedRezBundleRead": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadPinnedRezBundle",
+            "Effect": "Allow",
+            "Action": "s3:GetObjectVersion",
+            "Resource": "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/software/rez/3.4.0/studio-rez-ubuntu2404.tar.gz"
+          }
+        ]
+      },
+      "StudioWorkstationSSMRole/StudioRes202606NvidiaGridRead": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ListOnlyResNvidiaGridLatest",
+            "Effect": "Allow",
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::ec2-linux-nvidia-drivers",
+            "Condition": {
+              "StringLike": {
+                "s3:prefix": [
+                  "latest/",
+                  "latest/*"
+                ]
+              }
+            }
+          },
+          {
+            "Sid": "ReadOnlyResNvidiaGrid5959107",
+            "Effect": "Allow",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::ec2-linux-nvidia-drivers/latest/NVIDIA-Linux-x86_64-595.91.07-grid-aws.run"
+          }
+        ]
+      },
+      "StudioWorkstationSSMRole/StudioWorkstationPr65VersionRead": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadExactPinnedGpuReleaseVersions",
+            "Effect": "Allow",
+            "Action": "s3:GetObjectVersion",
+            "Resource": [
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/pr65-pinned-download-084e704e/res-2026.06/installation-scripts.tar.gz",
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz",
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz"
+            ]
+          }
+        ]
+      },
+      "StudioWorkstationSSMRole/StudioWorkstationReleaseRead": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ReadPinnedStudioRelease",
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetObject"
+            ],
+            "Resource": [
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/*/res-2026.06/installation-scripts.tar.gz",
+              "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/*/res-2026.06/virtual-desktop.tar.gz"
+            ]
+          }
+        ]
+      },
+      "studio-issue43-dcv-acm-export/StudioIssue43ExactAcMExport": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "ExportOnlyOneDcvCertificate",
+            "Effect": "Allow",
+            "Action": "acm:ExportCertificate",
+            "Resource": "arn:aws:acm:us-east-1:401233741942:certificate/b753beee-5659-4311-a52f-39326b7b3243"
+          }
+        ]
+      }
+    },
+    "shared_policy_documents_match_pre_cleanup": true
+  },
+  "gpu_cleanup_progress": {
+    "checked_at": "2026-11-20T19:13:15.799190+00:00",
+    "deleted_cpu_guards": [
+      "studio-live126128-cleanup-cpu-20261120",
+      "studio-live126128-fallback-cpu-20261120"
+    ],
+    "gpu_destroy": {
+      "Status": "InProgress",
+      "ResponseCode": -1,
+      "StandardOutputContent": "",
+      "StandardErrorContent": ""
+    },
+    "gpu_events": [
+      {
+        "Timestamp": "2026-11-20T19:09:44.056000+00:00",
+        "LogicalResourceId": "Workstation",
+        "ResourceStatus": "DELETE_IN_PROGRESS"
+      },
+      {
+        "Timestamp": "2026-11-20T19:09:43.366000+00:00",
+        "LogicalResourceId": "AutoStopSchedule",
+        "ResourceStatus": "DELETE_COMPLETE"
+      },
+      {
+        "Timestamp": "2026-11-20T19:09:42.110000+00:00",
+        "LogicalResourceId": "AutoStopSchedule",
+        "ResourceStatus": "DELETE_IN_PROGRESS"
+      },
+      {
+        "Timestamp": "2026-11-20T19:09:39.688000+00:00",
+        "LogicalResourceId": "studio-live128-gpu-20261120-1725",
+        "ResourceStatus": "DELETE_IN_PROGRESS",
+        "ResourceStatusReason": "User Initiated"
+      }
+    ],
+    "gpu_disks": [
+      {
+        "id": "vol-003294486f7e71384",
+        "state": "in-use",
+        "attachments": [
+          {
+            "DeleteOnTermination": true,
+            "EbsCardIndex": 0,
+            "VolumeId": "vol-003294486f7e71384",
+            "InstanceId": "i-00f7cc7ba7458f405",
+            "Device": "/dev/sda1",
+            "State": "attached",
+            "AttachTime": "2026-11-20T17:51:45+00:00"
+          }
+        ]
+      }
+    ],
+    "gpu_sgs": [
+      {
+        "id": "sg-0e967d6133ec42b0a"
+      }
+    ]
+  },
+  "gpu_cleanup_final_progress": {
+    "checked_at": "2026-11-20T19:16:21.725061+00:00",
+    "gpu_destroy": {
+      "Status": "InProgress",
+      "ResponseCode": -1,
+      "StandardOutputContent": "",
+      "StandardErrorContent": ""
+    },
+    "cleanup_log": {
+      "Status": "Success",
+      "ResponseCode": 0,
+      "StandardOutputContent": "[2026-11-20T19:13:45+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=290.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:13:55+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=300.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:14:05+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=310.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:14:15+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=320.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:14:25+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=330.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:14:35+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=340.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:14:45+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=350.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:14:55+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=360.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:15:05+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=370.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:15:15+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=380.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:15:25+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=390.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T19:15:35+00:00] destroy scope=studio-live128-gpu-20261120-1725 elapsed=400.0s stage=Waiting for cloudformation stack-delete-complete last=ec2:running | heartbeat\n[2026-11-20T18:57:53+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=370.0s stage=Checking DCV HTTPS endpoint last=cloudformation:CREATE_COMPLETE | heartbeat\n[2026-11-20T18:57:54+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=371.0s stage=Checking independent DCV hostname ownership last=ec2:running | progress\n[2026-11-20T18:57:56+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=373.1s stage=Shared hostname already assigned; preserving its current owner last=ec2:running | progress\n[2026-11-20T18:57:56+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=373.1s stage=Checking DCV HTTPS endpoint last=ec2:running | progress\n[2026-11-20T18:58:01+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=378.1s stage=DCV ready: https://dcv.kwesidavis.com:8443 last=ec2:running | progress\n[2026-11-20T18:58:03+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=380.0s stage=DCV ready: https://dcv.kwesidavis.com:8443 last=ec2:running | heartbeat\n[2026-11-20T18:58:06+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=382.4s stage=Checking expiration safeguards last=ec2:running | progress\n[2026-11-20T18:58:13+00:00] start scope=studio-live128-gpu-20261120-1725 elapsed=389.9s stage=Checking expiration safeguards last=cloudformation:CREATE_COMPLETE | command finished\n{\n  \"stack\": \"studio-live128-gpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb\",\n  \"profile\": \"gpu\",\n  \"stack_status\": \"CREATE_COMPLETE\",\n  \"instance\": \"i-00f7cc7ba7458f405\",\n  \"safety_stack\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87\",\n  \"state\": \"running\",\n  \"public_ip\": \"54.159.180.104\",\n  \"dcv_url\": \"https://dcv.kwesidavis.com:8443\",\n  \"expiration\": {\n    \"stop_at\": \"2026-11-20T19:01:58+00:00\",\n    \"duration_minutes\": 10,\n    \"remaining_seconds\": 224,\n    \"status\": \"scheduled\"\n  }\n}\n",
+      "StandardErrorContent": ""
+    },
+    "gpu": [
+      {
+        "id": "i-00f7cc7ba7458f405",
+        "state": {
+          "Code": 48,
+          "Name": "terminated"
+        }
+      }
+    ]
+  },
+  "workstation_cleanup_completion": {
+    "checked_at": "2026-11-20T19:17:45.884079+00:00",
+    "gpu_destroy": {
+      "Status": "Success",
+      "ResponseCode": 0,
+      "StandardOutputContent": "{\n  \"stack\": \"studio-live128-gpu-20261120-1725\",\n  \"stack_id\": \"arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb\",\n  \"state\": \"DELETE_COMPLETE\",\n  \"instance\": \"i-00f7cc7ba7458f405\",\n  \"native_disks_removed\": true,\n  \"recovered_warnings\": []\n}\n",
+      "StandardErrorContent": ""
+    },
+    "gpu_guards": [
+      {
+        "name": "studio-live126128-cleanup-gpu-20261120",
+        "result": "already absent"
+      },
+      {
+        "name": "studio-live126128-fallback-gpu-20261120",
+        "result": "deleted"
+      }
+    ],
+    "client_delete_requested": true
+  },
+  "client_cleanup_progress": {
+    "checked_at": "2026-11-20T19:18:14.645198+00:00",
+    "client_stack": [
+      {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-cli-client-20261120-1725/c13c2740-e508-11f1-ac23-12fff5aab171",
+        "status": "DELETE_IN_PROGRESS"
+      }
+    ],
+    "client": [
+      {
+        "id": "i-0fef4795526d4efb2",
+        "state": {
+          "Code": 32,
+          "Name": "shutting-down"
+        }
+      }
+    ],
+    "gpu_safety_stack": [
+      {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87",
+        "status": "DELETE_COMPLETE"
+      }
+    ],
+    "native_role": {
+      "aws_error": "NoSuchEntity",
+      "message": "The role with name studio-expiry-234792decfc2403f7c48-ExpirationRole-KP3SlH209fRA cannot be found."
+    },
+    "native_timer": {
+      "aws_error": "ResourceNotFoundException",
+      "message": "Schedule studio-stop-ebac5750-e50a-11f1-8168-0affd2542b87 does not exist."
+    }
+  },
+  "temporary_infrastructure_cleanup": {
+    "checked_at": "2026-11-20T19:18:51.260464+00:00",
+    "client_stack_status": "DELETE_COMPLETE",
+    "client_guards": [
+      {
+        "name": "studio-live126128-cleanup-client-20261120",
+        "result": "deleted"
+      },
+      {
+        "name": "studio-live126128-fallback-client-20261120",
+        "result": "deleted"
+      }
+    ],
+    "deletion_requested": [
+      "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126128-client-iam-20261120/2ddec7f0-e508-11f1-8b2f-12fff898354f",
+      "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126128-guard-20261120/d296dc70-e507-11f1-a9e2-0afff3da9dc5"
+    ]
+  },
+  "final_resources": {
+    "checked_at": "2026-11-20T19:20:05.729890+00:00",
+    "stacks": {
+      "cpu": {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126-cpu-20261120-1725/24ba1fc0-e509-11f1-85d8-0affe3eb93ad",
+        "state": "DELETE_COMPLETE"
+      },
+      "gpu": {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live128-gpu-20261120-1725/033916b0-e50b-11f1-9013-0eea0ef667bb",
+        "state": "DELETE_COMPLETE"
+      },
+      "safety": {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-expiry-234792decfc2403f7c48/ebac5750-e50a-11f1-8168-0affd2542b87",
+        "state": "DELETE_COMPLETE"
+      },
+      "client": {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-cli-client-20261120-1725/c13c2740-e508-11f1-ac23-12fff5aab171",
+        "state": "DELETE_COMPLETE"
+      },
+      "client_iam": {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126128-client-iam-20261120/2ddec7f0-e508-11f1-8b2f-12fff898354f",
+        "state": "DELETE_COMPLETE"
+      },
+      "guard": {
+        "id": "arn:aws:cloudformation:us-east-1:401233741942:stack/studio-live126128-guard-20261120/d296dc70-e507-11f1-a9e2-0afff3da9dc5",
+        "state": "DELETE_COMPLETE"
+      }
+    },
+    "iam": {
+      "native_role": {
+        "aws_error": "NoSuchEntity"
+      },
+      "client_role": {
+        "aws_error": "NoSuchEntity"
+      },
+      "guard_role": {
+        "aws_error": "NoSuchEntity"
+      },
+      "policy_0": {
+        "aws_error": "NoSuchEntity"
+      },
+      "policy_1": {
+        "aws_error": "NoSuchEntity"
+      },
+      "policy_2": {
+        "aws_error": "NoSuchEntity"
+      },
+      "client_profile": {
+        "aws_error": "NoSuchEntity"
+      }
+    },
+    "instances": [
+      {
+        "id": "i-03d7699a7a84f97bf",
+        "state": "stopped",
+        "volumes": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "AttachTime": "2026-11-19T21:51:38.864000+00:00",
+              "DeleteOnTermination": true,
+              "Status": "attached",
+              "VolumeId": "vol-04cfea9fc49d43a18",
+              "EbsCardIndex": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "i-0fef4795526d4efb2",
+        "state": "terminated",
+        "volumes": []
+      },
+      {
+        "id": "i-00f7cc7ba7458f405",
+        "state": "terminated",
+        "volumes": []
+      },
+      {
+        "id": "i-05883164f07cbc4ca",
+        "state": "terminated",
+        "volumes": []
+      }
+    ],
+    "volumes": [],
+    "groups": [],
+    "interfaces": [],
+    "external_schedules": [],
+    "native_schedule": {
+      "aws_error": "ResourceNotFoundException"
+    },
+    "protected_primary": {
+      "name": "studio-expiry-44c962e0-e463-11f1-b2d2-0efff16b89b3",
+      "state": "DISABLED",
+      "target": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack"
+    },
+    "protected_fallback": {
+      "name": "studio-fallback-44c962e0-e463-11f1-b2d2-0efff16b89b3",
+      "state": "DISABLED",
+      "target": "arn:aws:scheduler:::aws-sdk:ec2:terminateInstances"
+    },
+    "password_parameter": [],
+    "cleanup_complete": true
+  },
+  "completed_at_utc": "2026-11-20T19:20:05.729890+00:00",
+  "source_changes_during_live_test": false,
+  "cleanup": {
+    "status": "verified",
+    "checked_at_utc": "2026-11-20T19:20:05.729890+00:00",
+    "test_instances_terminated": 3,
+    "test_ebs_volumes_absent": 3,
+    "test_security_groups_absent": 3,
+    "test_network_interfaces_absent": 3,
+    "test_cloudformation_stacks_delete_complete": 6,
+    "temporary_iam_roles_absent": 3,
+    "temporary_managed_policies_absent": 3,
+    "temporary_instance_profiles_absent": 1,
+    "native_stop_schedule_absent": true,
+    "external_test_schedules_absent": true,
+    "temporary_password_parameter_absent": true,
+    "shared_hostname_unassigned": true,
+    "original_eip_tags_restored": true,
+    "shared_certificate_status": "ISSUED",
+    "shared_efs_state": "available",
+    "protected_comfyUi2": "stopped; original root volume attached; both legacy destructive timers DISABLED",
+    "remaining_test_resources": []
+  },
+  "remaining_compatibility_note": "These PRs do not migrate existing legacy destructive-timer deployments. comfyUi2 was deliberately excluded from lifecycle and guest mutations. Its two legacy schedules remain disabled; new-model timed start/extend reject legacy deployments until explicit migration."
+}

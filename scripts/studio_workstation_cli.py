@@ -42,7 +42,7 @@ GPU_KEYS = {
     "virtual-desktop.tar.gz": GPU_APP_PREFIX + "/virtual-desktop.tar.gz",
 }
 
-TRUSTED_DCV_HOSTNAME = "dcv.kwesidavis.com"  # Issue #43: opt-in, never an IP alias
+TRUSTED_DCV_HOSTNAME = "dcv.kwesidavis.com"  # Only its verified owner gets the trusted URL.
 
 # Default automatic-stop duration; callers may select any positive supported duration.
 GPU_EXPIRATION_DEFAULT_MINUTES = 150
@@ -321,6 +321,28 @@ def wait_dcv(stack, region, *, attempts=24, sleep=time.sleep):
             sleep(10)
 
 
+def ready_desktop(stack, region, *, gpu):
+    """Keep a usable desktop when optional hostname setup cannot finish."""
+    from runtime import independent_eip
+    wait_gpu_bootstrap(stack, region, gpu=gpu)
+    wait_dcv(stack, region)
+    try:
+        claimed = independent_eip.assign(aws, stack, verified_dcv_hostname, only_if_unassigned=True)
+        progress.stage("Shared hostname assigned: " + TRUSTED_DCV_HOSTNAME if claimed else
+                       "Shared hostname already assigned; preserving its current owner")
+    except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+        detail = (exc.stderr or f"AWS command exited {exc.returncode}") if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+        print("WARNING: automatic hostname setup incomplete: " + detail.strip() +
+              f". For intentional assignment or transfer: python3 studio workstation hostname assign {stack}",
+              file=sys.stderr, flush=True)
+    endpoint = wait_dcv(stack, region)  # Recheck actual ownership, TLS and reachability after any recovery.
+    progress.stage("DCV ready: " + endpoint["url"])
+    if not endpoint["trusted"]:
+        progress.stage("IP certificate warning expected. To assign or transfer the trusted hostname: "
+                       f"python3 studio workstation hostname assign {stack}")
+    return endpoint
+
+
 def command(args):
     from runtime.workstation_inventory import PROFILES, context, list_workstations
     from runtime import pr65_one_shot_guard as guard
@@ -461,8 +483,7 @@ def command(args):
             aws(args.region, "cloudformation", "wait", "stack-create-complete", "--stack-name", args.stack)
             if args.profile != "publisher":
                 try:
-                    wait_gpu_bootstrap(args.stack, args.region, gpu=gpu)
-                    progress.stage("DCV ready: " + wait_dcv(args.stack, args.region)["url"])
+                    endpoint = ready_desktop(args.stack, args.region, gpu=gpu)
                 except Exception:
                     # Failed desktop creation must not strand a billable, unreachable VM.
                     selected = context(aws, args.region, args.stack)
@@ -474,7 +495,10 @@ def command(args):
                     install_efs_client(instance_id(args.stack, args.region), args.region)
                 except (RuntimeError, subprocess.CalledProcessError) as exc:
                     print("WARNING: desktop is available; Studio software setup incomplete; EFS helper installation failed: " + str(exc), file=sys.stderr)
-            print(json.dumps(describe(args.stack, args.region, with_expiration=gpu), indent=2), flush=True)
+            result = describe(args.stack, args.region, with_expiration=gpu)
+            if args.profile != "publisher":
+                result["dcv_url"] = endpoint["url"]
+            print(json.dumps(result, indent=2), flush=True)
         return
     selected = context(aws, args.region, args.stack)
     iid = selected["instance"]
@@ -534,13 +558,15 @@ def command(args):
                 independent_eip.release_if_owned(aws, selected, verified_dcv_hostname)
             else:
                 try:
-                    wait_gpu_bootstrap(args.stack, args.region, gpu=profile == "gpu")
-                    progress.stage("DCV ready: " + wait_dcv(args.stack, args.region)["url"])
+                    endpoint = ready_desktop(args.stack, args.region, gpu=profile == "gpu")
                 except Exception:
                     progress.stage("Stopping EC2 after desktop readiness failure")
                     aws(args.region, "ec2", "stop-instances", "--instance-ids", iid)
                     raise
-        print(json.dumps(describe(args.stack, args.region, with_expiration=args.action == "start"), indent=2), flush=True)
+        result = describe(args.stack, args.region, with_expiration=args.action == "start")
+        if args.action == "start" and profile != "publisher":
+            result["dcv_url"] = endpoint["url"]
+        print(json.dumps(result, indent=2), flush=True)
 
 def main(argv=None):
     from runtime.workstation_inventory import PROFILES
@@ -557,7 +583,8 @@ def main(argv=None):
         if action in ("list", "profiles", "profile"):
             continue
         if action == "hostname":
-            s.add_argument("hostname_action", choices=["status", "assign", "release"])
+            s.add_argument("hostname_action", choices=["status", "assign", "release"],
+                           help="Inspect ownership, intentionally assign/transfer, or release the hostname")
         if action != "create":
             s.add_argument("name", nargs="?", help="Workstation name shown by list")
         selector = s.add_mutually_exclusive_group()
@@ -586,7 +613,8 @@ def main(argv=None):
         if action == "extend-expiration":
             s.add_argument("--additional-minutes", type=gpu_extension_minutes, required=True)
         if action == "connect":
-            s.add_argument("--hostname", choices=[TRUSTED_DCV_HOSTNAME])
+            s.add_argument("--hostname", choices=[TRUSTED_DCV_HOSTNAME],
+                           help="Require this trusted hostname; normally the endpoint is selected automatically")
             s.add_argument("--ssm", action="store_true")
         if action == "destroy":
             s.add_argument("--delete-stack", action="store_true")
