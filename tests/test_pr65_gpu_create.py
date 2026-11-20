@@ -1,71 +1,81 @@
-"""Native safety identity and pre-billing schedule contracts, with fault injection."""
+"""CloudFormation owns the stop timer; scheduler IAM cannot destroy a workstation."""
 import copy
+import datetime as dt
 import json
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from runtime import pr65_gpu_create as creator, pr65_one_shot_guard as guard
-from workstation_fake import AWS, NOW, h, ROOT, inventory, missing
+from workstation_fake import AWS, NOW, h, ROOT
 
 
 class CreationTests(unittest.TestCase):
-    def test_two_names_have_independent_native_identity_and_no_shared_role_edits(self):
-        aws=AWS();a=aws.desktop('art');b=aws.desktop('ai')
-        self.assertNotEqual(a['token'],b['token']);self.assertNotEqual(a['safety_stack'],b['safety_stack'])
-        for selected in (a,b):guard.status(aws,selected,now=NOW)
-        self.assertEqual(len(aws.schedules),4)
-        self.assertFalse(any(c[0]=='iam' and c[1].startswith(('put-','update-','create-')) for c in aws.calls))
-        self.assertFalse(any(c[1]=='delete-volume' for c in aws.calls))
+    def test_two_names_have_independent_native_timers_and_no_shared_role_edits(self):
+        aws = AWS()
+        a, b = aws.desktop('art'), aws.desktop('ai')
+        self.assertNotEqual(a['token'], b['token'])
+        self.assertNotEqual(a['safety_stack'], b['safety_stack'])
+        for selected in (a, b):
+            guard.status(aws, selected, now=NOW)
+        self.assertEqual(len(aws.schedules), 2)
+        self.assertFalse(any(c[0] == 'iam' and c[1].startswith(('put-', 'update-', 'create-')) for c in aws.calls))
+        self.assertFalse(any(c[1] in ('delete-volume', 'terminate-instances') for c in aws.calls))
 
-    def test_primary_is_armed_and_read_back_before_workload_creation(self):
-        aws=AWS();selected=aws.desktop();calls=aws.calls
-        creates=[i for i,c in enumerate(calls) if c[:2]==('cloudformation','create-stack')]
-        scheduled=next(i for i,c in enumerate(calls) if c[:2]==('scheduler','create-schedule'))
-        read=next(i for i,c in enumerate(calls) if c[:2]==('scheduler','get-schedule'))
-        self.assertLess(creates[0],scheduled);self.assertLess(scheduled,read);self.assertLess(read,creates[1])
-        primary=aws.schedules['studio-expiry-'+selected['token']]
-        self.assertEqual(json.loads(primary['Target']['Input']),{'StackName':selected['stack_id']})
+    def test_cloudformation_owns_instance_and_timer_before_cli_readback(self):
+        aws = AWS()
+        selected = aws.desktop(minutes=720)
+        resources = {r['LogicalResourceId']: r for r in selected['resources']}
+        self.assertEqual(resources['AutoStopSchedule']['ResourceType'], 'AWS::Scheduler::Schedule')
+        self.assertEqual(resources['AutoStopSchedule']['PhysicalResourceId'], 'studio-stop-' + selected['token'])
+        self.assertFalse(any(c[:2] == ('scheduler', 'create-schedule') for c in aws.calls))
+        wait = next(i for i, c in enumerate(aws.calls)
+                    if c[:2] == ('cloudformation', 'wait') and selected['stack_id'] in c)
+        read = next(i for i, c in enumerate(aws.calls) if c[:2] == ('scheduler', 'get-schedule'))
+        self.assertLess(wait, read)
+        spec = aws.schedules['studio-stop-' + selected['token']]
+        self.assertEqual(json.loads(spec['Target']['Input']), {'InstanceIds': [selected['instance']]})
+        self.assertEqual(spec['ActionAfterCompletion'], 'NONE')
+        self.assertEqual(guard.status(aws, selected, now=NOW)['duration_minutes'], 720)
 
     def test_invalid_role_prevents_any_billable_stack(self):
-        aws=AWS()
-        def corrupt(service,action,args,result):
-            if (service,action)==('iam','get-role-policy') and args[args.index('--policy-name')+1]==creator.POLICY:
-                result['PolicyDocument']['Statement'][0]['Resource']='*'
-        aws.after=corrupt
-        with self.assertRaisesRegex(ValueError,'permissions'):aws.desktop()
-        self.assertFalse(aws.vms);self.assertFalse(aws.schedules)
+        aws = AWS()
+        def corrupt(service, action, args, result):
+            if (service, action) == ('iam', 'get-role-policy') and args[args.index('--policy-name') + 1] == creator.POLICY:
+                result['PolicyDocument']['Statement'][0]['Resource'] = '*'
+        aws.after = corrupt
+        with self.assertRaisesRegex(ValueError, 'permissions'):
+            aws.desktop()
+        self.assertFalse(aws.vms)
+        self.assertFalse(aws.schedules)
 
-    def test_failure_before_primary_readback_never_creates_compute(self):
-        for action in ('create-schedule','get-schedule'):
-            aws=AWS()
-            def fail(service,op,args):
-                if service=='scheduler' and op==action:raise RuntimeError('injected guard failure')
-            aws.before=fail
-            with self.subTest(action=action),self.assertRaises(RuntimeError):aws.desktop()
-            self.assertFalse(aws.vms)
+    def test_timer_setup_failure_stops_compute_and_preserves_local_work(self):
+        for failed_action in ('get-schedule', 'update-schedule'):
+            aws = AWS()
+            def fail(service, action, args):
+                if (service, action) == ('scheduler', failed_action):
+                    raise RuntimeError('injected timer failure')
+            aws.before = fail
+            with self.subTest(action=failed_action), self.assertRaises(RuntimeError):
+                aws.desktop()
+            self.assertTrue(aws.vms and aws.volumes and aws.schedules)
+            self.assertTrue(all(vm['State']['Name'] == 'stopped' for vm in aws.vms.values()))
+            self.assertFalse(any(c[1] in ('delete-stack', 'terminate-instances', 'delete-volume') for c in aws.calls))
 
-    def test_failure_after_workload_creation_requests_native_teardown(self):
-        aws=AWS()
-        def fail(service,action,args):
-            if service=='scheduler' and action=='update-schedule':raise RuntimeError('injected pin failure')
-        aws.before=fail
-        with self.assertRaisesRegex(RuntimeError,'Creation failed'):aws.desktop()
-        self.assertTrue(aws.vms)
-        self.assertTrue(all(vm['State']['Name']=='terminated' for vm in aws.vms.values()))
-        self.assertFalse(aws.volumes)
-        self.assertTrue(any(c[:2]==('cloudformation','delete-stack') for c in aws.calls))
-        self.assertTrue(aws.schedules)  # Do not disarm protection on uncertain creation.
-
-    def test_scope_permissions_are_exact_and_volume_delete_is_absent(self):
+    def test_scope_permissions_only_allow_stopping_exact_owned_instances(self):
         template=json.loads((ROOT/'infra/workstation-expiration-role.json').read_text())
-        self.assertNotIn('deletevolume',json.dumps(template).lower())
+        actions=[s['Action'] for p in template['Resources']['ExpirationRole']['Properties']['Policies']
+                 for s in p['PolicyDocument']['Statement']]
+        self.assertEqual(actions,['ec2:StopInstances'])
         aws=AWS();s=aws.desktop();identity=creator.safety(aws,h.REGION,s['stack'])
         role=identity['role'].rsplit('/',1)[1]
         original=copy.deepcopy(aws.policies[role])
-        for change in ('scope','trust','extra-policy','managed-policy','wrong-role'):
+        for change in ('scope','trust','extra-policy','managed-policy','wrong-role','destructive-action'):
             with self.subTest(change=change):
                 aws.policies[role]=copy.deepcopy(original)
                 if change=='scope':aws.policies[role][creator.POLICY]['Statement'][0]['Condition']['StringEquals']['ec2:ResourceTag/StudioCleanupToken']='foreign'
                 if change=='extra-policy':aws.policies[role]['Extra']={}
+                if change=='destructive-action':aws.policies[role][creator.POLICY]['Statement'][0]['Action']='ec2:TerminateInstances'
                 expected=identity['role']
                 def change_read(service,action,args,result):
                     if change=='trust' and (service,action)==('iam','get-role'):
@@ -82,8 +92,40 @@ class CreationTests(unittest.TestCase):
         b=aws.desktop()
         self.assertNotEqual(a['token'],b['token']);self.assertNotEqual(a['stack_id'],b['stack_id'])
 
+        self.assertNotIn('studio-stop-'+a['token'], aws.schedules)
+
     def test_duplicate_name_never_updates_existing_stack(self):
         aws=AWS();first=aws.desktop();before=copy.deepcopy(aws.vms)
         with self.assertRaises(Exception):aws.desktop()
         self.assertEqual(aws.vms,before)
         self.assertFalse(any(c[1]=='update-stack' for c in aws.calls))
+
+    def test_extra_instance_is_rejected_before_creating_any_aws_resource(self):
+        vm = {'Type': 'AWS::EC2::Instance', 'Properties': {'BlockDeviceMappings': [{'Ebs': {'DeleteOnTermination': True}}]}}
+        body = {'Resources': {'Workstation': vm, 'ExtraInstance': copy.deepcopy(vm)}}
+        aws = AWS()
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'invalid.json'
+            path.write_text(json.dumps(body))
+            with self.assertRaises(ValueError):
+                creator.create_guarded(aws, h.REGION, 'art', path, [], utc_now=lambda: NOW)
+        self.assertFalse(aws.calls)
+
+    def test_short_user_timer_begins_after_slow_native_provisioning(self):
+        aws, clock, initial = AWS(), [NOW], []
+        def provisioning(service, action, args):
+            if service != 'cloudformation':
+                return
+            if action == 'wait':
+                record = aws.lookup(args[args.index('--stack-name') + 1])
+                safety = any(t == {'Key': 'StudioManaged', 'Value': 'expiry'} for t in record['Tags'])
+                clock[0] += dt.timedelta(minutes=12 if safety else 4)
+            if action == 'create-stack' and args[args.index('--stack-name') + 1] == 'gpu-a':
+                body = json.loads(Path(args[args.index('--template-body') + 1][7:]).read_text())
+                initial.append(body['Resources']['AutoStopSchedule']['Properties']['ScheduleExpression'])
+        aws.before = provisioning
+        selected = aws.desktop(minutes=1, utc_now=lambda: clock[0])
+        status = guard.status(aws, selected, now=clock[0])
+        self.assertGreater(dt.datetime.fromisoformat(initial[0][3:-1]).replace(tzinfo=dt.timezone.utc), clock[0])
+        self.assertEqual(status['duration_minutes'], 1)
+        self.assertEqual(dt.datetime.fromisoformat(status['stop_at']), clock[0] + dt.timedelta(minutes=1))

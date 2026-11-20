@@ -1,26 +1,19 @@
-"""Native GPU stack creation, with independently scoped expiration armed before billing."""
+"""CloudFormation provisions the workstation and its native automatic-stop timer."""
 import datetime as dt
 import hashlib
 import re
 from pathlib import Path
 import json
-import time
 
 from runtime import pr65_one_shot_guard as guard
 from runtime import cli_progress as progress
 
 POLICY = "StudioWorkstationExpiry"
-POLL_SECONDS = 3
-MAX_DISCOVERY_SECONDS = 120
 
 
 class Scheduler:
     def __init__(self, aws_call, region):
         self.aws_call, self.region = aws_call, region
-
-    def create_schedule(self, **spec):
-        return self.aws_call(self.region, "scheduler", "create-schedule",
-                             "--cli-input-json", json.dumps(spec))
 
     def update_schedule(self, **spec):
         return self.aws_call(self.region, "scheduler", "update-schedule",
@@ -29,15 +22,6 @@ class Scheduler:
     def get_schedule(self, **keys):
         return self.aws_call(self.region, "scheduler", "get-schedule",
                              "--name", keys["Name"], "--group-name", keys["GroupName"])
-
-
-class EC2:
-    def __init__(self, aws_call, region):
-        self.aws_call, self.region = aws_call, region
-
-    def terminate_instances(self, **keys):
-        return self.aws_call(self.region, "ec2", "terminate-instances",
-                             "--instance-ids", *keys["InstanceIds"])
 
 
 def preflight(aws_call, region, stack, token, *, role_arn):
@@ -60,17 +44,8 @@ def preflight(aws_call, region, stack, token, *, role_arn):
     doc = json.loads(doc) if isinstance(doc, str) else doc
     scope = {"StringEquals": {"ec2:ResourceTag/StudioStack": stack,
                               "ec2:ResourceTag/StudioCleanupToken": token}}
-    expected = [{"Effect": "Allow", "Action": action,
-                 "Resource": "arn:aws:ec2:us-east-1:401233741942:" + kind + "/*", "Condition": scope}
-                for action, kind in (("ec2:TerminateInstances", "instance"), ("ec2:DeleteSecurityGroup", "security-group"))]
-    expected += [{"Effect": "Allow", "Action": "cloudformation:DeleteStack",
-                  "Resource": "arn:aws:cloudformation:us-east-1:401233741942:stack/" + stack + "/*",
-                  "Condition": {"StringEquals": {"aws:ResourceTag/StudioCleanupToken": token}}},
-                 {"Effect": "Allow", "Action": ["ec2:DescribeInstances", "ec2:DescribeInstanceAttribute",
-                  "ec2:DescribeSecurityGroups", "ec2:DescribeNetworkInterfaces", "ec2:DescribeVolumes", "ec2:DescribeTags",
-                  "ec2:DescribeInstanceCreditSpecifications", "ec2:DescribeLaunchTemplates",
-                  "ssm:DescribeAssociation", "ssm:ListAssociations"],
-                  "Resource": "*"}]
+    expected = [{"Effect": "Allow", "Action": "ec2:StopInstances",
+                 "Resource": "arn:aws:ec2:us-east-1:401233741942:instance/*", "Condition": scope}]
     if doc != {"Version": "2012-10-17", "Statement": expected}:
         raise ValueError("Expiration role permissions differ from exact workstation scope")
     inline = aws_call(region, "iam", "list-role-policies", "--role-name", name)
@@ -108,7 +83,7 @@ def safety(aws, region, stack, *, create=False, arn=None, cleanup=False):
     token = record["StackId"].rsplit("/", 1)[-1]
     params = {p["ParameterKey"]: p["ParameterValue"] for p in record.get("Parameters", [])}
     if (not record["StackId"].startswith("arn:aws:cloudformation:us-east-1:401233741942:stack/" + name + "/") or
-            record["StackName"] != name or (not cleanup and record["StackStatus"] != "CREATE_COMPLETE") or
+            record["StackName"] != name or (not cleanup and record["StackStatus"] not in ("CREATE_COMPLETE", "UPDATE_COMPLETE")) or
             tags.get("StudioManaged") != "expiry" or tags.get("StudioWorkstation") != stack or
             params.get("WorkstationStack") != stack or
             (outputs and (outputs.get("WorkstationStack") != stack or outputs.get("CleanupToken") != token))):
@@ -124,112 +99,68 @@ def safety(aws, region, stack, *, create=False, arn=None, cleanup=False):
         preflight(aws, region, stack, token, role_arn=role)
     return {"arn": record["StackId"], "token": token, "role": role, "state": record["StackStatus"]}
 
-def _one_instance(aws_call, region, iid):
-    data = aws_call(region, "ec2", "describe-instances", "--instance-ids", iid)
-    items = [vm for r in data.get("Reservations", []) for vm in r.get("Instances", [])]
-    if len(items) != 1 or items[0].get("InstanceId") != iid:
-        raise RuntimeError("Expected exactly one scoped EC2 instance")
-    return items[0]
 
-
-def _tags_match(item, stack, token):
-    tags = item.get("Tags", [])
-    keys = [t["Key"] for t in tags]
-    values = {t["Key"]: t["Value"] for t in tags}
-    return (len(keys) == len(set(keys)) and
-            values.get("StudioStack") == stack and
-            values.get("StudioCleanupToken") == token)
-
-
-def _emergency(aws_call, region, stack_id, stack, token, iid, stack_owned):
-    """Prefer native teardown. Fall back only to the exact owned EC2 instance."""
-    progress.stage("Requesting emergency teardown")
-    problems = []
-    if stack_owned:
-        try:
-            aws_call(region, "cloudformation", "delete-stack", "--stack-name", stack_id)
-            return problems
-        except Exception as exc:
-            problems.append("stack deletion: " + str(exc))
-    if iid:
-        try:
-            instance = _one_instance(aws_call, region, iid)
-            if not _tags_match(instance, stack, token) or guard._tags(instance).get("aws:cloudformation:stack-id") != stack_id:
-                raise RuntimeError("Emergency instance ownership mismatch")
-            aws_call(region, "ec2", "terminate-instances", "--instance-ids", iid)
-        except Exception as exc:
-            problems.append("instance termination: " + str(exc))
-    return problems
-
-
-def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150,
-                   clock=time.monotonic, sleep=time.sleep, utc_now=None):
-    """Arm native stack expiration BEFORE CreateStack, then add exact-instance fallback."""
-    guard.validate_durations(minutes)
+def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150, utc_now=None):
+    """Provision a native stop schedule with EC2; no client-side arming window."""
+    now = utc_now or (lambda: dt.datetime.now(dt.timezone.utc))
+    guard.deadline(now(), minutes)  # Validate the selected duration before any AWS writes.
     body = json.loads(Path(template).read_text())
     instance = body["Resources"]["Workstation"]
     disks = [m["Ebs"] for m in instance["Properties"].get("BlockDeviceMappings", []) if "Ebs" in m]
     if (instance["Type"] != "AWS::EC2::Instance" or not disks or
             any(d.get("DeleteOnTermination") is not True for d in disks) or
-            any(r["Type"] not in ("AWS::EC2::Instance", "AWS::EC2::SecurityGroup")
-                for r in body["Resources"].values())):
-        raise ValueError("Expected one disposable workstation without separate disk resources")
-    now = utc_now or (lambda: dt.datetime.now(dt.timezone.utc))
-    expiry = now().replace(microsecond=0) + dt.timedelta(minutes=minutes)
+            {key: r["Type"] for key, r in body["Resources"].items()} !=
+            {"Workstation": "AWS::EC2::Instance", "WorkstationSG": "AWS::EC2::SecurityGroup"}):
+        raise ValueError("Expected a workstation with native EBS cleanup on explicit destroy")
     identity = safety(aws_call, region, stack, create=True)
     token, role = identity["token"], identity["role"]
-    progress.stage("Arming expiration safeguards")
-    scheduler = Scheduler(aws_call, region)
-    initial = guard._schedule("studio-expiry-" + token, guard.DELETE_STACK,
-                              {"StackName": stack}, expiry, role)
-    scheduler.create_schedule(**initial)
-    guard._verify_schedule(scheduler, initial)
+    # A bounded provisioning stop survives a disconnected CLI. The selected runtime
+    # starts after infrastructure exists, so even a one-minute timer can be armed.
+    expiry = guard.deadline(now(), 10)
     tags = [{"Key": "StudioStack", "Value": stack}, {"Key": "StudioCleanupToken", "Value": token}]
     for resource in body["Resources"].values():
         resource["Properties"].setdefault("Tags", []).extend(tags)
+    schedule = guard._schedule("studio-stop-" + token, expiry, role, "${Workstation}", minutes)
+    # CloudFormation has no ActionAfterCompletion property; Scheduler defaults to NONE.
+    schedule.pop("ActionAfterCompletion")
+    schedule["Target"]["Input"] = {"Fn::Sub": schedule["Target"]["Input"]}
+    body["Resources"]["AutoStopSchedule"] = {"Type": "AWS::Scheduler::Schedule", "Properties": schedule}
     Path(template).write_text(json.dumps(body))
     cf_params = ["ParameterKey=" + k + ",ParameterValue=" + v for k, v in
                  (p.split("=", 1) for p in parameters)]
-    progress.stage("Creating guarded workstation")
+    progress.stage("Creating workstation and automatic-stop timer")
     response = aws_call(region, "cloudformation", "create-stack", "--stack-name", stack,
                         "--template-body", "file://" + str(template), "--parameters", *cf_params,
                         "--tags", "Key=StudioStack,Value=" + stack, "Key=StudioCleanupToken,Value=" + token,
                         "Key=StudioManaged,Value=true", "Key=StudioProfile,Value=gpu",
-                        "Key=StudioSafetyStack,Value=" + identity["arn"], "--on-failure", "DELETE")
+                        "Key=StudioSafetyStack,Value=" + identity["arn"], "--on-failure", "DELETE", "--timeout-in-minutes", "5")
     stack_id = response.get("StackId", "")
     if not stack_id.startswith("arn:aws:cloudformation:us-east-1:401233741942:stack/" + stack + "/"):
-        raise RuntimeError("Unrecognized stack identity; native expiry remains armed")
-    iid, stack_owned = None, False
-    started = clock()
-    progress.stage("Discovering workstation instance")
+        raise RuntimeError("Unrecognized stack identity; inspect CloudFormation provisioning")
+    from runtime.workstation_inventory import context
     try:
-        while clock() - started <= MAX_DISCOVERY_SECONDS:
-            records = aws_call(region, "cloudformation", "describe-stacks", "--stack-name", stack_id)["Stacks"]
-            if len(records) != 1 or records[0].get("StackId") != stack_id or not _tags_match(records[0], stack, token):
-                raise RuntimeError("CloudFormation ownership changed")
-            stack_owned = True
-            state = records[0]["StackStatus"]
-            if state not in ("CREATE_IN_PROGRESS", "CREATE_COMPLETE"):
-                raise RuntimeError("CloudFormation creation failed: " + state)
-            resources = aws_call(region, "cloudformation", "list-stack-resources", "--stack-name", stack_id)["StackResourceSummaries"]
-            if any(r.get("ResourceType") not in ("AWS::EC2::Instance", "AWS::EC2::SecurityGroup") for r in resources):
-                raise RuntimeError("Unexpected workstation resource type")
-            found = [r["PhysicalResourceId"] for r in resources if r.get("LogicalResourceId") == "Workstation" and r.get("PhysicalResourceId")]
-            if len(found) > 1 or (iid and found and found[0] != iid):
-                raise RuntimeError("Changing instance identity")
-            if found:
-                iid = found[0]
-                vm = _one_instance(aws_call, region, iid)
-                if vm.get("BlockDeviceMappings"):
-                    progress.stage("Arming instance termination safeguard")
-                    proposal = guard.plan(vm, stack, token, now(), minutes=minutes, role=role,
-                                          stack_id=stack_id, terminate_at=expiry)
-                    activated = guard.arm(scheduler, EC2(aws_call, region), proposal)
-                    return {"stack_id": stack_id, "safety_stack": identity["arn"], "guard": activated,
-                            "terminate_at": expiry.isoformat(), "cloudformation_status": state}
-            sleep(POLL_SECONDS)
-        raise RuntimeError("Timed out discovering workstation")
+        aws_call(region, "cloudformation", "wait", "stack-create-complete", "--stack-name", stack_id)
+        selected = context(aws_call, region, stack_id)
+        actual = guard.status(aws_call, selected, now=now())
+        if actual["status"] != "scheduled":
+            raise RuntimeError("Workstation provisioning stop timer is not active in the future")
+        desired = guard.plan(selected["vm"], stack, token, now(), minutes=minutes,
+                             role=role, stack_id=stack_id)
+        guard._update(aws_call, actual["schedule"], desired["schedule"], now=now())
+        actual = guard.status(aws_call, selected, now=now())
+        if actual["status"] != "scheduled":
+            raise RuntimeError("Selected stop deadline elapsed during creation; workstation will stay stopped")
+        return {"stack_id": stack_id, "safety_stack": identity["arn"],
+                "stop_at": actual["stop_at"], "duration_minutes": minutes,
+                "cloudformation_status": selected["stack_status"]}
     except BaseException as exc:
-        problems = _emergency(aws_call, region, stack_id, stack, token, iid, stack_owned)
-        raise RuntimeError("Creation failed; verify native teardown. Stack=" + stack_id +
-                           "; expiry safety stack=" + identity["arn"] + "; warnings=" + str(problems)) from exc
+        # An interrupted CLI cannot cancel CFN provisioning. Stop only an exact owned VM
+        # if verification fails; failed initial provisioning uses ordinary CFN rollback.
+        try:
+            selected = context(aws_call, region, stack_id)
+            if selected["state"] == "running":
+                guard.verify_ownership(selected["vm"], stack, token, stack_id)
+                aws_call(region, "ec2", "stop-instances", "--instance-ids", selected["instance"])
+        except Exception as stop_error:
+            raise RuntimeError("Creation/auto-stop verification failed; stopping is unverified. Inspect " + stack_id) from stop_error
+        raise RuntimeError("Creation/auto-stop verification failed; inspect the preserved workstation " + stack_id) from exc

@@ -1,17 +1,18 @@
 # Studio Workstation
 
-Named, disposable Ubuntu 24.04 workstations on AWS: CPU, NVIDIA GPU and an isolated
+Named Ubuntu 24.04 workstations on AWS: CPU, NVIDIA GPU and an isolated
 software publisher. Uses CloudFormation, EC2, Amazon DCV, Systems Manager and the
 pinned RES 2026.06 standalone bootstrap—not the full RES control plane.
 
 ## Current development status
 
 Merged PR #116 integrates multiple named workstations, shared hostname ownership,
-and one native compute/disk lifecycle. See PR #116 and Issue #98 for its measured
-acceptance evidence; Issue #125 tracks automatic assignment of an available hostname.
-Source/offline checks for subsequent changes are not authenticated browser acceptance.
-The previously accepted single-GPU RES/T4/DCV behavior remains the provisioning
-baseline; no new installer or GPU bootstrap architecture is introduced.
+and one native compute/disk lifecycle. Issue #68 changes ordinary GPU expiration
+to automatic stop, preserving the stack and disk, with user-selected durations.
+Issue #125 adds automatic assignment of an available hostname. See the implementation
+PRs for measured offline and live evidence; source checks are not authenticated
+browser acceptance. Updating the CLI does not
+convert existing destructive timers; see the [legacy workstation note](docs/studio-cli.md#existing-workstations).
 
 ## Quick start
 
@@ -22,7 +23,7 @@ git checkout main
 python3 -m pip install -r requirements.txt
 python3 studio workstation profiles
 python3 studio workstation create --profile gpu --name art --dry-run
-python3 studio workstation create --profile gpu --name art --expires-in 150m
+python3 studio workstation create --profile gpu --name art --expires-in 8h
 python3 studio workstation list
 python3 studio workstation connect art
 ```
@@ -34,6 +35,8 @@ An existing owner keeps it, even if stopped. `connect art` automatically returns
 the verified trusted hostname for its owner, or the current public-IP URL otherwise;
 you do not need `--hostname`. Publishers and dry runs do not claim the hostname.
 CPU/GPU creates provide writable shared EFS at `/studio` and optional Rez setup.
+GPU timeouts stop the instance and preserve saved local files. Omit `--expires-in`
+for `150m`, or choose a positive whole duration in minutes, hours or days.
 Use `--no-studio-software` to skip Rez; shared storage still follows DCV setup.
 The normal `workstation` account can install and save files under `/studio` without sudo.
 Shared application launchers use MenuLibre (**Menu Editor**); see the
@@ -70,23 +73,31 @@ usable. If endpoint recovery fails, the CLI reports failure.
 ```bash
 python3 studio workstation status art
 python3 studio workstation stop art
-python3 studio workstation start art
+python3 studio workstation start art --expires-in 1d
 python3 studio workstation connect art
+python3 studio workstation extend-expiration art --additional-minutes 480
 python3 studio workstation destroy art --delete-stack
 ```
 
-Stop/destroy releases only the selected owner's hostname. Start claims it again
-if still free. Explicit assignment moves the existing shared EIP and prepares
+CLI stop/destroy releases only the selected owner's hostname. Automatic stop keeps
+its hostname association, so another workstation will not take it. Start reuses
+an existing assignment or claims the hostname if free. Explicit assignment moves
+the existing shared EIP and prepares
 trusted TLS, checking both affected desktops. A former owner gets
 an auto-assigned public IP, with bounded stop/start recovery if needed. No extra EIP
 or CPU-return subsystem. The owner needs only one reachable endpoint.
 
-EC2 and all attached local EBS are one disposable workstation. Stop/start preserves
-them; CloudFormation destroy or expiration terminates compute and natively deletes
-the disks. Durable data belongs outside the workstation. Shared EFS, EIP, DNS, ACM
-certificate and pre-existing profiles/client security groups remain independent.
-There is no volume-only schedule or deletion controller. Native workstation expiry
-uses a scoped stack-deletion schedule and an exact-instance termination fallback.
+Manual stop and GPU expiration preserve the workstation stack and local EBS.
+Each GPU start arms and verifies a fresh stop timer before starting EC2. The
+default is the duration selected at the most recent create/start; `--expires-in`
+overrides it. An extension changes the current deadline without a four-hour cap.
+Saved EBS files survive stopping; RAM and instance-store data do not.
+
+Explicit `destroy --delete-stack` deletes the workstation and local disks.
+Shared EFS, EIP, DNS, ACM certificate and pre-existing profiles/client security
+groups remain independent. Stopped workstations still incur storage and applicable
+public IPv4 charges. The native timer can only stop its scoped instance; destructive
+test cleanup is separate from the ordinary workstation lifecycle.
 
 Publisher uses the same named lifecycle, its dedicated IAM profile and existing
 EFS/Rez build/promotion workflow. It has no DCV desktop. See the full

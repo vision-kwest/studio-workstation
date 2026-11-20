@@ -12,8 +12,9 @@ class HostnameTests(unittest.TestCase):
         self.aws=AWS();self.a=self.aws.desktop('art');self.b=self.aws.desktop('ai');self.cpu=self.aws.desktop('edit','cpu')
         self.tls=lambda host,ip:'https://'+host+':8443'
         self.patches=[]
-        real_status=guard.status
-        self.add(patch.object(guard,'status',side_effect=lambda aws,c,**kw:real_status(aws,c,now=NOW,**kw)))
+        real_status,real_rearm=guard.status,guard.rearm
+        self.add(patch.object(guard,'status',side_effect=lambda aws,c,**kw:real_status(aws,c,**{'now':NOW,**kw})))
+        self.add(patch.object(guard,'rearm',side_effect=lambda aws,c,**kw:real_rearm(aws,c,**{'now':NOW,**kw})))
         self.add(patch.object(h,'check_gpu_tls'))
         self.add(patch.object(eip,'resolve',side_effect=lambda c,r,aws,tls:dcv_endpoint.resolve(c,r,aws,tls,probe=lambda *_:None)))
         real_reachable=eip._reachable
@@ -133,17 +134,16 @@ class HostnameTests(unittest.TestCase):
         self.assertTrue(all(c[-1]==self.a['instance'] for c in writes))
         self.assertFalse(any(c[1]=='allocate-address' for c in self.aws.calls))
 
-    def test_expired_restart_window_rolls_back_without_extending_deadlines(self):
-        self.assign('art');self.aws.restore_public_ip=False
-        original=guard.status.side_effect
-        def near_expiry(aws,c,**kw):
-            if c['instance']==self.a['instance'] and kw.get('headroom')==80:raise ValueError('too little restart time')
-            return original(aws,c,**kw)
-        guard.status.side_effect=near_expiry
-        with self.assertRaisesRegex(RuntimeError,'original association restored'):self.assign('ai')
-        self.assertEqual(self.aws.address['InstanceId'],self.a['instance'])
-        self.assertFalse(any(c[1]=='stop-instances' and c[-1]==self.a['instance'] for c in self.aws.calls))
-        self.assertTrue(eip.resolve(inventory.context(self.aws,h.REGION,'ai'),h.REGION,self.aws,self.tls)['reachable'])
+    def test_timer_verification_failure_blocks_hostname_recovery_restart(self):
+        self.assign('art')
+        self.aws.restore_public_ip = False
+        guard.rearm.side_effect = ValueError('cannot verify stop timer')
+        self.aws.calls.clear()
+        with self.assertRaises((ValueError, RuntimeError)):
+            self.assign('ai')
+        self.assertFalse(any(c[1] == 'start-instances' and c[-1] == self.a['instance'] for c in self.aws.calls))
+        self.assertTrue(self.aws.volumes)
+        self.assertFalse(any(c[1] in ('terminate-instances', 'delete-stack') for c in self.aws.calls))
 
     def test_failure_before_or_after_eip_mutation_restores_original_owner(self):
         self.assign('art')

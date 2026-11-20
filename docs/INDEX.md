@@ -1,5 +1,7 @@
 > **Current operations:** [Named Studio CLI](studio-cli.md). Issue #98 retires
 > fixed PR65 names/tokens, the CPU-return hostname model, and separate disk cleanup.
+> Issue #68 makes GPU expiration stop EC2, preserving its stack and local EBS.
+> Existing destructive timers are not automatically converted by updating source.
 > Older linked acceptance/design documents are dated evidence, not current commands.
 
 # Documentation index
@@ -11,19 +13,19 @@
 | Page | Purpose |
 |---|---|
 | [Main README / Quick Start](../README.md) | Project state, first commands, key costs and access risks |
-| [Studio CLI](studio-cli.md) | **Canonical create, preview, check-ready, connect, stop, start, destroy commands** |
+| [Studio CLI](studio-cli.md) | **Canonical create, connect, automatic stop, restart, extension and explicit destroy commands** |
 | [Shared application menus](shared-applications.md) | MenuLibre GUI workflow, shared launchers, migration and refresh |
 | [Shared EFS setup](efs-helper-install.md) | Writable `/studio`, EFS helper and dated CPU storage acceptance |
-| [GPU workstation profile](gpu-workstation-profile.md) | Validated Tesla T4 / RES 2026.06 GPU runtime and pinned limits |
+| [GPU workstation profile](gpu-workstation-profile.md) | Tesla T4 / RES 2026.06 runtime, timer behavior and dated acceptance |
 | [GPU runtime provenance](../runtime/README.md) | Exact derived archive keys, versions, SHA-256 and acceptance evidence |
-| [Workstation lifecycle](workstation-lifecycle-visual.md) | EBS, stop/start, changed public IP, cleanup |
+| [Workstation lifecycle](workstation-lifecycle-visual.md) | Automatic stop, saved EBS files, fresh restart timer and explicit destruction |
 | [Architecture](visual-architecture.md) | Image creation versus running EC2 workstation |
 | [CPU lifecycle/TLS](cpu-acceptance-lifecycle-tls.md) | CPU live-acceptance record and security background |
 | [Release tooling](../scripts/README.md) | Release building/publication, historical paths and updated version-read caveat |
 
 ## Trusted DCV hostname (PR #67 merged; acceptance history below)
 
-- [Merged PR #67](https://github.com/vision-kwest/studio-workstation/pull/67) implemented scoped ACM/TLS, CPU/GPU shared hostname and guarded EIP handoff; supervised CPU/GPU trusted browser login and cleanup were observed. Exact GPU expiration enhancements remain in [Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68) / draft [PR #69](https://github.com/vision-kwest/studio-workstation/pull/69).
+- [Merged PR #67](https://github.com/vision-kwest/studio-workstation/pull/67) implemented scoped ACM/TLS, CPU/GPU shared hostname and guarded EIP handoff; supervised CPU/GPU trusted browser login and cleanup were observed. [Issue #68](https://github.com/vision-kwest/studio-workstation/issues/68) owns the current automatic-stop policy and user-selected durations; PR #69 records earlier expiration work.
 - [Issue #43 — EIP, ACM and AWS Workload Credentials Provider](issue43-acm-dcv.md) and [CPU/GPU shared-hostname design](issue43-shared-cpu-gpu-handoff.md) retain their dated **pre-merge** proposals and acceptance checkpoints; statements such as “unapproved” were true at their original review dates, not today.
 - The original Lambda/EventBridge/DDNS approach was retired by PR #67. Always consult the [current Studio CLI](studio-cli.md) rather than treating old design gates as live operating instructions.
 
