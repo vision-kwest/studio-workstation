@@ -270,6 +270,97 @@ class NamedLifecycleTests(CliFixture):
         self.assertIn('sg-0123456789abcdef0',self.aws.groups)
 
 
+class StopWaiterRecoveryTests(CliFixture):
+    @staticmethod
+    def fail_stop_waiter(service, action, args):
+        if service == 'ec2' and action == 'wait' and args[0] == 'instance-stopped':
+            raise cli.subprocess.CalledProcessError(255, ['aws', 'ec2', 'wait'], stderr='injected stop timeout')
+
+    def test_stopped_readback_and_retry_complete_only_owned_cleanup(self):
+        for profile, mode in (('cpu', 'timeout'), ('gpu', 'timeout'),
+                              ('gpu', 'already-stopped'), ('gpu', 'foreign')):
+            with self.subTest(profile=profile, mode=mode):
+                self.aws.before = None
+                name = profile + '-' + mode
+                selected = self.create(profile, name)
+                self.invoke('hostname', 'assign', name)
+                self.assertIn(selected['instance'], eip.acm._grants(self.aws)[0])
+                if mode == 'foreign':
+                    self.create('cpu', 'other-owner')
+                    self.invoke('hostname', 'assign', 'other-owner')
+                if mode == 'already-stopped':
+                    self.aws.vms[selected['instance']]['State']['Name'] = 'stopped'
+                disks, address = copy.deepcopy(self.aws.volumes), copy.deepcopy(self.aws.address)
+                grants = eip.acm._grants(self.aws)
+                self.aws.calls.clear()
+                self.aws.before = self.fail_stop_waiter
+                self.assertEqual(json.loads(self.invoke('stop', name))['state'], 'stopped')
+                self.assertEqual(self.aws.volumes, disks)
+                self.assertEqual(sum(c[1] == 'stop-instances' for c in self.aws.calls), mode != 'already-stopped')
+                sessions, policies = eip.acm._grants(self.aws)
+                self.assertNotIn(selected['instance'], sessions)
+                self.assertNotIn(selected['instance'], policies)
+                if mode == 'foreign':
+                    self.assertEqual(self.aws.address, address)
+                    self.assertEqual((sessions, policies), grants)
+                else:
+                    self.assertIsNone(self.aws.address.get('InstanceId'))
+
+    def test_unconfirmed_or_replaced_instance_never_releases_hostname(self):
+        for mode in ('stopping', 'running', 'read-failure', 'replacement'):
+            with self.subTest(mode=mode):
+                self.aws.before = None
+                selected = self.create('cpu', mode)
+                self.invoke('hostname', 'assign', mode)
+                address, grants = copy.deepcopy(self.aws.address), eip.acm._grants(self.aws)
+                self.aws.calls.clear()
+                def fail_readback(*args):
+                    raise cli.subprocess.CalledProcessError(254, ['aws'], stderr='injected readback failure')
+                def fault(service, action, args):
+                    if service != 'ec2' or action != 'wait':
+                        return
+                    vm = self.aws.vms[selected['instance']]
+                    if mode in ('stopping', 'running'):
+                        vm['State']['Name'] = mode
+                    if mode == 'replacement':
+                        replacement = copy.deepcopy(vm)
+                        replacement['InstanceId'] = 'i-0ffffffffffffffff'
+                        self.aws.vms[replacement['InstanceId']] = replacement
+                        resources = self.aws.resources[selected['stack_id']]
+                        next(r for r in resources if r['LogicalResourceId'] == 'Workstation')['PhysicalResourceId'] = replacement['InstanceId']
+                    self.aws.before = fail_readback if mode == 'read-failure' else None
+                    self.fail_stop_waiter(service, action, args)
+                self.aws.before = fault
+                with patch.object(eip, 'release_if_owned', wraps=eip.release_if_owned) as cleanup, self.assertRaises(SystemExit):
+                    self.invoke('stop', mode)
+                cleanup.assert_not_called()
+                self.aws.before = None
+                self.assertEqual(self.aws.address, address)
+                self.assertEqual(eip.acm._grants(self.aws), grants)
+                self.assertEqual([c[1] for c in self.aws.writes], ['stop-instances'])
+
+    def test_stop_request_and_start_waiter_failures_still_propagate(self):
+        for command, operation in (('stop', 'stop-instances'), ('start', 'wait')):
+            with self.subTest(command=command):
+                self.aws.before = None
+                selected = self.create('cpu', command)
+                if command == 'start':
+                    self.invoke('stop', command)
+                def fail(service, action, args):
+                    if service == 'ec2' and action == operation:
+                        if command == 'start':
+                            self.aws.vms[selected['instance']]['State']['Name'] = 'stopped'
+                        raise cli.subprocess.CalledProcessError(254, ['aws'], stderr='injected original failure')
+                self.aws.before = fail
+                with (patch.object(eip, 'release_if_owned') as cleanup,
+                      patch.object(cli, 'ready_desktop', return_value={'url': 'https://example.test'}) as ready,
+                      self.assertRaises(SystemExit)):
+                    self.invoke(command, command)
+                cleanup.assert_not_called()
+                ready.assert_not_called()
+                self.assertIn('injected original failure', self.errors.getvalue())
+
+
 class AutoStopLifecycleTests(CliFixture):
     def test_create_and_start_accept_minutes_hours_days_without_arbitrary_caps(self):
         with patch.object(cli, 'command') as dispatch:
