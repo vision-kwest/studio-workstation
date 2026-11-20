@@ -6,10 +6,12 @@ pinned RES 2026.06 standalone bootstrap—not the full RES control plane.
 
 ## Current development status
 
-Issue #98 provides named workstations and explicit hostname assignment. Issue #68
-changes ordinary GPU expiration to automatic stop, preserving the stack and disk,
-with user-selected durations. See its implementation PR for offline and live evidence;
-source checks are not authenticated browser acceptance. Updating the CLI does not
+Merged PR #116 integrates multiple named workstations, shared hostname ownership,
+and one native compute/disk lifecycle. Issue #68 changes ordinary GPU expiration
+to automatic stop, preserving the stack and disk, with user-selected durations.
+Issue #125 adds automatic assignment of an available hostname. See the implementation
+PRs for measured offline and live evidence; source checks are not authenticated
+browser acceptance. Updating the CLI does not
 convert existing destructive timers; see the [legacy workstation note](docs/studio-cli.md#existing-workstations).
 
 ## Quick start
@@ -28,6 +30,10 @@ python3 studio workstation connect art
 
 Use the authorized account and `us-east-1`. Create is billable without `--dry-run`.
 Omit `--name` for a generated name. No user cleanup token or disk-cleanup delay.
+CPU/GPU create/start automatically uses `dcv.kwesidavis.com` when it is unassigned.
+An existing owner keeps it, even if stopped. `connect art` automatically returns
+the verified trusted hostname for its owner, or the current public-IP URL otherwise;
+you do not need `--hostname`. Publishers and dry runs do not claim the hostname.
 CPU/GPU creates provide writable shared EFS at `/studio` and optional Rez setup.
 GPU timeouts stop the instance and preserve saved local files. Omit `--expires-in`
 for `150m`, or choose a positive whole duration in minutes, hours or days.
@@ -49,21 +55,35 @@ sudo passwd workstation
 Open the URL from `connect art` and log in as `workstation`, not with AWS credentials.
 Raw-IP HTTPS has an expected certificate warning; unreachable DCV is not success.
 
+To inspect ownership, intentionally transfer the hostname, or retry a failed
+automatic assignment:
+
+```bash
+python3 studio workstation hostname status
+python3 studio workstation hostname assign art
+python3 studio workstation connect art
+```
+
+Assignment intentionally transfers the hostname from its current Studio owner. Automatic setup
+failures print a warning and retry command; a checked public-IP endpoint remains
+usable. If endpoint recovery fails, the CLI reports failure.
+
 ## Daily operations
 
 ```bash
 python3 studio workstation status art
 python3 studio workstation stop art
 python3 studio workstation start art --expires-in 1d
+python3 studio workstation connect art
 python3 studio workstation extend-expiration art --additional-minutes 480
-python3 studio workstation hostname status
-python3 studio workstation hostname assign art
-python3 studio workstation hostname release
 python3 studio workstation destroy art --delete-stack
 ```
 
-Create/start never steals `dcv.kwesidavis.com`. Assignment moves the existing shared
-EIP and prepares trusted TLS, checking both affected desktops. A former owner gets
+CLI stop/destroy releases only the selected owner's hostname. Automatic stop keeps
+its hostname association, so another workstation will not take it. Start reuses
+an existing assignment or claims the hostname if free. Explicit assignment moves
+the existing shared EIP and prepares
+trusted TLS, checking both affected desktops. A former owner gets
 an auto-assigned public IP, with bounded stop/start recovery if needed. No extra EIP
 or CPU-return subsystem. The owner needs only one reachable endpoint.
 

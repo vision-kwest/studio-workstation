@@ -1,6 +1,6 @@
-"""Explicit single-owner DCV hostname. No DNS edits, extra EIPs or CPU-return path.
+"""Single-owner DCV hostname. No DNS edits, extra EIPs or CPU-return path.
 
-Hostname commands must be serialized by the operator. AWS has no conditional
+Explicit hostname transfers must be serialized by the operator. AWS has no conditional
 EIP reassociation API; repeated ownership checks and no-allow-reassociation
 prevent knowingly seizing an address from an unexpected owner.
 """
@@ -20,7 +20,8 @@ def _target(aws, stack, *, running=True):
     vm = selected["vm"]
     if selected["profile"] not in ("cpu", "gpu") or vm.get("VpcId") != "vpc-01bbe5d01838f70b2":
         raise ValueError("Hostname requires an owned Studio desktop in the validated VPC")
-    if running and (selected["state"] != "running" or selected["stack_status"] != "CREATE_COMPLETE"):
+    if running and (selected["state"] != "running" or
+                    selected["stack_status"] not in ("CREATE_COMPLETE", "UPDATE_COMPLETE")):
         raise ValueError("Destination must be a running, completely created workstation")
     interfaces = vm.get("NetworkInterfaces", [])
     if len(interfaces) != 1 or interfaces[0].get("Attachment", {}).get("DeviceIndex") != 0:
@@ -119,9 +120,11 @@ def _reachable(aws, selected, check_tls, *, restart=False, sleep=time.sleep):
         progress.stage("Checking DCV endpoint recovery")
 
 
-def _change(aws, destination, check_tls, *, destroying=False):
+def _change(aws, destination, check_tls, *, destroying=False, only_if_unassigned=False):
     progress.stage("Checking independent DCV hostname ownership")
     before = _address(aws)
+    if only_if_unassigned and any(_fingerprint(before)):
+        return None
     stale = legacy._tags(before).get("StudioDcvInstanceId") if not before.get("InstanceId") else None
     if stale:
         if any(_fingerprint(before)):
@@ -141,6 +144,8 @@ def _change(aws, destination, check_tls, *, destroying=False):
         acm.revoke_gpu(aws, stale)
         _move(aws, before, None)
         before = _address(aws)
+    if only_if_unassigned and any(_fingerprint(before)):
+        return None  # Stale-owner recovery may have overlapped another claim.
     previous = _owner(aws, before)
     if destination:
         if destination["profile"] == "gpu":
@@ -153,9 +158,15 @@ def _change(aws, destination, check_tls, *, destroying=False):
             return {"owner": destination["stack"], "endpoint": endpoint}
         # Verify its independent endpoint before changing certificate permissions or EIP.
         _reachable(aws, destination, check_tls)
-        acm.prepare_gpu(aws, destination["instance"])
+        if not only_if_unassigned:
+            acm.prepare_gpu(aws, destination["instance"])
+    moved = None
     try:
         moved = _move(aws, before, destination)
+        if only_if_unassigned:
+            # Reserve the free EIP before touching shared certificate grants.
+            # A competing claimant fails in _move without modifying IAM/SSM.
+            acm.prepare_gpu(aws, destination["instance"])
         endpoint = _reachable(aws, destination, check_tls) if destination else None
         if destination and endpoint is None:
             raise RuntimeError("Destination stopped during transfer; not a successful DCV assignment")
@@ -166,7 +177,10 @@ def _change(aws, destination, check_tls, *, destroying=False):
     except BaseException as exc:
         current = _address(aws)
         if _fingerprint(current) != _fingerprint(before):
-            if current.get("InstanceId") not in (None, destination["instance"] if destination else None):
+            if (any(_fingerprint(current)) and
+                    current.get("InstanceId") != (destination["instance"] if destination else None)):
+                if only_if_unassigned and moved is not None:
+                    acm.revoke_gpu(aws, destination["instance"])
                 raise RuntimeError("Hostname transfer failed; foreign owner, no rollback takeover") from exc
             _move(aws, current, previous)
         if previous and not destroying:
@@ -181,8 +195,9 @@ def _change(aws, destination, check_tls, *, destroying=False):
             "hostname": legacy.HOST, "endpoint": endpoint, "previous_endpoint": old_endpoint}
 
 
-def assign(aws, stack, check_tls):
-    return _change(aws, _target(aws, stack), check_tls)
+def assign(aws, stack, check_tls, *, only_if_unassigned=False):
+    """Claim a free hostname automatically, or explicitly transfer an occupied one."""
+    return _change(aws, _target(aws, stack), check_tls, only_if_unassigned=only_if_unassigned)
 
 
 def release(aws, check_tls=None):
