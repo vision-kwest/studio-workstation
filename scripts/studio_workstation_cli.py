@@ -551,8 +551,16 @@ def command(args):
         if not retry_stop:
             progress.stage("Starting EC2" if args.action == "start" else "Stopping EC2")
             aws(args.region, "ec2", args.action + "-instances", "--instance-ids", iid)
-            aws(args.region, "ec2", "wait", "instance-status-ok" if args.action == "start" else "instance-stopped",
-                "--instance-ids", iid)
+            try:
+                aws(args.region, "ec2", "wait", "instance-status-ok" if args.action == "start" else "instance-stopped",
+                    "--instance-ids", iid)
+            except subprocess.CalledProcessError:
+                if args.action != "stop":
+                    raise
+                fresh = context(aws, args.region, selected["stack_id"])
+                if fresh["instance"] != iid or fresh["state"] != "stopped":
+                    raise
+                progress.stage("EC2 stop confirmed by readback; completing cleanup")
         if profile != "publisher":
             if args.action == "stop":
                 independent_eip.release_if_owned(aws, selected, verified_dcv_hostname)
