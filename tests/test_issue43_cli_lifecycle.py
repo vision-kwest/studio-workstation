@@ -1,5 +1,7 @@
 """Common named lifecycle contracts: real parser/render/dispatch, stateful AWS boundary."""
 import contextlib
+import copy
+import datetime as dt
 import io
 import json
 import unittest
@@ -15,9 +17,10 @@ from workstation_fake import AWS, NOW, tags
 class CliFixture(unittest.TestCase):
     def setUp(self):
         self.aws=AWS()
+        self.now=NOW
         self.templates=[]
         self.aws.groups['sg-0123456789abcdef0']={'GroupId':'sg-0123456789abcdef0','VpcId':cli.DEFAULT_VPC}
-        real_run, real_create, real_status=cli.run, creator.create_guarded, guard.status
+        real_run, real_create, real_status, real_rearm=cli.run, creator.create_guarded, guard.status, guard.rearm
         def run(args, **kw):
             if args[0]=='aws':
                 self.assertEqual(args[1:3],['cloudformation','validate-template'])
@@ -31,8 +34,9 @@ class CliFixture(unittest.TestCase):
         self.add(patch.object(cli,'verified_dcv_hostname',side_effect=lambda host,ip:'https://'+host+':8443'))
         self.add(patch.object(dcv_endpoint,'_probe'))
         self.add(patch.object(h,'check_gpu_tls'))
-        self.add(patch.object(creator,'create_guarded',side_effect=lambda *a,**kw:real_create(*a,**{'utc_now':lambda:NOW,'sleep':lambda _:None,**kw})))
-        self.add(patch.object(guard,'status',side_effect=lambda *a,**kw:real_status(*a,now=NOW,**kw)))
+        self.add(patch.object(creator,'create_guarded',side_effect=lambda *a,**kw:real_create(*a,**{'utc_now':lambda:NOW,**kw})))
+        self.add(patch.object(guard,'status',side_effect=lambda *a,**kw:real_status(*a,**{'now':self.now,**kw})))
+        self.add(patch.object(guard,'rearm',side_effect=lambda *a,**kw:real_rearm(*a,**{'now':self.now,**kw})))
 
     def add(self,p):
         obj=p.start();self.addCleanup(p.stop);return obj
@@ -160,7 +164,7 @@ class NamedLifecycleTests(CliFixture):
         b=inventory.context(self.aws,h.REGION,'art')
         self.assertEqual(b['state'],'stopped')
         self.assertEqual(self.aws.vms[a['instance']]['State']['Name'],'running')
-        self.assertEqual(len(self.aws.schedules),2)
+        self.assertEqual(len(self.aws.schedules),1)
 
     def test_missing_guard_blocks_restart_but_does_not_block_stop(self):
         a=self.create('gpu','art');self.aws.schedules.clear()
@@ -214,3 +218,94 @@ class NamedLifecycleTests(CliFixture):
         self.invoke('destroy','publish','--delete-stack')
         self.assertEqual(self.aws.volumes,{})
         self.assertIn('sg-0123456789abcdef0',self.aws.groups)
+
+
+class AutoStopLifecycleTests(CliFixture):
+    def test_create_and_start_accept_minutes_hours_days_without_arbitrary_caps(self):
+        with patch.object(cli, 'command') as dispatch:
+            for value, expected in (('1m', 1), ('59m', 59), ('480m', 480), ('8h', 480), ('2d', 2880), ('10000m', 10000)):
+                for command in ('create', 'start'):
+                    with self.subTest(value=value, command=command):
+                        args = [command, '--name', 'art', '--expires-in', value]
+                        if command == 'create':
+                            args += ['--profile', 'gpu']
+                        self.invoke(*args)
+                        self.assertEqual(dispatch.call_args.args[0].expires_in, expected)
+            self.invoke('extend-expiration', 'art', '--additional-minutes', '10000')
+            self.assertEqual(dispatch.call_args.args[0].additional_minutes, 10000)
+        self.assertFalse(self.aws.calls)
+
+    def test_invalid_duration_syntax_never_reaches_aws(self):
+        for value in ('0m', '-1m', '0h', '1.5h', 'foo', '1', '1w', '1h30m'):
+            for command in ('create', 'start'):
+                args = [command, '--name', 'art', '--expires-in', value]
+                if command == 'create':
+                    args += ['--profile', 'gpu']
+                with self.subTest(value=value, command=command), self.assertRaises(SystemExit):
+                    self.invoke(*args)
+        self.assertFalse(self.aws.calls)
+
+    def test_timeout_preserves_stack_disk_and_saved_data_then_start_rearms_before_compute(self):
+        self.invoke('create', '--profile', 'gpu', '--name', 'art', '--expires-in', '8h')
+        selected = inventory.context(self.aws, h.REGION, 'art')
+        name = 'studio-stop-' + selected['token']
+        volume_id = selected['vm']['BlockDeviceMappings'][0]['Ebs']['VolumeId']
+        self.aws.volumes[volume_id]['saved_file_sha256'] = 'saved-work-sentinel'
+        disk = copy.deepcopy(self.aws.volumes[volume_id])
+        self.now = NOW + dt.timedelta(minutes=481)
+        self.aws.fire_schedule(name)
+        stopped = json.loads(self.invoke('status', 'art'))
+        self.assertEqual(stopped['state'], 'stopped')
+        self.assertEqual(stopped['expiration']['status'], 'expired')
+        self.aws.calls.clear()
+        self.invoke('start', 'art', '--expires-in', '12h')
+        self.assertEqual(self.aws.volumes[volume_id], disk)
+        fresh = inventory.context(self.aws, h.REGION, 'art')
+        self.assertEqual((fresh['stack_id'], fresh['instance'], fresh['state']),
+                         (selected['stack_id'], selected['instance'], 'running'))
+        status = guard.status(self.aws, fresh)
+        self.assertEqual(status['duration_minutes'], 720)
+        self.assertEqual(dt.datetime.fromisoformat(status['stop_at']), self.now + dt.timedelta(minutes=720))
+        update = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('scheduler', 'update-schedule'))
+        start = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('ec2', 'start-instances'))
+        self.assertLess(update, start)
+        self.assertTrue(any(c[:2] == ('scheduler', 'get-schedule') for c in self.aws.calls[update + 1:start]))
+        self.assertFalse(any(c[1] in ('delete-stack', 'terminate-instances', 'delete-volume') for c in self.aws.calls))
+        self.invoke('stop', 'art')
+        self.now += dt.timedelta(days=1)
+        self.invoke('start', 'art')
+        self.assertEqual(dt.datetime.fromisoformat(guard.status(self.aws, fresh)['stop_at']), self.now + dt.timedelta(minutes=720))
+
+    def test_failed_timer_rearm_never_starts_compute_or_deletes_work(self):
+        selected = self.create('gpu', 'art')
+        self.invoke('stop', 'art')
+        disk = copy.deepcopy(self.aws.volumes)
+        updated = []
+        def after(service, action, args, result):
+            if (service, action) == ('scheduler', 'update-schedule'):
+                updated.append(True)
+        def before(service, action, args):
+            if (service, action) == ('scheduler', 'get-schedule') and updated:
+                raise RuntimeError('cannot verify timer')
+        self.aws.before, self.aws.after = before, after
+        self.aws.calls.clear()
+        with self.assertRaises(SystemExit):
+            self.invoke('start', 'art', '--expires-in', '8h')
+        self.assertEqual(self.aws.vms[selected['instance']]['State']['Name'], 'stopped')
+        self.assertEqual(self.aws.volumes, disk)
+        self.assertFalse(any(c[1] in ('start-instances', 'terminate-instances', 'delete-stack') for c in self.aws.calls))
+
+    def test_disabled_legacy_deployment_is_visible_and_not_implicitly_migrated(self):
+        selected = self.aws.legacy_desktop('legacy')
+        before = copy.deepcopy(self.aws.schedules)
+        self.aws.calls.clear()
+        status = json.loads(self.invoke('status', 'legacy'))
+        self.assertEqual(status['expiration']['status'], 'legacy')
+        self.assertFalse(self.aws.writes)
+        self.invoke('stop', 'legacy')
+        self.aws.calls.clear()
+        with self.assertRaises(SystemExit):
+            self.invoke('start', 'legacy', '--expires-in', '8h')
+        self.assertFalse(self.aws.writes)
+        self.assertEqual(self.aws.schedules, before)
+        self.assertEqual(self.aws.vms[selected['instance']]['State']['Name'], 'stopped')

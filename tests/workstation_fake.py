@@ -37,7 +37,11 @@ def resolve(value, values):
     if set(value) == {'Ref'}:
         return values[value['Ref']]
     if set(value) == {'Fn::Sub'}:
-        return re.sub(r'\$\{([^}]+)\}', lambda m: str(values.get(m[1], m[0])), value['Fn::Sub'])
+        template = value['Fn::Sub']
+        if isinstance(template, list):
+            template, substitutions = template
+            values = {**values, **resolve(substitutions, values)}
+        return re.sub(r'\$\{([^}]+)\}', lambda m: str(values.get(m[1], m[0])), template)
     if set(value) == {'Fn::Split'}:
         separator, text = resolve(value['Fn::Split'], values)
         return text.split(separator)
@@ -137,6 +141,13 @@ class AWS:
                         'DeleteOnTermination': props['BlockDeviceMappings'][0]['Ebs']['DeleteOnTermination']}}]}
                 self.volumes[vid] = {'VolumeId':vid, 'State':'in-use', 'Tags': tags(instance_tags),
                                     'Attachments':[{'InstanceId':physical, 'Device':'/dev/sda1'}]}
+            elif kind == 'AWS::Scheduler::Schedule':
+                props = resolve(resource['Properties'], values)
+                assert 'Tags' not in props, 'AWS::Scheduler::Schedule does not accept Tags'
+                physical = props['Name']
+                props.setdefault('ActionAfterCompletion', 'NONE')
+                self.schedules[physical] = props
+                values[key + '.Arn'] = f'arn:aws:scheduler:{h.REGION}:{h.ACCOUNT}:schedule/{props["GroupName"]}/{physical}'
             else:
                 raise AssertionError(kind)
             values[key] = physical
@@ -145,7 +156,7 @@ class AWS:
         stack['Outputs'] = [{'OutputKey':key, 'OutputValue':resolve(v['Value'],values)} for key,v in body.get('Outputs',{}).items()]
         return {'StackId':arn}
 
-    def desktop(self, name='gpu-a', profile='gpu', *, minutes=150):
+    def desktop(self, name='gpu-a', profile='gpu', *, minutes=150, utc_now=None):
         # Actual renderer and native safety template; no alternate production implementation.
         import tempfile, sys
         from unittest.mock import patch
@@ -162,7 +173,7 @@ class AWS:
                       'InstanceProfileName=StudioWorkstationSSMRole','SubnetId=subnet-0986937ce71fb97cb',
                       'VpcId=vpc-01bbe5d01838f70b2','DiskSizeGiB=100','ClientCidr=0.0.0.0/0']
             if profile=='gpu':
-                creator.create_guarded(self,h.REGION,name,path,params,minutes=minutes,utc_now=lambda:NOW,sleep=lambda _:None)
+                creator.create_guarded(self,h.REGION,name,path,params,minutes=minutes,utc_now=utc_now or (lambda:NOW))
             else:
                 self.native_create(name,json.loads(path.read_text()),dict(p.split('=',1) for p in params),
                                    {'StudioManaged':'true','StudioProfile':profile})
@@ -178,6 +189,29 @@ class AWS:
         if self.address.get('InstanceId') == iid:
             self.detach()
         vm.pop('PublicIpAddress',None)
+
+    def fire_schedule(self, name):
+        spec = self.schedules[name]
+        assert spec['State'] == 'ENABLED'
+        assert spec['Target']['Arn'] == 'arn:aws:scheduler:::aws-sdk:ec2:stopInstances'
+        ids = json.loads(spec['Target']['Input'])['InstanceIds']
+        self(h.REGION, 'ec2', 'stop-instances', '--instance-ids', *ids)
+        if spec['ActionAfterCompletion'] == 'DELETE':
+            del self.schedules[name]
+
+    def legacy_desktop(self, name='legacy'):
+        selected = self.desktop(name)
+        current = self.schedules.pop('studio-stop-' + selected['token'])
+        self.resources[selected['stack_id']] = [r for r in selected['resources'] if r['LogicalResourceId'] != 'AutoStopSchedule']
+        for prefix, action, payload, delay in (
+                ('studio-expiry-', 'cloudformation:deleteStack', {'StackName': selected['stack_id']}, 0),
+                ('studio-fallback-', 'ec2:terminateInstances', {'InstanceIds': [selected['instance']]}, 5)):
+            spec = deepcopy(current)
+            spec.update(Name=prefix + selected['token'], State='DISABLED', ActionAfterCompletion='DELETE',
+                        ScheduleExpression='at(' + (NOW + dt.timedelta(minutes=150 + delay)).strftime('%Y-%m-%dT%H:%M:%S') + ')')
+            spec['Target'].update(Arn='arn:aws:scheduler:::aws-sdk:' + action, Input=json.dumps(payload))
+            self.schedules[spec['Name']] = spec
+        return inventory.context(self, h.REGION, name)
 
     def detach(self):
         iid = self.address.get('InstanceId')
@@ -231,6 +265,7 @@ class AWS:
                     if r['ResourceType']=='AWS::EC2::Instance':self.terminate(physical)
                     if r['ResourceType']=='AWS::EC2::SecurityGroup':self.groups.pop(physical,None)
                     if r['ResourceType']=='AWS::IAM::Role':self.roles.pop(physical,None);self.policies.pop(physical,None)
+                    if r['ResourceType']=='AWS::Scheduler::Schedule':self.schedules.pop(physical,None)
                     r['ResourceStatus']='DELETE_COMPLETE'
                 s['StackStatus']='DELETE_COMPLETE'
                 return {}

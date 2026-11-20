@@ -1,33 +1,34 @@
-# Workstation lifecycle — validated CPU and GPU paths
+# Workstation lifecycle — automatic stop and explicit destruction
 
-A baked AMI and a running workstation are separate resources. Merged PR #65 validated **create → GPU/DCV login → stop → start → verify saved file → destroy and audit** using one scoped GPU acceptance workstation.
+A workstation's saved local EBS files remain through manual stop and GPU timer
+expiration. A stopped workstation is reusable; explicit destroy deletes its stack
+and local disks. Shared EFS and the independent hostname resources remain separate.
 
 ```mermaid
 flowchart TD
-  AMI["Validated CPU or GPU AMI"] --> Create["CLI create + CloudFormation"]
-  Create --> Running["EC2 running"]
-  Running --> Ready["SSM + RES/DCV ready"]
-  Ready --> Connect["DCV local Linux login"]
-  Connect --> Stop["Save work; CLI stop"]
-  Stop --> Stopped["Same EBS retained; EC2 stopped"]
-  Stopped --> Start["CLI start: same instance"]
-  Start --> IP["Public IP can change; verify DCV"]
-  IP --> Connect
-  Connect --> Destroy["CLI destroy --delete-stack"]
+  Create["CLI create + CloudFormation"] --> Running["EC2 running; saved work on EBS"]
+  Create --> Timer["GPU stop schedule"]
+  Timer -->|"Deadline reached"| Stopped["EC2 stopped; stack and EBS preserved"]
+  Running -->|"Save work; CLI stop"| Stopped
+  Stopped --> Start["CLI start: verify fresh GPU timer"]
+  Start --> Running
+  Running --> Destroy["Explicit destroy --delete-stack"]
   Stopped --> Destroy
-  Destroy --> EBS["Verify EBS, SG and launch template removed"]
-  EBS --> Schedules["Verify then remove test schedules"]
+  Destroy --> Removed["Verify stack and local resources removed"]
 ```
 
 ## Operational rules
 
 - **Create** immediately deploys a billable stack unless `--dry-run` is supplied. There is no `--yes`, `--confirm-stack`, or `--confirm-instance`.
-- **Stop** preserves the EBS-backed filesystem; EC2 compute charges stop after the instance reaches `stopped`, while storage charges continue. The GPU test observed an NVIDIA DRM warning and slow stop; the instance ultimately stopped successfully.
-- **Start** may change the instance's public IPv4, as observed during GPU acceptance. Check SSM, GDM/Xorg, DCV console and GPU OpenGL rather than assuming `running` means login is ready.
+- **Stop and GPU expiration** preserve saved files on EBS and the CloudFormation stack. Compute charges end when EC2 stops; retained storage and applicable public IPv4 charges continue. RAM and instance-store data are not preserved.
+- **Start** verifies a fresh GPU stop deadline before starting the same instance/disk. It reuses the last create/start duration unless `--expires-in` supplies another positive `m`, `h` or `d` duration. There is no four-hour cap. Public IPv4 can change, so verify DCV readiness again.
 - **Connect** prints the current DCV URL. DCV authenticates the local `workstation` account (set a strong password interactively via SSM). No inbound SSH is required.
-- **Destroy** uses `destroy --stack NAME --delete-stack`. Retained GPU EBS (`DeleteOnTermination=false`) **may survive** stack deletion; independently inspect exact volume ID, SG, launch template and scheduled expiration actions before confirming cleanup.
-- **One-shot GPU test expiration** runs through stop/start. It is not a general production stop/start service; the EBS deletion action is best-effort.
+- **Destroy** uses `destroy NAME --delete-stack`. CloudFormation deletes the workstation, its local EBS and owned stop schedule; the CLI checks resource absence before reporting completion.
+- **Existing legacy timers** are not converted by a CLI update. Review [existing workstation behavior](studio-cli.md#existing-workstations) before treating an old destructive timer as automatic stop.
+- **Destructive test cleanup** is separately scoped to disposable live-test resources. It does not change ordinary workstation expiry.
 
-**Acceptance evidence:** CPU v0.1.3 passed prior stop/start DCV reconnection. GPU PR #65 passed exact file SHA-256 persistence, RES/T4/DCV readiness after restart and final cleanup; the user confirmed interactive DCV login before the stop/start test but not separately afterward.
+**Evidence:** The Issue #68 implementation PR records validation of the new timer.
+Historical CPU/GPU stop/start acceptance established EBS file persistence and DCV
+readiness, but does not by itself prove delivery of the new native stop schedule.
 
 See [Studio CLI](studio-cli.md), [Quick Start](../README.md#quick-start), and [Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46).

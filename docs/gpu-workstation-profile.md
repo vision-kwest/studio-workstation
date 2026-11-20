@@ -1,4 +1,27 @@
-# GPU workstation profile — validated RES 2026.06 path
+# GPU workstation profile — RES 2026.06 and automatic stop
+
+## Current workstation lifecycle
+
+New named GPU workstations use one CloudFormation-owned stop schedule. Timeout
+stops EC2 and preserves the stack and saved files on its encrypted gp3 root disk.
+Explicit `destroy --delete-stack` removes the workstation and local disks.
+`DeleteOnTermination=true` does not delete a disk when its instance stops.
+
+```bash
+python3 studio workstation create --profile gpu --name art --expires-in 8h
+python3 studio workstation stop art
+python3 studio workstation start art --expires-in 1d
+python3 studio workstation extend-expiration art --additional-minutes 480
+```
+
+Create defaults to `150m`; positive whole `m`, `h` and `d` durations have no
+four-hour ceiling. Start verifies a fresh stop deadline before starting the
+existing instance. See [Studio CLI](studio-cli.md#gpu-automatic-stop) for duration
+reuse, near-deadline races and existing deployments that still have legacy timers.
+Source/offline validation and observed live acceptance are recorded separately in
+the Issue #68 implementation PR.
+
+## Historical GPU acceptance
 
 **Historical acceptance:** GPU AMI `ami-027c98f85b155c2ac` passed live validation in October–November 2026 but later failed on kernel `7.0.0-1017-aws` with an NVIDIA module installed only for `7.0.0-1014-aws`. **Draft Issue #100** switches new GPU launches to Canonical Ubuntu 24.04 `ami-0d6dd9e8265d48906` (the old GPU recipe’s parent), leaving the RES 2026.06 guest driver installer responsible for installing NVIDIA after dependencies/reboots. This change is **offline-only until separately approved live acceptance**. Merged PR #65 completed GPU Studio CLI creation, local DCV password login, NVIDIA OpenGL, stop/start persisted-file verification, and exact test teardown ([Issue #46](https://github.com/vision-kwest/studio-workstation/issues/46)). The successful 0.1.11/1 GPU Image Builder image was built separately; its Image Builder **pipeline remains disabled and points to recipe 0.1.10**.
 
@@ -10,9 +33,9 @@ For the current user-facing commands, use [Studio CLI](studio-cli.md). Earlier s
 - **Issue #100 installer published, GPU acceptance pending:** new version `sgj5wZfqMTRUImWDDbxR08emK755aU7A` (SHA-256 `6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d`); it retains the original RES signed NVIDIA download plus a checksum/kernel-module check. See [runtime release provenance](../runtime/README.md).
 - New GPU launches use a driver-free Canonical base and let the **existing RES post-reboot installer** install NVIDIA GRID; the immutable RES archives, RES cloud-init/reboot continuation and DCV setup remain unchanged. Verify guest S3 driver download rights and `nvidia-smi` after the final reboot before promoting this candidate.
 - `STUDIO_STANDALONE=true` isolates RES-only broker, cluster-setting and external identity dependencies while using DCV Linux `system` authentication.
-- GPU persistent mode uses encrypted gp3 root EBS, stop-on-shutdown and `DeleteOnTermination=false`. Application files survive EC2 stop/start; its public IPv4 can change.
+- The current GPU renderer uses encrypted gp3 root EBS, stop-on-shutdown and `DeleteOnTermination=true`. Saved application files survive EC2 stop/start; explicit destruction deletes local disks and the public IPv4 can change after restart.
 - The live Task 5 test verified the same 100 GiB EBS root volume, identical file SHA-256 before/after stop/start, RES readiness and T4/OpenGL after restart. The user confirmed an actual DCV login before the test.
-- **The merged GPU CLI remains hardcoded to the one approved acceptance stack/token.** Other stack names need a deliberate CLI/IAM scope update; it is not a generic self-service GPU platform.
+- Issue #98 replaced the original fixed acceptance name/token with named workstations and an internal deployment identity. The earlier fixed-name launch is historical.
 
 ## Exact immutable runtime archives
 
@@ -28,27 +51,21 @@ The exact SHA-256 and S3 VersionIds are documented in [runtime provenance](../ru
 ## Offline render for review
 
 ```bash
-python3 runtime/render_workstation.py \
-  --profile gpu --lifecycle persistent \
-  --bucket studio-workstation-releases-401233741942-us-east-1 \
-  --prefix releases/issue100-res-native-20261115/res-2026.06 \
-  --user workstation \
-  --cleanup-token pr65-b23c8e5fdf67b683cd35 \
-  --test-stack studio-gpu-cli-accept65 \
-  --output /tmp/studio-gpu-review.json
-
-aws cloudformation validate-template \
-  --template-body file:///tmp/studio-gpu-review.json \
-  --region us-east-1 --no-cli-pager
+python3 studio workstation create --profile gpu --name art \
+  --expires-in 8h --dry-run
 ```
 
-The base `runtime/workstation-template.json` contains a `RENDER_OFFLINE` placeholder and **must not be deployed directly**. ValidateTemplate checks structure, not GPU functionality. Use [`studio workstation create ... --dry-run`](studio-cli.md) to see CLI-rendered inputs without EC2 launch.
+The base `runtime/workstation-template.json` contains a `RENDER_OFFLINE` placeholder and **must not be deployed directly**. Dry-run previews rendered inputs without creating AWS resources; it does not prove live GPU or timer delivery.
 
-## DCV and cleanup
+## DCV and test cleanup
 
 During the supervised test, `--client-cidr 0.0.0.0/0 --allow-public-dcv` explicitly allowed login from changing networks. This opens TCP 8443 to the public internet, requires a strong unique Linux password and was removed in acceptance cleanup. SSH stayed closed. For long-term use, prefer restricted ingress or a future identity-aware private path ([Issue #62](https://github.com/vision-kwest/studio-workstation/issues/62)). Enroll the local `workstation` password interactively through SSM, not in user data.
 
-The test-only one-shot guard terminates the instance after approximately 150 minutes and attempts retained-EBS deletion 45 minutes later, even through EC2 stop/start. Do not treat it as a permanent workstation service or guaranteed EBS recycler. Test resources were deleted; the tag-scoped IAM expiration role remains.
+The historical PR #65 test used termination after approximately 150 minutes and
+an attempted retained-EBS deletion 45 minutes later. Those were supervised test
+safeguards. Future destructive test timers must be created separately for the
+explicitly selected disposable test resources; they are not ordinary Studio CLI
+behavior. Normal GPU expiration stops the instance and preserves its local files.
 
 ## RES sources
 

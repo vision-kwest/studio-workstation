@@ -37,8 +37,9 @@ def _remove_safety(aws, region, stack, identity, selected=None):
     filters = ["Name=tag:StudioStack,Values=" + stack, "Name=tag:StudioCleanupToken,Values=" + token]
     _remaining(aws, region, filters)
     progress.stage("Removing expiration safeguards")
-    for prefix, action, field in (("studio-expiry-", guard.DELETE_STACK, "StackName"),
-                                  ("studio-fallback-", guard.TERMINATE, "InstanceIds")):
+    # Compatibility cleanup only: new workstations never create these destructive timers.
+    for prefix, action, field in (("studio-expiry-", "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack", "StackName"),
+                                  ("studio-fallback-", "arn:aws:scheduler:::aws-sdk:ec2:terminateInstances", "InstanceIds")):
         name = prefix + token
         spec = _absent(lambda: aws(region, "scheduler", "get-schedule", "--group-name", guard.GROUP,
                                    "--name", name), "ResourceNotFoundException")
@@ -89,9 +90,13 @@ def destroy(aws, run, stack, region, *, sleep=time.sleep):
     selected = context(aws, region, stack)
     stack = selected["stack"]
     allowed = {"Workstation": "AWS::EC2::Instance", "WorkstationSG": "AWS::EC2::SecurityGroup"}
+    if selected["profile"] == "gpu":
+        allowed["AutoStopSchedule"] = "AWS::Scheduler::Schedule"
     for r in selected["resources"]:
         if allowed.get(r.get("LogicalResourceId")) != r.get("ResourceType"):
-            raise ValueError("Unexpected resource in disposable workstation stack")
+            raise ValueError("Unexpected resource in workstation stack")
+        if r.get("LogicalResourceId") == "AutoStopSchedule" and r.get("PhysicalResourceId") not in (None, "studio-stop-" + selected["token"]):
+            raise ValueError("Auto-stop schedule does not belong to this deployment")
     vm = selected["vm"]
     disks = [m["Ebs"] for m in vm.get("BlockDeviceMappings", []) if "Ebs" in m]
     if vm.get("State", {}).get("Name") not in (None, "terminated") and (
@@ -129,6 +134,10 @@ def destroy(aws, run, stack, region, *, sleep=time.sleep):
         if terminated and terminated.get("State", {}).get("Name") != "terminated":
             raise RuntimeError("Original instance is not terminated")
     for resource in selected["resources"]:
+        if resource["ResourceType"] == "AWS::Scheduler::Schedule" and resource.get("PhysicalResourceId"):
+            if _absent(lambda: aws(region, "scheduler", "get-schedule", "--group-name", guard.GROUP,
+                                   "--name", resource["PhysicalResourceId"]), "ResourceNotFoundException") is not None:
+                raise RuntimeError("Workstation auto-stop schedule remains after native deletion")
         if resource["ResourceType"] == "AWS::EC2::SecurityGroup" and resource.get("PhysicalResourceId"):
             if _absent(lambda: aws(region, "ec2", "describe-security-groups", "--group-ids", resource["PhysicalResourceId"]),
                        "InvalidGroup.NotFound") is not None:
