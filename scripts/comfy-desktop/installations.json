@@ -1,0 +1,16 @@
+[
+  {
+    "id": "inst-1795224457905",
+    "name": "Studio ComfyUI",
+    "createdAt": "2026-11-21T01:27:37.905Z",
+    "installPath": "/studio/apps/comfyui/main/Studio ComfyUI (1)",
+    "sourceId": "standalone",
+    "status": "installed",
+    "launchArgs": "--enable-manager --database-url @DATABASE_URL@",
+    "launchMode": "window",
+    "version": "v0.42.1",
+    "releaseTag": "v0.42.1-env1",
+    "variant": "linux-nvidia",
+    "pythonVersion": "3.13.12"
+  }
+]

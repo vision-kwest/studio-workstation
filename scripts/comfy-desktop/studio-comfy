@@ -1,0 +1,67 @@
+#!/usr/bin/python3
+"""Seed missing local Comfy Desktop v1.1.10 files, then run the shared app."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+APPIMAGE = Path("/studio/apps/comfy-desktop/current/Comfy-Desktop.AppImage")
+TEMPLATES = Path(__file__).resolve().parent
+
+
+def main():
+    settings = json.loads((TEMPLATES / "settings.json").read_text())
+    installations = json.loads((TEMPLATES / "installations.json").read_text())
+    instance = installations[0]
+    install = Path(instance["installPath"])
+    required = [APPIMAGE, install / "standalone-env", install / "ComfyUI/main.py",
+                install / "ComfyUI/.venv/bin/python3", *map(Path, settings["modelsDirs"]),
+                Path(settings["inputDir"]), Path(settings["outputDir"])]
+    for path in required:
+        if not path.exists():
+            raise FileNotFoundError(f"Shared ComfyUI path unavailable: {path}")
+    if not os.access(APPIMAGE, os.X_OK):
+        raise PermissionError(f"AppImage is not executable: {APPIMAGE}")
+
+    home = Path.home()
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
+    state = Path(os.environ.get("XDG_STATE_HOME") or home / ".local/state") / "comfyui-studio"
+    state.mkdir(parents=True, exist_ok=True)
+    with (state / "setup.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        database = data / "comfyui-studio/comfyui.db"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        instance["launchArgs"] = instance["launchArgs"].replace(
+            "@DATABASE_URL@", shlex.quote(f"sqlite:///{database}"))
+        for path, contents in ((config / "comfyui-desktop-2/settings.json", settings),
+                               (data / "comfyui-desktop-2/installations.json", installations)):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists():
+                continue
+            with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as temporary:
+                json.dump(contents, temporary, indent=2)
+                temporary.write("\n")
+            try:
+                os.link(temporary.name, path)  # Atomic creation, never overwrite a local file.
+            except FileExistsError:
+                pass
+            finally:
+                os.unlink(temporary.name)
+    os.execv(str(APPIMAGE), [str(APPIMAGE), "--no-sandbox", *sys.argv[1:]])
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError) as error:
+        message = f"ComfyUI could not start.\n{error}"
+        print(message, file=sys.stderr)
+        if shutil.which("zenity"):
+            subprocess.run(["zenity", "--error", "--no-markup", "--text", message], check=False)
+        sys.exit(1)

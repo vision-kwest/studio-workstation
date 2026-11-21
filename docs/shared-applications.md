@@ -52,6 +52,42 @@ Ubuntu 24.04 restricts unprivileged user namespaces. Its packaged VS Code AppArm
 
 The profile is installed before VS Code needs to exist, independently of optional Rez. AppArmor reloads it at boot; replacement CPU/GPU workstations receive it from the same software-setup script. Existing workstations need the updated setup before retrying a failed launch. The actual GUI launch, extension use and replacement-workstation checks remain the acceptance criteria in #123.
 
+## ComfyUI on a replacement GPU workstation
+
+[Issue #131](https://github.com/vision-kwest/studio-workstation/issues/131) adds `scripts/comfy-desktop/studio-comfy` and two small configuration templates. Use the shared **ComfyUI** launcher for the first Desktop launch on a fresh workstation. The helper registers the existing **Studio ComfyUI** installation, selects shared storage, and uses Desktop's native startup preference to open that instance. It does not install or download ComfyUI, Python, models or custom nodes.
+
+| Shared location | Purpose |
+|---|---|
+| `/studio/apps/comfy-desktop/current/Comfy-Desktop.AppImage` | Existing Desktop executable; the `current` symlink pattern is retained |
+| `/studio/apps/comfyui/main/Studio ComfyUI (1)` | Existing standalone installation, including its environment and native user/workflow directory; preserve this exact path |
+| `/studio/models/comfyui` | Model library and default download destination |
+| `/studio/projects/comfyui/input`, `/studio/projects/comfyui/output` | Shared inputs and generated outputs |
+| `/studio/projects/comfyui/workflows` | Existing exported workflow files |
+
+The helper seeds only missing `~/.config/comfyui-desktop-2/settings.json` and `~/.local/share/comfyui-desktop-2/installations.json`. It carries forward the operator's disabled telemetry/beta preferences, omits the old workstation's local model fallback, and puts SQLite at `~/.local/share/comfyui-studio/comfyui.db`. It honors `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` when set; keep those on local storage. Electron caches, credentials and runtime state remain local. Existing files are left byte-for-byte unchanged by the helper; Desktop can subsequently update its own files normally.
+
+**Install once on EFS**, as the ordinary desktop user, from the repository root:
+
+```bash
+mkdir -p /studio/bin /studio/apps/comfy-desktop/launcher
+install -m 755 scripts/comfy-desktop/studio-comfy /studio/apps/comfy-desktop/launcher/studio-comfy
+install -m 644 scripts/comfy-desktop/{settings,installations}.json /studio/apps/comfy-desktop/launcher/
+ln -sfnT /studio/apps/comfy-desktop/launcher/studio-comfy /studio/bin/studio-comfy
+cp -an /studio/share/applications/menulibre-comfyui.desktop /studio/share/applications/menulibre-comfyui.desktop.before-studio-comfy
+sed -i 's|^Exec=.*|Exec=/studio/bin/studio-comfy|' /studio/share/applications/menulibre-comfyui.desktop
+desktop-file-validate /studio/share/applications/menulibre-comfyui.desktop
+```
+
+Replacement workstations reuse those shared files automatically through the existing application-menu integration. The helper checks the shared app, environment and storage paths before creating local configuration; an unavailable path stops launch instead of allowing Desktop to select local fallback storage. It serializes initialization with a local lock, releases it before launching Desktop, and retains the already-required `--no-sandbox` argument. This disables Electron's sandbox; it does not alter the system's AppArmor policy. Errors go to stderr and, when available, a native Zenity dialog.
+
+**Scope:** This is a first-launch seed, not a profile migration or repair tool. If the raw AppImage has already created default configuration on a workstation, existing files stay intact; finish setup through Desktop's normal **Add Existing Instance** and storage settings. Later changes to these templates affect only missing files. Use Desktop's GUI for an existing profile. If the installation moves, update the shared template and existing profiles explicitly. The helper does not synchronize live Desktop sessions or coordinate concurrent installation updates.
+
+**Acceptance:** On a fresh GPU workstation, launch **ComfyUI** from GNOME search, confirm that Studio ComfyUI opens without onboarding or Add Existing Instance, load an existing shared workflow, and generate an image into the shared output directory. Quit Desktop fully, launch again, and confirm local preferences remain. The operator has already reported successful manual reuse of the shared installation/models/workflows/output on a replacement; automatic first-launch acceptance is a separate check. Do not run a second backend against an installation currently being used for this test: native launch preparation can modify that shared environment before checking its port.
+
+**Rollback:** Restore `menulibre-comfyui.desktop.before-studio-comfy` over the shared launcher (or set its Command back to `/studio/apps/comfy-desktop/current/Comfy-Desktop.AppImage --no-sandbox`). Keep the shared installation and data. Seeded local profiles remain ordinary Desktop configuration and continue to work without the helper.
+
+**Source contract:** Comfy Desktop **v1.1.10**, commit [`ccccb94ff41348f02e96a01eaa1a8895ffc2bf19`](https://github.com/Comfy-Org/Comfy-Desktop/commit/ccccb94ff41348f02e96a01eaa1a8895ffc2bf19): [`settings.ts`](https://github.com/Comfy-Org/Comfy-Desktop/blob/ccccb94ff41348f02e96a01eaa1a8895ffc2bf19/src/main/settings.ts), [`installations.ts`](https://github.com/Comfy-Org/Comfy-Desktop/blob/ccccb94ff41348f02e96a01eaa1a8895ffc2bf19/src/main/installations.ts), [`lib/paths.ts`](https://github.com/Comfy-Org/Comfy-Desktop/blob/ccccb94ff41348f02e96a01eaa1a8895ffc2bf19/src/main/lib/paths.ts), and startup in [`index.ts`](https://github.com/Comfy-Org/Comfy-Desktop/blob/ccccb94ff41348f02e96a01eaa1a8895ffc2bf19/src/main/index.ts). Upstream code is unchanged. The bundled OEM mechanism is Windows-only; no supported Linux unattended registration interface was identified. Recheck these file formats when changing the shared Desktop version.
+
 ## Readiness and refresh
 
 Wait for **Menu Editor** to appear before managing launchers. From a desktop terminal, these optional checks show the integration and service state:
