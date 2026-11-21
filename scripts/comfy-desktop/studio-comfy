@@ -1,0 +1,133 @@
+#!/usr/bin/python3
+"""Choose a shared Comfy Desktop default or seed missing local files and launch."""
+import argparse
+from datetime import datetime, timezone
+import fcntl
+import json
+import os
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+from uuid import uuid4
+
+STUDIO = Path("/studio")
+APPIMAGE = STUDIO / "apps/comfy-desktop/current/Comfy-Desktop.AppImage"
+TEMPLATES = Path(__file__).resolve().parent
+
+
+def check_install(install):
+    for relative in ("standalone-env", "ComfyUI/main.py", "ComfyUI/.venv/bin/python3"):
+        if not (install / relative).exists():
+            raise FileNotFoundError(f"Shared ComfyUI path unavailable: {install / relative}")
+
+
+def set_default(install, data):
+    if not install.is_absolute() or not install.resolve().is_relative_to(STUDIO.resolve()):
+        raise ValueError("Choose an absolute installation path below /studio")
+    check_install(install)
+    catalog = data / "comfyui-desktop-2/installations.json"
+    records = json.loads(catalog.read_text()) if catalog.exists() else []
+    record = next((item for item in records if item.get("sourceId") == "standalone"
+                   and item.get("installPath")
+                   and Path(item["installPath"]).resolve() == install.resolve()), None)
+    if record is None:
+        manifest = json.loads((install / "manifest.json").read_text())
+        if not isinstance(manifest, dict):
+            raise ValueError("Installation manifest.json must contain an object")
+        record = {key: manifest.get(field) for key, field in (
+            ("version", "comfyui_ref"), ("releaseTag", "version"),
+            ("variant", "id"), ("pythonVersion", "python_version"))}
+        record.update(id=f"inst-{uuid4().hex}", name=install.name,
+                      createdAt=datetime.now(timezone.utc).isoformat())
+    fields = ("id", "name", "createdAt", "version", "releaseTag", "variant", "pythonVersion")
+    if any(not isinstance(record.get(key), str) or not record[key].strip() for key in fields):
+        raise ValueError("Installation registration or manifest is missing usable version metadata")
+    entry = {key: record[key] for key in fields}
+    lexer = shlex.shlex(record.get("launchArgs", "--enable-manager"), posix=True)
+    lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
+    tokens, arguments = iter(token for token in lexer if token), []
+    for token in tokens:
+        if token == "--database-url":
+            value = next(tokens, None)
+            if value is None or value.startswith("--"):
+                raise ValueError("Existing --database-url requires a value")
+        elif not token.startswith("--database-url="):
+            arguments.append(token)
+    entry.update(installPath=str(install), sourceId="standalone", status="installed",
+                 launchMode="window",
+                 launchArgs=shlex.join([*arguments, "--database-url", "@DATABASE_URL@"]))
+    with tempfile.NamedTemporaryFile(mode="w", dir=TEMPLATES, delete=False) as temporary:
+        json.dump([entry], temporary, indent=2)
+        temporary.write("\n")
+    try:
+        os.chmod(temporary.name, 0o644)
+        os.replace(temporary.name, TEMPLATES / "installations.json")
+    finally:
+        Path(temporary.name).unlink(missing_ok=True)
+    print(f"Shared ComfyUI default: {install}\nApplies to fresh workstation setups only.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("--set-default", type=Path, metavar="PATH",
+                        help="select an existing /studio installation for fresh setups, then exit")
+    args, app_args = parser.parse_known_args()
+    home = Path.home()
+    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
+    if args.set_default is not None:
+        if app_args:
+            parser.error("--set-default does not take AppImage arguments")
+        set_default(args.set_default, data)
+        return
+    settings = json.loads((TEMPLATES / "settings.json").read_text())
+    installations = json.loads((TEMPLATES / "installations.json").read_text())
+    instance = installations[0]
+    settings["autoLaunchOnStartup"] = instance["id"]
+    install = Path(instance["installPath"])
+    check_install(install)
+    required = [APPIMAGE, *map(Path, settings["modelsDirs"]),
+                Path(settings["inputDir"]), Path(settings["outputDir"])]
+    for path in required:
+        if not path.exists():
+            raise FileNotFoundError(f"Shared ComfyUI path unavailable: {path}")
+    if not os.access(APPIMAGE, os.X_OK):
+        raise PermissionError(f"AppImage is not executable: {APPIMAGE}")
+
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    state = Path(os.environ.get("XDG_STATE_HOME") or home / ".local/state") / "comfyui-studio"
+    state.mkdir(parents=True, exist_ok=True)
+    with (state / "setup.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        database = data / "comfyui-studio/comfyui.db"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        instance["launchArgs"] = instance["launchArgs"].replace(
+            "@DATABASE_URL@", shlex.quote(f"sqlite:///{database}"))
+        for path, contents in ((config / "comfyui-desktop-2/settings.json", settings),
+                               (data / "comfyui-desktop-2/installations.json", installations)):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists():
+                continue
+            with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as temporary:
+                json.dump(contents, temporary, indent=2)
+                temporary.write("\n")
+            try:
+                os.link(temporary.name, path)  # Atomic creation, never overwrite a local file.
+            except FileExistsError:
+                pass
+            finally:
+                os.unlink(temporary.name)
+    os.execv(str(APPIMAGE), [str(APPIMAGE), "--no-sandbox", *app_args])
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError) as error:
+        message = f"ComfyUI could not complete the command.\n{error}"
+        print(message, file=sys.stderr)
+        if shutil.which("zenity"):
+            subprocess.run(["zenity", "--error", "--no-markup", "--text", message], check=False)
+        sys.exit(1)
