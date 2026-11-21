@@ -121,6 +121,87 @@ def test_observations_include_only_allowlisted_states(capsys):
     assert "ec2:running" in stderr and secret not in stderr
 
 
+def test_checkpoint_freshness_and_unchanged_time_are_independent(monkeypatch, capsys):
+    clock = [0.0]
+    monkeypatch.setattr(progress.time, "monotonic", lambda: clock[0])
+    with progress.operation("start", "art", interval=3600):
+        assert "last_age=unknown" in capsys.readouterr().err
+        for observed, reported in ((0, 15), (20, 25)):
+            clock[0] = observed
+            progress.observe("ssm", {"Status": "Failed"})
+            progress.checkpoint("Failed: NVIDIA T4")
+            clock[0] = reported
+            progress.stage(f"Readiness retry at {reported}")
+            line = capsys.readouterr().err.splitlines()[-1]
+            assert f"last_age={reported - observed:.1f}s" in line
+            assert f"checked_age={reported - observed:.1f}s" in line
+            assert f"last_check=Failed: NVIDIA T4 unchanged_for={reported:.1f}s" in line
+        progress.checkpoint("Failed: Xorg")
+        progress.stage("Another readiness check")
+        assert "last_check=Failed: Xorg unchanged_for=0.0s checked_age=0.0s" in capsys.readouterr().err
+        progress.checkpoint(None)
+        progress.stage("Ready")
+        assert "last_check=" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("gpu", [False, True])
+@pytest.mark.parametrize("succeeds", [False, True])
+def test_readiness_retry_preserves_requests_checks_and_safe_diagnostics(gpu, succeeds):
+    label, records = "NVIDIA T4" if gpu else "GDM and DCV services", []
+    checks = ["set -e", "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
+              "systemctl is-active gdm3 dcvserver", "dcv describe-session console"]
+    if gpu:
+        checks += ["nvidia-smi -L | grep -q 'Tesla T4'", "pgrep -x Xorg",
+                   "DISPLAY=:0 XAUTHORITY=/run/user/119/gdm/Xauthority __GLX_VENDOR_LIBRARY_NAME=nvidia glxinfo -B | grep -q 'OpenGL renderer string: Tesla T4'"]
+    failed = {"Status": "Failed", "StandardOutputContent": f"Checking {label}\nSECRET_STDOUT",
+              "StandardErrorContent": "SECRET_STDERR"}
+    for quiet in (False, True):
+        calls, pauses, waiting, stderr = [], [], [], io.StringIO()
+        replies = iter([{"Command": {"CommandId": "probe-1", "Status": "Pending"}}, failed,
+                        {"Command": {"CommandId": "probe-2", "Status": "Pending"}},
+                        {"Status": "Success"} if succeeds else failed])
+
+        def execute(argv, **kwargs):
+            calls.append(list(argv))
+            return json.dumps(next(replies))
+
+        def sleep(seconds):
+            pauses.append(seconds)
+            if seconds == 15 and not quiet:
+                waiting.append(stderr.getvalue().splitlines()[-1])
+
+        error = None
+        with patch.object(cli, "instance_id", return_value="i-0123456789abcdef0"), \
+             patch.object(cli.subprocess, "check_output", side_effect=execute), \
+             patch.object(cli.time, "sleep", side_effect=sleep), contextlib.redirect_stderr(stderr):
+            with progress.operation("start", "art", enabled=not quiet, interval=3600):
+                try:
+                    cli.wait_gpu_bootstrap("art", h.REGION, gpu=gpu, attempts=2, sleep=sleep)
+                except RuntimeError as exc:
+                    error = str(exc)
+        assert pauses == [5, 15, 5]
+        assert [call[2] for call in calls] == ["send-command", "get-command-invocation"] * 2
+        for call in calls[::2]:
+            parameters = json.loads(call[call.index("--parameters") + 1])
+            assert [line for line in parameters["commands"] if not line.startswith("echo ")] == checks
+            assert parameters["executionTimeout"] == ["45"]
+            assert call[call.index("--timeout-seconds") + 1] == "60"
+            assert call[call.index("--document-name") + 1] == "AWS-RunShellScript"
+        assert bool(error) == (not succeeds)
+        assert "SECRET_" not in stderr.getvalue() + (error or "")
+        if error:
+            assert "workstation expiry remains armed" in error and "SSM command=probe-2" in error
+        if quiet:
+            assert stderr.getvalue() == ""
+        else:
+            assert len(waiting) == 1 and "after attempt 1/2 (15s delay)" in waiting[0]
+            assert f"last_check=Failed: {label}" in waiting[0]
+            assert "attempt 2/2" in stderr.getvalue()
+            assert ("last_check=" in stderr.getvalue().splitlines()[-1]) == (not succeeds)
+        records.append((calls, pauses, error))
+    assert records[0] == records[1]
+
+
 @pytest.mark.parametrize("failure", [OSError("closed pipe"), ValueError("closed stream")])
 def test_closed_stderr_never_interrupts_work_or_cleanup(failure):
     class ClosedStream:

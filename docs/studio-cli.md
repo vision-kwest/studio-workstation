@@ -152,18 +152,39 @@ Progress reporting does not alter AWS operations or their retry limits.
 For example, a stop can show the following (illustrative elapsed times):
 
 ```text
-[2026-11-17T21:10:00+00:00] stop scope=art elapsed=0.0s stage=Validating request last=not observed | started
-[2026-11-17T21:10:01+00:00] stop scope=art elapsed=1.0s stage=Stopping EC2 last=ec2:stopping | observed
-[2026-11-17T21:10:10+00:00] stop scope=art elapsed=10.0s stage=Waiting for ec2 instance-stopped last=ec2:stopping | heartbeat
-[2026-11-17T21:10:20+00:00] stop scope=art elapsed=20.0s stage=Waiting for ec2 instance-stopped last=ec2:stopping | heartbeat
-[2026-11-17T21:10:22+00:00] stop scope=art elapsed=22.0s stage=AWS waiter confirmed: ec2 instance-stopped last=ec2:stopping | progress
+[2026-11-17T21:10:00+00:00] stop scope=art elapsed=0.0s stage=Validating request last=not observed last_age=unknown | started
+[2026-11-17T21:10:01+00:00] stop scope=art elapsed=1.0s stage=Stopping EC2 last=ec2:stopping last_age=0.0s | observed
+[2026-11-17T21:10:10+00:00] stop scope=art elapsed=10.0s stage=Waiting for ec2 instance-stopped last=ec2:stopping last_age=9.0s | heartbeat
+[2026-11-17T21:10:20+00:00] stop scope=art elapsed=20.0s stage=Waiting for ec2 instance-stopped last=ec2:stopping last_age=19.0s | heartbeat
+[2026-11-17T21:10:22+00:00] stop scope=art elapsed=22.0s stage=AWS waiter confirmed: ec2 instance-stopped last=ec2:stopping last_age=21.0s | progress
 ```
 
 The command then reports EIP/certificate cleanup and finishes with total elapsed
 time. `last` is an observation, not a predicted current state: native waiters do
 not expose their intermediate responses. A confirmed waiter is one completed
-stage; the command can still fail later. A heartbeat proves the CLI is alive,
-not that AWS is advancing. No percentages or credentials are printed by the reporter.
+stage; the command can still fail later. `last_age` shows time since that AWS state
+was observed, including repeated observations of the same state. Heartbeats alone
+do not refresh it. A heartbeat proves the CLI is alive, not that AWS is advancing.
+
+Readiness retries include the attempt number and the existing 15-second retry
+delay. `last_check` retains the last reported checkpoint and result during the
+next wait/probe. Separate fixed labels identify the RES marker, GDM/DCV services,
+DCV console, NVIDIA T4, Xorg and NVIDIA OpenGL. For example:
+
+```text
+[2026-11-21T21:26:28+00:00] start scope=art elapsed=1820.0s stage=Waiting to retry readiness after attempt 70/96 (15s delay) last=ssm:Failed last_age=10.0s last_check=Failed: NVIDIA T4 unchanged_for=480.0s checked_age=10.0s | heartbeat
+```
+
+`checked_age` measures time since the readiness observation was recorded;
+`unchanged_for` measures time since that same result was first observed. A repeat
+refreshes only `checked_age`. Neither field proves continuous guest failure or
+estimates completion. The checkpoint names the last check started by that probe,
+not the underlying OS cause. Missing checkpoint output is reported as `not reported`;
+SSM unavailability and local polling timeout have their own fixed descriptions.
+A successful probe clears the previous failure. Labels come only from exact
+known markers, never arbitrary guest stdout/stderr; a terminal SSM failure
+includes the instance and command IDs for inspecting detailed output in SSM.
+No additional AWS calls, percentages or credentials are introduced by reporting.
 
 ```bash
 python3 studio workstation stop art > stop.json

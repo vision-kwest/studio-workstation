@@ -22,13 +22,19 @@ class _Reporter:
         self.interval, self.started, self.stream = interval, time.monotonic(), sys.stderr
         self.stop, self.lock = Event(), Lock()
         self.stage, self.last, self.observations = "Validating request", "not observed", {}
+        self.observed_at = None
+        self.checkpoint, self.checked_at, self.changed_at = None, None, None
 
     def _write(self, event):
         timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = time.monotonic()
+        age = f"{now - self.observed_at:.1f}s" if self.observed_at is not None else "unknown"
+        checkpoint = (f" last_check={self.checkpoint} unchanged_for={now - self.changed_at:.1f}s"
+                      f" checked_age={now - self.checked_at:.1f}s" if self.checkpoint else "")
         try:
             print(f"[{timestamp}] {self.action} scope={self.scope} "
-                  f"elapsed={time.monotonic() - self.started:.1f}s stage={self.stage} "
-                  f"last={self.last} | {event}", file=self.stream, flush=True)
+                  f"elapsed={now - self.started:.1f}s stage={self.stage} "
+                  f"last={self.last} last_age={age}{checkpoint} | {event}", file=self.stream, flush=True)
         except (OSError, ValueError):
             pass  # A closed progress pipe must never interrupt cleanup or rollback.
 
@@ -45,9 +51,16 @@ class _Reporter:
     def observed(self, service, value):
         with self.lock:
             self.last = f"{service}:{value}"
+            self.observed_at = time.monotonic()
             if self.observations.get(service) != value:
                 self.observations[service] = value
                 self._write("observed")
+
+    def checked(self, label):
+        with self.lock:
+            self.checked_at = time.monotonic()
+            if label != self.checkpoint:
+                self.checkpoint, self.changed_at = label, self.checked_at
 
     def heartbeat(self):
         while not self.stop.wait(self.interval):
@@ -82,6 +95,12 @@ def operation(action, scope, *, enabled=True, interval=10):
 def stage(label):
     if reporter := _current.get():
         reporter.update(label)
+
+
+def checkpoint(label):
+    """Record a fixed readiness label; None clears the previous result."""
+    if reporter := _current.get():
+        reporter.checked(label)
 
 
 def observe(service, response):
