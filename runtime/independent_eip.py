@@ -106,14 +106,14 @@ def _reachable(aws, selected, check_tls, *, restart=False, sleep=time.sleep):
         if not restart or cycle:
             raise RuntimeError("DCV endpoint recovery failed: " + str(failure)) from failure
         fresh = _target(aws, selected["stack_id"])
-        if fresh["profile"] == "gpu":
+        if guard.has_expiration(fresh):
             if guard.status(aws, fresh)["status"] == "legacy":
                 raise ValueError("Legacy timer requires conversion before an automatic workstation restart")
         iid = fresh["instance"]
         progress.stage("Restarting workstation for DCV endpoint recovery")
         aws(legacy.REGION, "ec2", "stop-instances", "--instance-ids", iid)
         aws(legacy.REGION, "ec2", "wait", "instance-stopped", "--instance-ids", iid)
-        if fresh["profile"] == "gpu":
+        if guard.has_expiration(fresh):
             guard.rearm(aws, context(aws, legacy.REGION, fresh["stack_id"]))
         aws(legacy.REGION, "ec2", "start-instances", "--instance-ids", iid)
         aws(legacy.REGION, "ec2", "wait", "instance-status-ok", "--instance-ids", iid)
@@ -148,7 +148,7 @@ def _change(aws, destination, check_tls, *, destroying=False, only_if_unassigned
         return None  # Stale-owner recovery may have overlapped another claim.
     previous = _owner(aws, before)
     if destination:
-        if destination["profile"] == "gpu":
+        if guard.has_expiration(destination):
             guard.status(aws, destination)
         if before.get("InstanceId") == destination["instance"]:
             acm.prepare_gpu(aws, destination["instance"])

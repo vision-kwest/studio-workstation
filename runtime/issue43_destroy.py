@@ -90,7 +90,7 @@ def destroy(aws, run, stack, region, *, sleep=time.sleep):
     selected = context(aws, region, stack)
     stack = selected["stack"]
     allowed = {"Workstation": "AWS::EC2::Instance", "WorkstationSG": "AWS::EC2::SecurityGroup"}
-    if selected["profile"] == "gpu":
+    if guard.has_expiration(selected):
         allowed["AutoStopSchedule"] = "AWS::Scheduler::Schedule"
     for r in selected["resources"]:
         if allowed.get(r.get("LogicalResourceId")) != r.get("ResourceType"):
@@ -148,7 +148,7 @@ def destroy(aws, run, stack, region, *, sleep=time.sleep):
             raise RuntimeError("Original attached disk still exists after native teardown")
     if selected["profile"] != "publisher" and selected["instance"]:
         independent_eip.release_if_owned(aws, selected, None, destroying=True)
-    if selected["profile"] == "gpu":
+    if guard.has_expiration(selected):
         identity = creator.safety(aws, region, stack, arn=selected["safety_stack"], cleanup=True)
         if identity["token"] != selected["token"]:
             raise ValueError("Safety-stack ownership differs from workstation; workload removed, guard preserved")

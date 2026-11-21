@@ -47,10 +47,10 @@ class CliFixture(unittest.TestCase):
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(self.errors):cli.main(list(argv))
         return output.getvalue()
 
-    def create(self,profile,name):
+    def create(self,profile,name,*options):
         args=['create','--profile',profile,'--name',name]
         if profile=='publisher':args+=['--security-group-id','sg-0123456789abcdef0']
-        self.invoke(*args)
+        self.invoke(*args,*options)
         return inventory.context(self.aws,h.REGION,name)
 
 
@@ -472,3 +472,109 @@ class AutoStopLifecycleTests(CliFixture):
         self.assertFalse(self.aws.writes)
         self.assertEqual(self.aws.schedules, before)
         self.assertEqual(self.aws.vms[selected['instance']]['State']['Name'], 'stopped')
+
+
+class ProfileAutoStopTests(CliFixture):
+    def test_every_profile_supports_four_hour_stop_extension_restart_and_destroy(self):
+        for profile in inventory.PROFILES:
+            with self.subTest(profile=profile):
+                self.now = NOW
+                name = 'ayo' if profile == 'cpu' else profile + '-timer'
+                self.aws.calls.clear()
+                selected = self.create(profile, name, '--expires-in', '4h')
+                self.assertEqual(selected['profile'], profile)
+                if profile == 'publisher':
+                    self.assertIsNone(selected['dcv_url'])
+                    self.assertFalse(any(c[0] == 'ssm' or c[1] in ('associate-address', 'disassociate-address')
+                                         for c in self.aws.calls))
+                status = json.loads(self.invoke('status', name))
+                self.assertEqual(status['expiration']['duration_minutes'], 240)
+                timer = 'studio-stop-' + selected['token']
+                spec = self.aws.schedules[timer]
+                self.assertEqual(spec['Target']['Arn'], guard.STOP)
+                self.assertEqual(json.loads(spec['Target']['Input']), {'InstanceIds': [selected['instance']]})
+                with patch.object(guard, '_utc', side_effect=lambda value=None: self.now if value is None else value):
+                    extended = json.loads(self.invoke('extend-expiration', name, '--additional-minutes', '60'))
+                self.assertEqual(dt.datetime.fromisoformat(extended['proposed_stop_utc']), NOW + dt.timedelta(hours=5))
+                disk = selected['vm']['BlockDeviceMappings'][0]['Ebs']['VolumeId']
+                self.aws.volumes[disk]['saved_file_sha256'] = 'saved-work'
+                volumes = copy.deepcopy(self.aws.volumes)
+                self.now += dt.timedelta(hours=6)
+                self.aws.fire_schedule(timer)
+                stopped = json.loads(self.invoke('status', name))
+                self.assertEqual((stopped['state'], stopped['expiration']['status']), ('stopped', 'expired'))
+                self.assertEqual(self.aws.stacks[selected['stack_id']]['StackStatus'], 'CREATE_COMPLETE')
+                for options, minutes in (((), 240), (('--expires-in', '8h'), 480)):
+                    self.aws.calls.clear()
+                    started = json.loads(self.invoke('start', name, *options))
+                    self.assertEqual(started['expiration']['duration_minutes'], minutes)
+                    self.assertEqual(dt.datetime.fromisoformat(started['expiration']['stop_at']),
+                                     self.now + dt.timedelta(minutes=minutes))
+                    update = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('scheduler', 'update-schedule'))
+                    start = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('ec2', 'start-instances'))
+                    self.assertLess(update, start)
+                    self.assertTrue(any(c[:2] == ('scheduler', 'get-schedule') for c in self.aws.calls[update + 1:start]))
+                    self.assertEqual(self.aws.volumes, volumes)
+                    self.invoke('stop', name)
+                    self.now += dt.timedelta(days=1)
+                self.assertFalse(any(c[1] in ('delete-stack', 'terminate-instances', 'delete-volume') for c in self.aws.calls))
+                workload = self.aws.stacks.pop(selected['stack_id'])
+                try:
+                    orphan = next(r for r in json.loads(self.invoke('list')) if r['name'] == name)
+                    self.assertEqual((orphan['state'], orphan['profile']), ('safety-stack-only', profile))
+                finally:
+                    self.aws.stacks[selected['stack_id']] = workload
+                self.invoke('destroy', name, '--delete-stack')
+                self.assertNotIn(timer, self.aws.schedules)
+                self.assertNotIn(disk, self.aws.volumes)
+                self.assertNotIn(spec['Target']['RoleArn'].rsplit('/', 1)[-1], self.aws.roles)
+                self.assertEqual(self.aws.stacks[selected['safety_stack']]['StackStatus'], 'DELETE_COMPLETE')
+
+    def test_missing_timer_or_association_blocks_restart_for_every_profile(self):
+        for profile in inventory.PROFILES:
+            selected = self.create(profile, profile + '-missing', '--expires-in', '4h')
+            self.invoke('stop', selected['stack'])
+            timer = 'studio-stop-' + selected['token']
+            spec = self.aws.schedules[timer]
+            stack = self.aws.stacks[selected['stack_id']]
+            original_tags = copy.deepcopy(stack['Tags'])
+            volumes = copy.deepcopy(self.aws.volumes)
+            for missing in ('schedule', 'StudioSafetyStack', 'StudioCleanupToken'):
+                with self.subTest(profile=profile, missing=missing):
+                    if missing == 'schedule':
+                        del self.aws.schedules[timer]
+                    else:
+                        stack['Tags'] = [t for t in original_tags if t['Key'] != missing]
+                    self.aws.calls.clear()
+                    with self.assertRaises(SystemExit):
+                        self.invoke('start', selected['stack'])
+                    self.assertFalse(self.aws.writes)
+                    self.assertEqual(self.aws.volumes, volumes)
+                    self.aws.schedules[timer], stack['Tags'] = spec, copy.deepcopy(original_tags)
+
+    def test_untimed_cpu_and_publisher_preserve_their_existing_start_behavior(self):
+        for profile in ('cpu', 'publisher'):
+            selected = self.create(profile, profile + '-untimed')
+            self.assertNotIn('expiration', json.loads(self.invoke('status', selected['stack'])))
+            self.invoke('stop', selected['stack'])
+            self.aws.calls.clear()
+            with self.assertRaises(SystemExit):
+                self.invoke('start', selected['stack'], '--expires-in', '4h')
+            self.assertFalse(self.aws.writes)
+            self.assertEqual(json.loads(self.invoke('start', selected['stack']))['state'], 'running')
+            self.assertFalse(self.aws.schedules)
+
+    def test_timed_cpu_hostname_recovery_rearms_before_restarting_compute(self):
+        selected = self.create('cpu', 'timed-owner', '--expires-in', '4h')
+        self.create('cpu', 'next-owner')
+        self.aws.restore_public_ip = False
+        self.aws.calls.clear()
+        reachable = eip._reachable
+        with patch.object(eip, '_reachable', side_effect=lambda aws, c, tls, **kw:
+                          reachable(aws, c, tls, sleep=lambda _: None, **kw)):
+            result = json.loads(self.invoke('hostname', 'assign', 'next-owner'))
+        self.assertTrue(result['previous_endpoint']['reachable'])
+        update = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('scheduler', 'update-schedule'))
+        start = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('ec2', 'start-instances'))
+        self.assertLess(update, start)
+        self.assertEqual(self.aws.calls[start][-1], selected['instance'])
