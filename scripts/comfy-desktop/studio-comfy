@@ -67,13 +67,16 @@ def set_default(install, data):
         os.replace(temporary.name, TEMPLATES / "installations.json")
     finally:
         Path(temporary.name).unlink(missing_ok=True)
-    print(f"Shared ComfyUI default: {install}\nApplies to fresh workstation setups only.")
+    print(f"Shared ComfyUI default: {install}\nUsed by fresh setups and explicit --update launches.")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
-    parser.add_argument("--set-default", type=Path, metavar="PATH",
-                        help="select an existing /studio installation for fresh setups, then exit")
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument("--set-default", type=Path, metavar="PATH",
+                         help="select an existing /studio installation as the shared default, then exit")
+    actions.add_argument("--update", action="store_true",
+                         help="apply the shared default locally, then launch (Desktop must be closed)")
     args, app_args = parser.parse_known_args()
     home = Path.home()
     data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
@@ -105,20 +108,34 @@ def main():
         database.parent.mkdir(parents=True, exist_ok=True)
         instance["launchArgs"] = instance["launchArgs"].replace(
             "@DATABASE_URL@", shlex.quote(f"sqlite:///{database}"))
-        for path, contents in ((config / "comfyui-desktop-2/settings.json", settings),
-                               (data / "comfyui-desktop-2/installations.json", installations)):
+        settings_path = config / "comfyui-desktop-2/settings.json"
+        catalog_path = data / "comfyui-desktop-2/installations.json"
+        overwrite = False
+        if args.update:
+            local_settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+            local_catalog = json.loads(catalog_path.read_text()) if catalog_path.exists() else []
+            selected = next((item for item in local_catalog
+                             if item.get("id") == local_settings.get("autoLaunchOnStartup")), {})
+            overwrite = (selected.get("id") != instance["id"] or not selected.get("installPath")
+                         or Path(selected["installPath"]).resolve() != install.resolve())
+            settings = local_settings if settings_path.exists() else settings
+            settings["autoLaunchOnStartup"] = instance["id"]
+        for path, contents in ((catalog_path, installations), (settings_path, settings)):
             path.parent.mkdir(parents=True, exist_ok=True)
-            if path.exists():
+            if path.exists() and not overwrite:
                 continue
             with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as temporary:
                 json.dump(contents, temporary, indent=2)
                 temporary.write("\n")
             try:
-                os.link(temporary.name, path)  # Atomic creation, never overwrite a local file.
+                if overwrite:
+                    os.replace(temporary.name, path)
+                else:
+                    os.link(temporary.name, path)  # Atomic creation for ordinary launches.
             except FileExistsError:
                 pass
             finally:
-                os.unlink(temporary.name)
+                Path(temporary.name).unlink(missing_ok=True)
     os.execv(str(APPIMAGE), [str(APPIMAGE), "--no-sandbox", *app_args])
 
 

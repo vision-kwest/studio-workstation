@@ -109,6 +109,63 @@ class ComfyFirstLaunch(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertFalse(self.home.exists())
 
+    def test_update_replaces_different_or_missing_selection_preserving_preferences(self):
+        shared, = json.loads((self.templates / "installations.json").read_text())
+        for case in ("different-id", "wrong-path", "fresh", "settings-only", "catalog-only"):
+            with self.subTest(case=case):
+                for path in (self.settings, self.catalog):
+                    path.unlink(missing_ok=True)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                selected_id = shared["id"] if case == "wrong-path" else "previous"
+                if case not in ("fresh", "catalog-only"):
+                    self.settings.write_text(json.dumps({"autoLaunchOnStartup": selected_id,
+                                                        "theme": "light", "outputDir": "/my/output"}))
+                if case not in ("fresh", "settings-only"):
+                    old_path = self.install if case == "different-id" else self.studio / "old"
+                    old = {**shared, "id": selected_id, "installPath": str(old_path)}
+                    self.catalog.write_text(json.dumps([old, {**old, "id": "extra"}]))
+                result = self.launch("--update", "--example")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), ["--no-sandbox", "--example"])
+                settings = json.loads(self.settings.read_text())
+                chosen, = json.loads(self.catalog.read_text())
+                self.assertEqual(settings["autoLaunchOnStartup"], shared["id"])
+                self.assertEqual((chosen["id"], chosen["installPath"]), (shared["id"], str(self.install)))
+                if case not in ("fresh", "catalog-only"):
+                    self.assertEqual(settings, {"autoLaunchOnStartup": shared["id"],
+                                                "theme": "light", "outputDir": "/my/output"})
+
+    def test_update_matching_resolved_path_preserves_bytes_mtime_and_extra_entries(self):
+        self.assertEqual(self.launch().returncode, 0)
+        selected, = json.loads(self.catalog.read_text())
+        alias = self.studio / "same installation"
+        alias.symlink_to(self.install, target_is_directory=True)
+        entries = [{**selected, "id": "extra"}, {**selected, "installPath": str(alias)}]
+        self.catalog.write_text(json.dumps(entries, indent=1))
+        before = {path: (path.read_bytes(), path.stat().st_mtime_ns)
+                  for path in (self.settings, self.catalog)}
+        result = self.launch("--update")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), ["--no-sandbox"])
+        for path, original in before.items():
+            self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), original)
+
+    def test_update_rejects_conflicting_actions_and_invalid_shared_target_without_clobber(self):
+        self.assertEqual(self.launch().returncode, 0)
+        self.settings.write_text('{"autoLaunchOnStartup": "previous", "theme": "light"}\n')
+        self.marker.unlink()
+        before = {path: path.read_bytes() for path in
+                  (self.settings, self.catalog, self.templates / "installations.json")}
+        for arguments in (("--update", "--set-default", str(self.install)), ("--update",)):
+            with self.subTest(arguments=arguments):
+                if arguments == ("--update",):
+                    (self.install / "ComfyUI/main.py").unlink()
+                result = self.launch(*arguments)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.marker.exists())
+                for path, original in before.items():
+                    self.assertEqual(path.read_bytes(), original)
+
     def second_install(self):
         target = self.install.with_name("Studio ComfyUI (2)")
         shutil.copytree(self.install, target)
