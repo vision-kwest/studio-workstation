@@ -165,7 +165,6 @@ def gpu_release_preflight(args):
 
 def gpu_ready(stack, region, *, gpu=True):
     """Read-only guest readiness via bounded SSM diagnostics; no secrets."""
-    progress.stage("Checking RES and DCV readiness via SSM")
     import time
     iid = instance_id(stack, region)
     commands = [
@@ -179,9 +178,11 @@ def gpu_ready(stack, region, *, gpu=True):
     ]
     if gpu:
         commands += [
-        "echo 'Checking NVIDIA T4 and Xorg OpenGL'",
+        "echo 'Checking NVIDIA T4'",
         "nvidia-smi -L | grep -q 'Tesla T4'",
+        "echo 'Checking Xorg'",
         "pgrep -x Xorg",
+        "echo 'Checking NVIDIA OpenGL'",
         "DISPLAY=:0 XAUTHORITY=/run/user/119/gdm/Xauthority __GLX_VENDOR_LIBRARY_NAME=nvidia glxinfo -B | grep -q 'OpenGL renderer string: Tesla T4'",
     ]
     response = aws(region, "ssm", "send-command", "--instance-ids", iid,
@@ -199,18 +200,23 @@ def gpu_ready(stack, region, *, gpu=True):
                 raise
             continue
         if result["Status"] == "Success":
+            progress.checkpoint(None)
             progress.stage("Ready: RES, GDM and DCV" + (", Xorg and Tesla T4 OpenGL" if gpu else ""))
             return
         if result["Status"] in ("Failed", "Cancelled", "TimedOut"):
-            details = "\n".join(result.get(key, "") for key in
-                                ("StandardOutputContent", "StandardErrorContent"))
-            raise ValueError(f"GPU readiness failed: instance={iid} SSM command={cid}\n" + details[-1600:])
+            markers = {line[6:-1] for line in commands if line.startswith("echo 'Checking ")}
+            label = next((line[9:] for line in reversed(result.get("StandardOutputContent", "").splitlines())
+                          if line in markers), "not reported")
+            progress.checkpoint(f"{result['Status']}: {label}")
+            raise ValueError(f"GPU readiness failed: instance={iid} SSM command={cid}; {result['Status']}: {label}")
+    progress.checkpoint("SSM readiness polling timed out")
     raise ValueError("GPU readiness timed out; inspect SSM and RES bootstrap logs")
 
 
 def wait_gpu_bootstrap(stack, region, *, attempts=96, sleep=time.sleep, gpu=True):
     """Bound retries across native RES installation and reboots; keep fail-closed readiness.\n\n    The native workstation expiry and exact-instance fallback remain armed throughout.\n    """
     for attempt in range(attempts):
+        progress.stage(f"Checking RES and DCV readiness via SSM (attempt {attempt + 1}/{attempts})")
         try:
             gpu_ready(stack, region, gpu=gpu)
             return
@@ -221,13 +227,14 @@ def wait_gpu_bootstrap(stack, region, *, attempts=96, sleep=time.sleep, gpu=True
                        ("TargetNotConnected", "InvalidInstanceId",
                         "InvalidInstanceID.NotFound", "InvocationDoesNotExist")):
                 raise
+            progress.checkpoint("SSM unavailable")
         except ValueError as exc:
             if not any(message in str(exc) for message in
                        ("GPU readiness failed", "GPU readiness timed out")):
                 raise
             failure = str(exc)
         if attempt + 1 < attempts:
-            progress.stage("Waiting for RES bootstrap or reboot before retrying readiness")
+            progress.stage(f"Waiting to retry readiness after attempt {attempt + 1}/{attempts} (15s delay)")
             sleep(15)
     raise RuntimeError("RES/DCV bootstrap did not become ready; "
                        "native workstation expiry remains armed; last check: " + failure)
@@ -514,6 +521,7 @@ def command(args):
         print(json.dumps(publisher.command(args, aws), indent=2))
         return
     if args.action == "check-ready":
+        progress.stage("Checking RES and DCV readiness via SSM")
         gpu_ready(args.stack, args.region, gpu=profile == "gpu")
         print(json.dumps(wait_dcv(args.stack, args.region), indent=2))
         return

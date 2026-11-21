@@ -217,17 +217,26 @@ class StudioCliTests(unittest.TestCase):
     @mock.patch.object(cli, "aws")
     @mock.patch("time.sleep")
     def test_readiness_failure_reports_last_native_check_and_ssm_identity(self, sleep, aws, iid):
-        aws.side_effect = [
-            {"Command": {"CommandId": "readiness-command"}},
-            {"Status": "Failed", "StandardOutputContent":
-             "Checking GDM and DCV services\ninactive\nactive\n",
-             "StandardErrorContent": "service check failed"},
-        ]
-        with self.assertRaises(ValueError) as raised:
-            cli.gpu_ready(STACK, "us-east-1")
-        message = str(raised.exception)
-        for expected in (INSTANCE, "readiness-command", "Checking GDM", "inactive", "service check failed"):
-            self.assertIn(expected, message)
+        unsafe = ("inactive\nSECRET_STDOUT\nprefix Checking DCV console session\n"
+                  "Checking NVIDIA T4 SECRET_SUFFIX\n")
+        for markers, label in [
+            ("Checking RES desktop readiness marker\nChecking GDM and DCV services\n", "GDM and DCV services"),
+            ("", "not reported"),
+        ]:
+            with self.subTest(label=label), mock.patch.object(cli.progress, "checkpoint") as checkpoint:
+                aws.reset_mock()
+                aws.side_effect = [
+                    {"Command": {"CommandId": "readiness-command"}},
+                    {"Status": "Failed", "StandardOutputContent": markers + unsafe,
+                     "StandardErrorContent": "Checking NVIDIA T4\nSECRET_STDERR"},
+                ]
+                with self.assertRaises(ValueError) as raised:
+                    cli.gpu_ready(STACK, "us-east-1")
+                message = str(raised.exception)
+                self.assertEqual(message, f"GPU readiness failed: instance={INSTANCE} "
+                                 f"SSM command=readiness-command; Failed: {label}")
+                checkpoint.assert_called_once_with(f"Failed: {label}")
+                self.assertNotIn("SECRET", message)
         args = aws.call_args_list[0].args
         import json
         checks = json.loads(args[args.index("--parameters") + 1])["commands"]
