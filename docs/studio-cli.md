@@ -107,9 +107,9 @@ ln -sf /dev/null "$HOME/.config/systemd/user/update-notifier-release.path"
 ln -sf /dev/null "$HOME/.config/systemd/user/update-notifier-release.service"
 ```
 
-The preferences take effect at the next GNOME login. Save work and log out of
-GNOME if already logged in; disconnecting the DCV viewer keeps that session alive.
-To restore the prompts, remove only the three files above and log in again.
+For existing accounts, the next normal workstation stop/start reloads both GNOME
+and the systemd user manager. Disconnecting the DCV viewer keeps the session alive.
+To restore the prompts, remove only the three files above before the next boot.
 New-account setup does not reapply them on later boots.
 
 ## Stop, restart and explicit destruction
