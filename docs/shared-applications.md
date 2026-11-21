@@ -64,7 +64,7 @@ The profile is installed before VS Code needs to exist, independently of optiona
 | `/studio/projects/comfyui/input`, `/studio/projects/comfyui/output` | Shared inputs and generated outputs |
 | `/studio/projects/comfyui/workflows` | Existing exported workflow files |
 
-The helper seeds only missing `~/.config/comfyui-desktop-2/settings.json` and `~/.local/share/comfyui-desktop-2/installations.json`. It carries forward the operator's disabled telemetry/beta preferences, omits the old workstation's local model fallback, and puts SQLite at `~/.local/share/comfyui-studio/comfyui.db`. It honors `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` when set; keep those on local storage. Electron caches, credentials and runtime state remain local. Existing files are left byte-for-byte unchanged by the helper; Desktop can subsequently update its own files normally.
+An ordinary launch seeds only missing `~/.config/comfyui-desktop-2/settings.json` and `~/.local/share/comfyui-desktop-2/installations.json`. It carries forward the operator's disabled telemetry/beta preferences, omits the old workstation's local model fallback, and puts SQLite at `~/.local/share/comfyui-studio/comfyui.db`. It honors `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` when set; keep those on local storage. Electron caches, credentials and runtime state remain local. Without `--update`, existing files are left byte-for-byte unchanged by the helper; Desktop can subsequently update its own files normally.
 
 ### Select the default for fresh workstations
 
@@ -82,6 +82,18 @@ The selected record is the single source of its startup ID: the launcher derives
 Only the selected identity/version fields and launch arguments are exported. Existing launch arguments are retained except that `--database-url` is replaced with the local-database placeholder. A manifest-only selection uses `--enable-manager` and that placeholder. Environment variables, credentials, runtime state, and cached Git-version metadata are not copied. Other explicit paths in custom launch arguments retain their original values; the tool does not reconstruct GUI preferences from an installation folder.
 
 For a fresh setup test on an existing workstation, fully quit Desktop, create a temporary directory with `mktemp -d /tmp/studio-comfy-test.XXXXXX`, and set `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` to separate subdirectories there when running the normal launcher. A new temporary directory tests the newly selected default; reusing one tests preservation. This does not reset the workstation's normal profile.
+
+### Apply the default to an existing workstation
+
+[Issue #135](https://github.com/vision-kwest/studio-workstation/issues/135) adds an explicit update. **Fully quit Comfy Desktop first**, then run as the ordinary desktop user:
+
+```bash
+/studio/bin/studio-comfy --update
+```
+
+If the local startup ID and its resolved installation path already match the shared default, the helper leaves both local JSON files unchanged. Otherwise it replaces the local registered-instance list with the single shared default and updates `autoLaunchOnStartup`, preserving other local preferences. It writes the registry before the startup setting. Missing files receive the usual initial configuration. It then launches Desktop normally; this option does not update application software or models.
+
+This changes local registration, so other entries disappear from this workstation's instance list; their installation directories and data stay intact. `--set-default PATH` selects the shared default, while `--update` applies it locally. Run these as separate commands. The menu launcher can remain `/studio/bin/studio-comfy`.
 
 ### Install or update the shared helper
 
@@ -101,7 +113,7 @@ The no-clobber template copy preserves a previously selected shared default when
 
 Replacement workstations reuse those shared files automatically through the existing application-menu integration. The helper checks the shared app, environment and storage paths before creating local configuration; an unavailable path stops launch instead of allowing Desktop to select local fallback storage. It serializes initialization with a local lock, releases it before launching Desktop, and retains the already-required `--no-sandbox` argument. This disables Electron's sandbox; it does not alter the system's AppArmor policy. Errors go to stderr and, when available, a native Zenity dialog.
 
-**Scope:** This is a first-launch seed, not a profile migration or repair tool. If the raw AppImage has already created default configuration on a workstation, existing files stay intact; finish setup through Desktop's normal **Add Existing Instance** and storage settings. Later changes to these templates affect only missing files. Use Desktop's GUI for an existing profile. If the installation moves, update the shared template and existing profiles explicitly. The helper does not synchronize live Desktop sessions or coordinate concurrent installation updates.
+**Scope:** Ordinary launches seed missing files; `--update` explicitly applies the current shared instance selection to an existing workstation while Desktop is closed. Other existing preferences, including storage paths and onboarding state, remain local; use Desktop's GUI to change those. If an installation moves, select its new path with `--set-default` and run `--update` on workstations that should adopt it. The helper does not synchronize live Desktop sessions or coordinate concurrent installation updates.
 
 **Acceptance:** On a fresh GPU workstation, launch **ComfyUI** from GNOME search, confirm that Studio ComfyUI opens without onboarding or Add Existing Instance, load an existing shared workflow, and generate an image into the shared output directory. Quit Desktop fully, launch again, and confirm local preferences remain. The operator has already reported successful manual reuse of the shared installation/models/workflows/output on a replacement; automatic first-launch acceptance is a separate check. Do not run a second backend against an installation currently being used for this test: native launch preparation can modify that shared environment before checking its port.
 
