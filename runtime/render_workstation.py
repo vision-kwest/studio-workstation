@@ -36,6 +36,18 @@ if ! id -u USERNAME >/dev/null 2>&1; then
   groupadd --gid 2000 USERNAME
   useradd --uid 2000 --gid 2000 --create-home --shell /bin/bash USERNAME
   passwd -l USERNAME
+  runuser -u USERNAME -- bash -se <<'STUDIO_UPDATE_PROMPTS'
+mkdir -p "$HOME/.config/autostart" "$HOME/.config/systemd/user"
+cat > "$HOME/.config/autostart/update-notifier.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Update Notifier
+Exec=update-notifier
+Hidden=true
+DESKTOP
+ln -sf /dev/null "$HOME/.config/systemd/user/update-notifier-release.path"
+ln -sf /dev/null "$HOME/.config/systemd/user/update-notifier-release.service"
+STUDIO_UPDATE_PROMPTS
 fi
 cat > /etc/studio-standalone.env <<'CONFIG'
 STUDIO_STANDALONE=true

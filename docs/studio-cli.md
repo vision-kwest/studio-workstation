@@ -82,6 +82,36 @@ Use `--no-studio-software` to skip the optional Rez setup while retaining shared
 conflicts are rejected. Software setup completes asynchronously after DCV; a helper
 failure reports incomplete software setup while the desktop remains available.
 
+### Ubuntu update prompts
+
+New CPU/GPU desktop accounts disable Ubuntu's automatic update-notifier windows,
+including reboot notices, and its separate release-upgrade notification service.
+These local user preferences are installed before the first desktop session.
+Manual Software Updater/APT and background security updates keep their existing
+behavior. Suppressing dialogs does not prevent unattended kernel updates or repair
+an existing NVIDIA/kernel mismatch. Publisher instances have no desktop setting.
+
+For an existing workstation, run this in its terminal as `workstation`, not in
+CloudShell. From an administrative SSM shell, first run `sudo -iu workstation`:
+
+```bash
+mkdir -p "$HOME/.config/autostart" "$HOME/.config/systemd/user"
+cat > "$HOME/.config/autostart/update-notifier.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Update Notifier
+Exec=update-notifier
+Hidden=true
+DESKTOP
+ln -sf /dev/null "$HOME/.config/systemd/user/update-notifier-release.path"
+ln -sf /dev/null "$HOME/.config/systemd/user/update-notifier-release.service"
+```
+
+The preferences take effect at the next GNOME login. Save work and log out of
+GNOME if already logged in; disconnecting the DCV viewer keeps that session alive.
+To restore the prompts, remove only the three files above and log in again.
+New-account setup does not reapply them on later boots.
+
 ## Stop, restart and explicit destruction
 
 ```bash
