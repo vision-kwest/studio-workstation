@@ -66,17 +66,38 @@ The profile is installed before VS Code needs to exist, independently of optiona
 
 The helper seeds only missing `~/.config/comfyui-desktop-2/settings.json` and `~/.local/share/comfyui-desktop-2/installations.json`. It carries forward the operator's disabled telemetry/beta preferences, omits the old workstation's local model fallback, and puts SQLite at `~/.local/share/comfyui-studio/comfyui.db`. It honors `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` when set; keep those on local storage. Electron caches, credentials and runtime state remain local. Existing files are left byte-for-byte unchanged by the helper; Desktop can subsequently update its own files normally.
 
+### Select the default for fresh workstations
+
+After installing another standalone instance on EFS, run this as the ordinary desktop user, supplying its full installation path:
+
+```bash
+/studio/bin/studio-comfy --set-default \
+  "/studio/apps/comfyui/main/Studio ComfyUI (1)"
+```
+
+The command checks that the target is under `/studio` and has the standalone environment, `ComfyUI/main.py`, and virtual-environment Python. It uses matching local Desktop registration metadata when available, otherwise the target's `manifest.json`. It atomically replaces only the shared `installations.json` beside the helper, then exits. It does not launch Desktop or modify local configuration. A missing/incomplete target or unusable metadata leaves the previous shared selection intact.
+
+The selected record is the single source of its startup ID: the launcher derives `autoLaunchOnStartup` when creating fresh local settings. Existing workstations keep their local configuration. The ordinary menu command stays `/studio/bin/studio-comfy`; the AppImage still uses `current`. Multiple installed directories can remain on EFS, with this command selecting the one seeded on the next fresh workstation.
+
+Only the selected identity/version fields and launch arguments are exported. Existing launch arguments are retained except that `--database-url` is replaced with the local-database placeholder. A manifest-only selection uses `--enable-manager` and that placeholder. Environment variables, credentials, runtime state, and cached Git-version metadata are not copied. Other explicit paths in custom launch arguments retain their original values; the tool does not reconstruct GUI preferences from an installation folder.
+
+For a fresh setup test on an existing workstation, fully quit Desktop, create a temporary directory with `mktemp -d /tmp/studio-comfy-test.XXXXXX`, and set `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` to separate subdirectories there when running the normal launcher. A new temporary directory tests the newly selected default; reusing one tests preservation. This does not reset the workstation's normal profile.
+
+### Install or update the shared helper
+
 **Install once on EFS**, as the ordinary desktop user, from the repository root:
 
 ```bash
 mkdir -p /studio/bin /studio/apps/comfy-desktop/launcher
 install -m 755 scripts/comfy-desktop/studio-comfy /studio/apps/comfy-desktop/launcher/studio-comfy
-install -m 644 scripts/comfy-desktop/{settings,installations}.json /studio/apps/comfy-desktop/launcher/
+cp -n scripts/comfy-desktop/{settings,installations}.json /studio/apps/comfy-desktop/launcher/
 ln -sfnT /studio/apps/comfy-desktop/launcher/studio-comfy /studio/bin/studio-comfy
 cp -an /studio/share/applications/menulibre-comfyui.desktop /studio/share/applications/menulibre-comfyui.desktop.before-studio-comfy
 sed -i 's|^Exec=.*|Exec=/studio/bin/studio-comfy|' /studio/share/applications/menulibre-comfyui.desktop
 desktop-file-validate /studio/share/applications/menulibre-comfyui.desktop
 ```
+
+The no-clobber template copy preserves a previously selected shared default when updating the helper.
 
 Replacement workstations reuse those shared files automatically through the existing application-menu integration. The helper checks the shared app, environment and storage paths before creating local configuration; an unavailable path stops launch instead of allowing Desktop to select local fallback storage. It serializes initialization with a local lock, releases it before launching Desktop, and retains the already-required `--no-sandbox` argument. This disables Electron's sandbox; it does not alter the system's AppArmor policy. Errors go to stderr and, when available, a native Zenity dialog.
 

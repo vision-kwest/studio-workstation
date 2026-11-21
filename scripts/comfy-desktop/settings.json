@@ -4,6 +4,5 @@
   "betaFeaturesEnabled": false,
   "modelsDirs": ["/studio/models/comfyui"],
   "inputDir": "/studio/projects/comfyui/input",
-  "outputDir": "/studio/projects/comfyui/output",
-  "autoLaunchOnStartup": "inst-1795224457905"
+  "outputDir": "/studio/projects/comfyui/output"
 }

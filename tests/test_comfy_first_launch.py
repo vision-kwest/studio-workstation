@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import select
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ loader = SourceFileLoader('comfy', script)
 helper = module_from_spec(spec_from_loader(loader.name, loader))
 loader.exec_module(helper)
 helper.APPIMAGE, helper.TEMPLATES = Path(image), Path(templates)
+helper.STUDIO = Path(image).parent
 sys.argv = [script, *arguments]
 helper.main()
 """
@@ -42,7 +44,9 @@ class ComfyFirstLaunch(unittest.TestCase):
         for name in ("settings.json", "installations.json"):
             (self.templates / name).write_text((SOURCE / name).read_text().replace("/studio", str(self.studio)))
         self.image = self.studio / "Comfy Desktop.AppImage"
-        self.image.write_text(f"#!{sys.executable}\nimport json, sys\n"
+        self.marker = self.root / "app-launched"
+        self.image.write_text(f"#!{sys.executable}\nimport json, sys\nfrom pathlib import Path\n"
+                              f"Path({str(self.marker)!r}).touch()\n"
                               "print(json.dumps(sys.argv[1:]), flush=True)\n"
                               "if '--hold' in sys.argv: sys.stdin.readline()\n")
         self.image.chmod(0o755)
@@ -62,9 +66,9 @@ class ComfyFirstLaunch(unittest.TestCase):
         result = self.launch("--example", "argument with spaces")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), ["--no-sandbox", "--example", "argument with spaces"])
-        self.assertEqual(json.loads(self.settings.read_text()),
-                         json.loads((self.templates / "settings.json").read_text()))
         entry, = json.loads(self.catalog.read_text())
+        expected = json.loads((self.templates / "settings.json").read_text())
+        self.assertEqual(json.loads(self.settings.read_text()), {**expected, "autoLaunchOnStartup": entry["id"]})
         self.assertEqual(entry["installPath"], str(self.install))
         database = self.home / ".local/share/comfyui-studio/comfyui.db"
         self.assertEqual(shlex.split(entry["launchArgs"]),
@@ -104,6 +108,88 @@ class ComfyFirstLaunch(unittest.TestCase):
         self.assertIn("Shared ComfyUI path unavailable", result.stderr)
         self.assertEqual(result.stdout, "")
         self.assertFalse(self.home.exists())
+
+    def second_install(self):
+        target = self.install.with_name("Studio ComfyUI (2)")
+        shutil.copytree(self.install, target)
+        return target
+
+    def test_set_default_selects_registry_metadata_for_fresh_profiles_only(self):
+        self.assertEqual(self.launch().returncode, 0)
+        first, = json.loads(self.catalog.read_text())
+        target = self.second_install()
+        arguments = r'''--enable-manager --output-directory "C:\renders\shots" --label "artist's render" --literal '"quoted"' --database-url="sqlite:////old path/db" --database-url sqlite:////old.db'''
+        chosen = {**first, "id": "inst-second", "name": "Second install", "installPath": str(target),
+                  "version": "v0.43.0", "releaseTag": "v0.43.0-env7", "pythonVersion": "3.13.9",
+                  "launchArgs": arguments, "envVars": {"TOKEN": "test-only-sentinel"}, "comfyVersion": "ignore"}
+        self.catalog.write_text(json.dumps([first, chosen], indent=1))
+        originals = {path: path.read_bytes() for path in (self.settings, self.catalog)}
+        shared_settings = (self.templates / "settings.json").read_bytes()
+        self.marker.unlink()
+        result = self.launch("--set-default", str(target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.marker.exists(), "Setter launched Desktop")
+        selected, = json.loads((self.templates / "installations.json").read_text())
+        for key in ("id", "name", "createdAt", "version", "releaseTag", "variant", "pythonVersion", "installPath"):
+            self.assertEqual(selected[key], chosen[key])
+        expected = ["--enable-manager", "--output-directory", r"C:\renders\shots", "--label", "artist's render",
+                    "--literal", '"quoted"', "--database-url", "@DATABASE_URL@"]
+        self.assertEqual(shlex.split(selected["launchArgs"]), expected)
+        self.assertNotIn("envVars", selected)
+        self.assertNotIn("comfyVersion", selected)
+        self.assertEqual((self.templates / "settings.json").read_bytes(), shared_settings)
+        for path, contents in originals.items():
+            self.assertEqual(path.read_bytes(), contents)
+        self.assertEqual(self.launch().returncode, 0)
+        for path, contents in originals.items():
+            self.assertEqual(path.read_bytes(), contents)
+        fresh = self.root / "fresh workstation"
+        self.env["HOME"] = str(fresh)
+        result = self.launch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads((fresh / ".config/comfyui-desktop-2/settings.json").read_text())
+                         ["autoLaunchOnStartup"], chosen["id"])
+        seeded, = json.loads((fresh / ".local/share/comfyui-desktop-2/installations.json").read_text())
+        self.assertEqual(seeded["installPath"], str(target))
+        expected[-1] = f"sqlite:///{fresh}/.local/share/comfyui-studio/comfyui.db"
+        self.assertEqual(shlex.split(seeded["launchArgs"]), expected)
+
+    def test_set_default_uses_target_manifest_without_creating_local_profile(self):
+        target = self.second_install()
+        manifest = {"comfyui_ref": "v0.44.0", "version": "v0.44.0-env3", "id": "linux-nvidia",
+                    "python_version": "3.13.11"}
+        (target / "manifest.json").write_text(json.dumps(manifest))
+        result = self.launch("--set-default", str(target))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.marker.exists())
+        self.assertFalse(self.home.exists())
+        selected, = json.loads((self.templates / "installations.json").read_text())
+        self.assertEqual([selected[key] for key in ("version", "releaseTag", "variant", "pythonVersion")],
+                         ["v0.44.0", "v0.44.0-env3", "linux-nvidia", "3.13.11"])
+        self.assertEqual(selected["installPath"], str(target))
+        self.assertTrue(selected["id"])
+
+    def test_invalid_selection_preserves_shared_default(self):
+        target = self.second_install()
+        (target / "manifest.json").write_text("{}")
+        outside = self.root / "outside"
+        shutil.copytree(self.install, outside)
+        escape = self.studio / "escape"
+        escape.symlink_to(outside, target_is_directory=True)
+        original = (self.templates / "installations.json").read_bytes()
+        cases = [("relative", target.name), ("outside", str(outside)), ("symlink escape", str(escape)),
+                 ("missing", str(self.studio / "missing")), ("incomplete", str(target / "ComfyUI")),
+                 ("manifest metadata", str(target)), ("registry metadata", str(target))]
+        for name, path in cases:
+            with self.subTest(case=name):
+                if name == "registry metadata":
+                    self.catalog.parent.mkdir(parents=True)
+                    self.catalog.write_text(json.dumps([{"sourceId": "standalone", "installPath": str(target)}]))
+                result = self.launch("--set-default", path)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual((self.templates / "installations.json").read_bytes(), original)
+                self.assertFalse(self.marker.exists())
+                self.assertFalse(self.settings.exists())
 
     def test_initialization_lock_is_released_while_app_remains_running(self):
         app = subprocess.Popen([*self.command, "--hold"], env=self.env, text=True,
