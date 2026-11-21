@@ -43,3 +43,13 @@ The register is a planning artifact. No AWS resource or provisioning script is c
 ## Issue #100 — restoring RES runtime GPU installation (draft)
 
 Against upstream `aws/res` **2026.06** commit `1f526a241fb293a29fb018f08ccf81c100c05a42`: retain `scripts/dcv/linux/gpu_drivers.sh`, `virtual-desktop-host/linux/install.sh` and `install_post_reboot.sh` stage order. Replace only the Studio CLI’s custom baked GPU AMI selection with the existing verified Canonical 24.04 parent AMI. Retain upstream RES's signed `aws s3 cp --quiet --recursive` command unchanged. The missing role dependency was restored through IAM inline policy `StudioRes202606NvidiaGridRead`: `s3:ListBucket` for the distribution's `latest/` prefix and `s3:GetObject` for the exact 595.91.07 file; unrelated prefixes/objects are denied. One minimal archive adaptation adds SHA-256 verification (`cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156`) immediately after the upstream download, returning nonzero on missing/bad content. A standalone NVIDIA post-reboot check requires the driver executable and `nvidia` module for the active kernel before RES writes its ready marker. The 2026-11-15 guest test confirmed signed S3 List/HEAD was denied and unsigned read succeeded; the old archive failed in `gpu_drivers.sh` at 01:35:37 UTC. **Published candidate, not live accepted:** installation script at `releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz`, VersionId `sgj5wZfqMTRUImWDDbxR08emK755aU7A`, SHA-256 `6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d` (42,994 bytes), produced reproducibly from pinned RES sources by the existing CloudShell release tool. The old PR #65 installer and application archives remain unchanged.
+
+## Ubuntu desktop update prompts (Issue #137)
+
+The renderer creates a native per-user XDG `Hidden=true` override for
+`update-notifier.desktop` and masks Ubuntu Noble's `update-notifier-release.path`
+and `.service` for each new CPU/GPU desktop account. The masks affect the GUI
+release notification, not manual upgrades or APT security-update policy. These
+preferences are local and precede the first GNOME session. RES 2026.06 commit
+`1f526a241fb293a29fb018f08ccf81c100c05a42` installers, driver handling and reboot
+continuation remain unchanged; this does not resolve later kernel/driver mismatch.
