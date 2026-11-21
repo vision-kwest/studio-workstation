@@ -60,7 +60,7 @@ def safety_name(stack):
     return "studio-expiry-" + hashlib.sha256(stack.encode()).hexdigest()[:20]
 
 
-def safety(aws, region, stack, *, create=False, arn=None, cleanup=False):
+def safety(aws, region, stack, *, create=False, arn=None, cleanup=False, profile="gpu"):
     from runtime.workstation_inventory import stack_record
     progress.stage("Checking expiration safeguards")
     if region != "us-east-1" or not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,127}", stack):
@@ -73,6 +73,7 @@ def safety(aws, region, stack, *, create=False, arn=None, cleanup=False):
             "--template-body", "file://" + str(template), "--capabilities", "CAPABILITY_IAM",
             "--parameters", "ParameterKey=WorkstationStack,ParameterValue=" + stack,
             "--tags", "Key=StudioManaged,Value=expiry", "Key=StudioWorkstation,Value=" + stack,
+            "Key=StudioProfile,Value=" + profile,
             "--on-failure", "DELETE", "--timeout-in-minutes", "5")
         aws(region, "cloudformation", "wait", "stack-create-complete", "--stack-name", name)
     record = stack_record(aws, region, arn or name)
@@ -100,19 +101,24 @@ def safety(aws, region, stack, *, create=False, arn=None, cleanup=False):
     return {"arn": record["StackId"], "token": token, "role": role, "state": record["StackStatus"]}
 
 
-def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150, utc_now=None):
+def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150, utc_now=None, profile="gpu"):
     """Provision a native stop schedule with EC2; no client-side arming window."""
+    from runtime.workstation_inventory import PROFILES
+    if profile not in PROFILES:
+        raise ValueError("Unsupported workstation profile")
     now = utc_now or (lambda: dt.datetime.now(dt.timezone.utc))
     guard.deadline(now(), minutes)  # Validate the selected duration before any AWS writes.
     body = json.loads(Path(template).read_text())
     instance = body["Resources"]["Workstation"]
+    expected = {"Workstation": "AWS::EC2::Instance"}
+    if PROFILES[profile]["desktop"]:
+        expected["WorkstationSG"] = "AWS::EC2::SecurityGroup"
     disks = [m["Ebs"] for m in instance["Properties"].get("BlockDeviceMappings", []) if "Ebs" in m]
     if (instance["Type"] != "AWS::EC2::Instance" or not disks or
             any(d.get("DeleteOnTermination") is not True for d in disks) or
-            {key: r["Type"] for key, r in body["Resources"].items()} !=
-            {"Workstation": "AWS::EC2::Instance", "WorkstationSG": "AWS::EC2::SecurityGroup"}):
+            {key: r["Type"] for key, r in body["Resources"].items()} != expected):
         raise ValueError("Expected a workstation with native EBS cleanup on explicit destroy")
-    identity = safety(aws_call, region, stack, create=True)
+    identity = safety(aws_call, region, stack, create=True, profile=profile)
     token, role = identity["token"], identity["role"]
     # A bounded provisioning stop survives a disconnected CLI. The selected runtime
     # starts after infrastructure exists, so even a one-minute timer can be armed.
@@ -132,7 +138,7 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
     response = aws_call(region, "cloudformation", "create-stack", "--stack-name", stack,
                         "--template-body", "file://" + str(template), "--parameters", *cf_params,
                         "--tags", "Key=StudioStack,Value=" + stack, "Key=StudioCleanupToken,Value=" + token,
-                        "Key=StudioManaged,Value=true", "Key=StudioProfile,Value=gpu",
+                        "Key=StudioManaged,Value=true", "Key=StudioProfile,Value=" + profile,
                         "Key=StudioSafetyStack,Value=" + identity["arn"], "--on-failure", "DELETE", "--timeout-in-minutes", "5")
     stack_id = response.get("StackId", "")
     if not stack_id.startswith("arn:aws:cloudformation:us-east-1:401233741942:stack/" + stack + "/"):

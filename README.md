@@ -35,8 +35,10 @@ An existing owner keeps it, even if stopped. `connect art` automatically returns
 the verified trusted hostname for its owner, or the current public-IP URL otherwise;
 you do not need `--hostname`. Publishers and dry runs do not claim the hostname.
 CPU/GPU creates provide writable shared EFS at `/studio` and optional Rez setup.
-GPU timeouts stop the instance and preserve saved local files. Omit `--expires-in`
-for `150m`, or choose a positive whole duration in minutes, hours or days.
+All profiles accept `--expires-in` and stop the instance while preserving saved local files.
+For example: `python3 studio workstation create --profile cpu --name ayo --expires-in 4h`.
+Choose a positive whole duration in minutes, hours or days. GPU defaults to `150m`;
+CPU and publisher remain untimed when the option is omitted.
 Use `--no-studio-software` to skip Rez; shared storage still follows DCV setup.
 The normal `workstation` account can install and save files under `/studio` without sudo.
 Shared application launchers use MenuLibre (**Menu Editor**); see the
@@ -87,8 +89,8 @@ trusted TLS, checking both affected desktops. A former owner gets
 an auto-assigned public IP, with bounded stop/start recovery if needed. No extra EIP
 or CPU-return subsystem. The owner needs only one reachable endpoint.
 
-Manual stop and GPU expiration preserve the workstation stack and local EBS.
-Each GPU start arms and verifies a fresh stop timer before starting EC2. The
+Manual stop and expiration preserve the workstation stack and local EBS.
+Each timed workstation start verifies a fresh stop timer before starting EC2. The
 default is the duration selected at the most recent create/start; `--expires-in`
 overrides it. An extension changes the current deadline without a four-hour cap.
 Saved EBS files survive stopping; RAM and instance-store data do not.

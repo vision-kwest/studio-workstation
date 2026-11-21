@@ -22,7 +22,7 @@ flowchart TD
   CFN --> EC2["Standalone Ubuntu EC2 workstation"]
   EC2 --> DCV["Amazon DCV browser/client"]
   SSM["AWS Systems Manager"] -. "Administrative session" .-> EC2
-  CFN --> Scheduler["GPU auto-stop schedule"]
+  CFN --> Scheduler["Configured auto-stop schedule"]
   Scheduler -. "Stop at selected deadline" .-> EC2
 ```
 
@@ -33,10 +33,10 @@ The GPU AMI `ami-027c98f85b155c2ac` passed Image Builder 0.1.11/1, but its **Ima
 - GitHub stores source and tests, not passwords, private keys or proprietary NVIDIA binaries.
 - The live EC2 uses `StudioWorkstationSSMRole` for SSM and exact-version RES S3 access; Image Builder has its own permissions.
 - DCV authenticates the local Linux `workstation` user, **not AWS IAM**. A unique password is enrolled interactively through SSM.
-- Each named GPU has a tag-conditioned Scheduler role permitted to stop its
+- Each timed workstation has a tag-conditioned Scheduler role permitted to stop its
   instance. Ordinary expiration cannot delete the stack or terminate the instance.
 - Public TCP 8443 may be explicitly enabled for access from changing networks; this is internet exposure, not identity-aware private networking. No inbound SSH. Trusted TLS and broader production access remain deferred.
-- Manual stop and GPU expiration keep the stack and saved EBS files. Start rearms
+- Manual stop and expiration keep the stack and saved EBS files. Start rearms
   a verified timer and may change the public IP. Explicit `destroy --delete-stack`
   deletes the local resources and owned timer, with absence checks.
 

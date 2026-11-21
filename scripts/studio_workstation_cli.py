@@ -44,10 +44,6 @@ GPU_KEYS = {
 
 TRUSTED_DCV_HOSTNAME = "dcv.kwesidavis.com"  # Only its verified owner gets the trusted URL.
 
-# Default automatic-stop duration; callers may select any positive supported duration.
-GPU_EXPIRATION_DEFAULT_MINUTES = 150
-
-
 def gpu_duration_minutes(value):
     """Accept positive whole minutes, hours, or days without a product-duration cap."""
     match = re.fullmatch(r"([1-9][0-9]*)([mhd])", value)
@@ -62,13 +58,12 @@ def gpu_extension_minutes(value):
     return int(value)
 
 
-def gpu_expiration_options(args):
-    if args.profile != "gpu":
-        if args.expires_in is not None:
-            raise ValueError("--expires-in requires --profile gpu")
+def expiration_options(args):
+    from runtime.workstation_inventory import PROFILES
+    minutes = PROFILES[args.profile]["expires_minutes"] if args.expires_in is None else args.expires_in
+    if minutes is None:
         return None
     from runtime.pr65_one_shot_guard import deadline
-    minutes = GPU_EXPIRATION_DEFAULT_MINUTES if args.expires_in is None else args.expires_in
     deadline(dt.datetime.now(dt.timezone.utc), minutes)
     return minutes
 
@@ -116,10 +111,10 @@ def instance_id(stack, region):
 
 def describe(stack, region, *, with_expiration=False):
     from runtime.workstation_inventory import context
+    from runtime import pr65_one_shot_guard as guard
     selected = context(aws, region, stack)
     result = {k: v for k, v in selected.items() if k not in ("vm", "resources", "token")}
-    if with_expiration and selected["profile"] == "gpu" and selected["state"] in ("running", "stopped"):
-        from runtime import pr65_one_shot_guard as guard
+    if with_expiration and guard.has_expiration(selected) and selected["state"] in ("running", "stopped"):
         expiry = guard.status(aws, selected)
         result["expiration"] = {k: expiry[k] for k in ("stop_at", "duration_minutes", "remaining_seconds", "status", "warning") if k in expiry}
     return result
@@ -385,7 +380,7 @@ def command(args):
             raise ValueError("Release must be a version such as v0.1.3")
         args.client_cidr = str(ipaddress.IPv4Network(args.client_cidr, strict=False))
         gpu = args.profile == "gpu"
-        expiration = gpu_expiration_options(args)
+        expiration = expiration_options(args)
         if gpu:
             if args.region != "us-east-1" or args.image_id != GPU_AMI or args.instance_type != "g4dn.xlarge":
                 raise ValueError("GPU profile requires us-east-1, validated AMI and g4dn.xlarge")
@@ -469,9 +464,10 @@ def command(args):
                     raise ValueError("Publisher security group is not in the workstation VPC")
             if gpu:
                 gpu_release_preflight(args)
+            if expiration is not None:
                 from runtime import pr65_gpu_create
                 pr65_gpu_create.create_guarded(
-                    aws, args.region, args.stack, template, parameters, minutes=expiration)
+                    aws, args.region, args.stack, template, parameters, minutes=expiration, profile=args.profile)
             else:
                 progress.stage("Creating workstation stack")
                 cf_params = ["ParameterKey=" + k + ",ParameterValue=" + v for k, v in
@@ -495,7 +491,7 @@ def command(args):
                     install_efs_client(instance_id(args.stack, args.region), args.region)
                 except (RuntimeError, subprocess.CalledProcessError) as exc:
                     print("WARNING: desktop is available; Studio software setup incomplete; EFS helper installation failed: " + str(exc), file=sys.stderr)
-            result = describe(args.stack, args.region, with_expiration=gpu)
+            result = describe(args.stack, args.region, with_expiration=True)
             if args.profile != "publisher":
                 result["dcv_url"] = endpoint["url"]
             print(json.dumps(result, indent=2), flush=True)
@@ -543,11 +539,11 @@ def command(args):
         if args.action == "start" and selected["stack_status"] not in ("CREATE_COMPLETE", "UPDATE_COMPLETE"):
             raise ValueError("Cannot restart a workstation during failed or incomplete stack operations")
         if args.action == "start":
-            if profile == "gpu":
+            if guard.has_expiration(selected):
                 progress.stage("Arming a fresh automatic-stop timer before starting EC2")
                 guard.rearm(aws, selected, minutes=args.expires_in)
             elif args.expires_in is not None:
-                raise ValueError("--expires-in requires a GPU workstation")
+                raise ValueError("Automatic stop is not configured; create the workstation with --expires-in first")
         if not retry_stop:
             progress.stage("Starting EC2" if args.action == "start" else "Stopping EC2")
             aws(args.region, "ec2", args.action + "-instances", "--instance-ids", iid)
@@ -617,7 +613,7 @@ def main(argv=None):
             s.add_argument("--client-cidr", default="0.0.0.0/0")
         if action in ("create", "start"):
             s.add_argument("--expires-in", type=gpu_duration_minutes, metavar="DURATION",
-                           help="GPU automatic stop after a positive duration (150m, 8h, 2d); create defaults to 150m, start remembers the last selection")
+                           help="Automatic stop for any profile (150m, 8h, 2d); GPU create defaults to 150m, other profiles opt in; start remembers the last selection")
         if action == "extend-expiration":
             s.add_argument("--additional-minutes", type=gpu_extension_minutes, required=True)
         if action == "connect":

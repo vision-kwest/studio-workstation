@@ -35,7 +35,7 @@ live prices. The supported region, subnet and IAM profiles remain validated inpu
 ```bash
 python3 studio workstation create --profile gpu --name art --dry-run
 python3 studio workstation create --profile gpu --name art --expires-in 8h
-python3 studio workstation create --profile cpu --name edit
+python3 studio workstation create --profile cpu --name ayo --expires-in 4h
 python3 studio workstation list
 python3 studio workstation status art
 python3 studio workstation connect art
@@ -91,8 +91,8 @@ python3 studio workstation check-ready art
 python3 studio workstation destroy art --delete-stack
 ```
 
-Manual stop and GPU expiration preserve the same EC2 instance, CloudFormation
-stack and attached local EBS. GPU start verifies and rearms a fresh stop timer
+Manual stop and expiration preserve the same EC2 instance, CloudFormation
+stack and attached local EBS. Timed workstation start verifies and rearms a fresh stop timer
 before starting compute; `--expires-in` can select a new duration. Saved EBS files
 survive stopping, while unsaved RAM and instance-store data do not.
 
@@ -106,7 +106,7 @@ are independent of an individual workstation.
 waits for native CloudFormation and checks resource absence. A surviving resource
 is an error, not success and not an instruction to force-delete or silently retain.
 Retry destroy with the same immutable ARN after a partial failure. Inventory shows
-interrupted GPU safety-only stacks; `destroy NAME --delete-stack` reconciles them
+interrupted safety-only stacks; `destroy NAME --delete-stack` reconciles them
 only after exact-scope absence checks. Legacy untagged stacks are diagnostic inventory,
 not automatically adopted or deleted by the new lifecycle.
 
@@ -148,12 +148,13 @@ Interactive `connect --ssm` suppresses progress so it does not write into the gu
 terminal. Publisher build submission remains asynchronous: `command finished`
 with JSON status `submitted` means the request was sent; use `result` to check the build.
 
-## GPU automatic stop
+## Automatic stop for every profile
 
 `--expires-in` accepts a positive whole duration with `m`, `h` or `d` units,
-such as `150m`, `8h` or `1d`. GPU create defaults to `150m`. There is no
+such as `150m`, `8h` or `1d`, with CPU, GPU, and publisher profiles. GPU create defaults to `150m`. There is no
 four-hour ceiling; the duration must produce a valid future AWS schedule date.
-CPU and publisher profiles retain their existing manual stop lifecycle.
+CPU and publisher create opt in with `--expires-in`; omitting it keeps their manual stop lifecycle.
+Publisher still requires its existing `--security-group-id` and dedicated instance profile.
 
 One native EventBridge Scheduler resource belongs to the workstation's
 CloudFormation stack and invokes `StopInstances` for its exact instance.
@@ -169,7 +170,7 @@ once the stack is ready. An interrupted CLI therefore leaves a bounded stop
 timer in place. Initial CloudFormation creation has a five-minute timeout and
 normal failed-create rollback, which can remove incomplete new resources.
 
-GPU `start` updates and independently verifies a fresh deadline before starting
+For every timed profile, `start` updates and independently verifies a fresh deadline before starting
 EC2. Without an override, it reuses the duration selected at the most recent
 create/start. A failed timer verification prevents the start. An expired timer
 and a stopped instance are normal states; local saved work remains available.
@@ -191,6 +192,9 @@ Automatic stopping ends compute use, but retained EBS and applicable public IPv4
 charges continue. Stop never needs healthy optional hostname infrastructure.
 
 ### Existing workstations
+
+An existing untimed CPU or publisher remains untimed. `start --expires-in` cannot
+add a timer to it; create a new workstation with `--expires-in` to opt in.
 
 Updating the CLI does not disable, convert or re-enable old external destructive
 timers. `status` identifies a legacy deployment instead of presenting it as a
@@ -227,7 +231,7 @@ second ENI or proxy is created. The hostname owner does not need two public addr
 Explicit assignment verifies the managed target, primary-only ENI topology, DCV and certificate,
 rechecks ownership, moves the EIP, then verifies both the destination and former owner.
 Native public IPv4 reacquisition is attempted first. Bounded previous-owner stop/start
-is a fallback, with temporary interruption; a GPU rearms and verifies its stop
+is a fallback, with temporary interruption; a timed desktop rearms and verifies its stop
 timer before restarting. Assignment does not impose the old acceptance-test
 headroom limits. Unsupported networking, unknown ownership or failed recovery
 is an error, not a successful handoff.

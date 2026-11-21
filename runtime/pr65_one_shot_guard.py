@@ -104,11 +104,18 @@ def _verify_schedule(scheduler, spec):
     return _check_schedule(scheduler.get_schedule(Name=spec["Name"], GroupName=spec["GroupName"]), spec)
 
 
+def has_expiration(context):
+    """Require verification when any timer identity remains, including partial metadata."""
+    return bool(context["profile"] == "gpu" or context.get("safety_stack") or context.get("token") or
+                any(r.get("LogicalResourceId") == "AutoStopSchedule" for r in context["resources"]))
+
+
 def status(aws, context, *, now=None):
     """Inspect the retained stop timer, including ordinary disabled/expired states."""
     from runtime import pr65_gpu_create as creator
-    if context["profile"] != "gpu" or not context.get("safety_stack"):
-        raise ValueError("Expected GPU auto-stop association")
+    from runtime.workstation_inventory import PROFILES
+    if context["profile"] not in PROFILES or not context.get("safety_stack"):
+        raise ValueError("Automatic stop is not configured; expected a verified safety-stack association")
     resources = [r for r in context["resources"] if r.get("LogicalResourceId") == "AutoStopSchedule"]
     if not resources:
         return {"status": "legacy", "stop_at": None, "remaining_seconds": None, "duration_minutes": None,

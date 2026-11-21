@@ -118,7 +118,7 @@ def list_workstations(aws, region):
     for stack in stacks:
         tags = hostname._tags(stack)
         if tags.get("StudioManaged") == "expiry" and tags.get("StudioWorkstation") not in deployed:
-            rows.append({"name": tags.get("StudioWorkstation"), "profile": "gpu",
+            rows.append({"name": tags.get("StudioWorkstation"), "profile": tags.get("StudioProfile", "gpu"),
                          "state": "safety-stack-only", "safety_stack": stack["StackId"],
                          "dcv_url": None, "dcv_verified": False})
     return rows
