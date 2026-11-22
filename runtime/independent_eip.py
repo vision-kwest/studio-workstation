@@ -120,6 +120,18 @@ def _reachable(aws, selected, check_tls, *, restart=False, sleep=time.sleep):
         progress.stage("Checking DCV endpoint recovery")
 
 
+def _stopped_owner_released(previous, current):
+    return (previous and previous['state'] == 'stopped' and not any(_fingerprint(current)) and
+            legacy._tags(current).get('StudioDcvInstanceId') in (None, previous['instance']))
+
+
+def _claim_after_release(aws, destination, check_tls):
+    result = _change(aws, destination, check_tls, only_if_unassigned=True)
+    if result is None:
+        raise RuntimeError('Hostname was claimed during stopped-owner cleanup; new owner preserved')
+    return result
+
+
 def _change(aws, destination, check_tls, *, destroying=False, only_if_unassigned=False):
     progress.stage("Checking independent DCV hostname ownership")
     before = _address(aws)
@@ -159,7 +171,12 @@ def _change(aws, destination, check_tls, *, destroying=False, only_if_unassigned
         # Verify its independent endpoint before changing certificate permissions or EIP.
         _reachable(aws, destination, check_tls)
         if not only_if_unassigned:
-            acm.prepare_gpu(aws, destination["instance"])
+            try:
+                acm.prepare_gpu(aws, destination["instance"])
+            except RuntimeError:
+                if not _stopped_owner_released(previous, _address(aws)):
+                    raise
+                return _claim_after_release(aws, destination, check_tls)
     moved = None
     try:
         moved = _move(aws, before, destination)
@@ -176,6 +193,13 @@ def _change(aws, destination, check_tls, *, destroying=False, only_if_unassigned
             raise RuntimeError("Hostname owner changed during endpoint verification")
     except BaseException as exc:
         current = _address(aws)
+        if _stopped_owner_released(previous, current):
+            # The stopped-owner handler may have completed the detach concurrently.
+            if destination:
+                return _claim_after_release(aws, destination, check_tls)
+            _move(aws, current, None)
+            acm.revoke_gpu(aws, previous['instance'])
+            return {'owner': None, 'hostname': legacy.HOST, 'endpoint': None, 'previous_endpoint': None}
         if _fingerprint(current) != _fingerprint(before):
             if (any(_fingerprint(current)) and
                     current.get("InstanceId") != (destination["instance"] if destination else None)):

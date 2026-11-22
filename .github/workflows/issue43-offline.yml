@@ -12,6 +12,7 @@ on:
       - 'tests/test_issue43_hostname_handoff.py'
       - 'runtime/issue43_hostname_handoff.py'
       - 'runtime/independent_eip.py'
+      - 'infra/workstation-hostname-stop-release.json'
       - 'runtime/workstation_inventory.py'
       - 'tests/workstation_fake.py'
       - 'runtime/issue43_gpu_acm_setup.py'
@@ -37,7 +38,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: python3 -m pip install 'jinja2>=3,<4'
+      - run: python3 -m pip install 'jinja2>=3,<4' boto3
       - name: Compile standalone certificate and CLI modules
         run: python3 -m py_compile scripts/studio_dcv_acm.py scripts/studio_workstation_cli.py runtime/issue43_hostname_handoff.py runtime/issue43_gpu_acm_setup.py runtime/issue43_destroy.py runtime/issue68_expiration_extension.py
       - name: Test ACM certificate activation (no AWS credentials)

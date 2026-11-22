@@ -4,7 +4,7 @@ import datetime as dt
 import unittest
 from unittest.mock import patch
 from runtime import independent_eip as eip, dcv_endpoint, pr65_one_shot_guard as guard
-from workstation_fake import AWS, NOW, h, acm, inventory, tagdict, tags, missing
+from workstation_fake import AWS, NOW, h, acm, inventory, tagdict, tags, missing, release_stopped_hostname
 
 
 class HostnameTests(unittest.TestCase):
@@ -212,10 +212,101 @@ class HostnameTests(unittest.TestCase):
 
     def test_failed_guest_certificate_prevents_any_eip_change(self):
         self.assign('art');before=copy.deepcopy(self.aws.address)
-        with patch.object(acm,'prepare_gpu',side_effect=RuntimeError('guest failed')):
-            with self.assertRaises(RuntimeError):self.assign('ai')
-        self.assertEqual(self.aws.address,before)
+        for state in ('running', 'stopped'):
+            self.aws.vms[self.a['instance']]['State']['Name'] = state
+            with self.subTest(state=state), patch.object(acm,'prepare_gpu',side_effect=RuntimeError('guest failed')):
+                with self.assertRaises(RuntimeError):self.assign('ai')
+            self.assertEqual(self.aws.address,before)
 
     def test_unassociated_release_is_idempotent(self):
         self.assertIsNone(eip.release(self.aws,self.tls)['owner'])
         self.assertIsNone(eip.release(self.aws,self.tls)['owner'])
+
+    def test_explicit_transfer_retries_when_stopped_owner_is_released_during_certificate_setup(self):
+        self.assign('art'); self.aws.vms[self.a['instance']]['State']['Name'] = 'stopped'
+        baseline, prepare = copy.deepcopy(self.aws), acm.prepare_gpu
+        for phase in ('during-prepare', 'after-prepare'):
+            with self.subTest(phase=phase):
+                self.aws = copy.deepcopy(baseline)
+                fired, checks = [], []
+                def release():
+                    fired.append(True); release_stopped_hostname(self.aws)
+                def check(aws, iid, **kw):
+                    checks.append(iid)
+                    if phase == 'during-prepare' and len(checks) == 2 and not fired: release()
+                def enroll(aws, iid):
+                    result = prepare(aws, iid)
+                    if phase == 'after-prepare' and not fired: release()
+                    return result
+                self.aws.calls.clear()
+                with patch.object(h, 'check_gpu_tls', side_effect=check), patch.object(acm, 'prepare_gpu', side_effect=enroll):
+                    result = self.assign('ai')
+                self.assertTrue(fired)
+                self.assertEqual(result['owner'], 'ai')
+                self.assertEqual(self.aws.address['InstanceId'], self.b['instance'])
+                self.assertEqual(acm._grants(self.aws)[0], {self.b['instance']})
+                self.assertEqual(self.aws.vms[self.a['instance']]['State']['Name'], 'stopped')
+                self.assertEqual(self.aws.volumes, baseline.volumes)
+                self.assertFalse(any(c[1] == 'associate-address' and self.a['vm']['NetworkInterfaces'][0]['NetworkInterfaceId'] in c for c in self.aws.writes))
+                self.assertFalse(any(c[1] in ('start-instances', 'stop-instances', 'terminate-instances') for c in self.aws.writes))
+
+    def test_background_release_checks_current_owner_and_survives_delayed_events(self):
+        self.assign('art')
+        baseline = copy.deepcopy(self.aws)
+        for case in ('running', 'unassigned', 'nonowner-stopped', 'restarted', 'replaced', 'owner-tag', 'eni', 'foreign-stack'):
+            with self.subTest(case=case):
+                self.aws = copy.deepcopy(baseline)
+                vm = self.aws.vms[self.a['instance']]
+                vm['State']['Name'] = 'stopped'
+                if case == 'running': vm['State']['Name'] = 'running'
+                if case == 'unassigned': self.aws.detach()
+                if case == 'nonowner-stopped':
+                    vm['State']['Name'] = 'running'; self.aws.vms[self.b['instance']]['State']['Name'] = 'stopped'
+                if case == 'restarted':
+                    self.aws.fire_schedule('studio-stop-' + self.a['token'])
+                    self.aws(h.REGION, 'ec2', 'start-instances', '--instance-ids', self.a['instance'])
+                if case == 'replaced':
+                    next(r for r in self.aws.resources[self.a['stack_id']] if r['LogicalResourceId'] == 'Workstation')['PhysicalResourceId'] = self.b['instance']
+                if case == 'owner-tag':
+                    next(t for t in self.aws.address['Tags'] if t['Key'] == 'StudioDcvInstanceId')['Value'] = self.b['instance']
+                if case == 'eni': self.aws.address['NetworkInterfaceId'] = 'eni-foreign'
+                if case == 'foreign-stack':
+                    next(t for t in vm['Tags'] if t['Key'] == 'aws:cloudformation:stack-id')['Value'] = 'arn:foreign'
+                before = copy.deepcopy(self.aws.address); self.aws.calls.clear()
+                if case in ('replaced', 'owner-tag', 'eni', 'foreign-stack'):
+                    with self.assertRaises(ValueError): release_stopped_hostname(self.aws)
+                else:
+                    release_stopped_hostname(self.aws)
+                self.assertEqual(self.aws.address, before)
+                self.assertFalse(self.aws.writes)
+
+    def test_background_release_is_idempotent_and_cannot_detach_a_new_association(self):
+        from botocore.exceptions import ClientError
+        self.assign('art'); baseline = copy.deepcopy(self.aws)
+        for race in ('none', 'before-readback', 'before-detach', 'denied'):
+            with self.subTest(race=race):
+                self.aws = copy.deepcopy(baseline)
+                self.aws.fire_schedule('studio-stop-' + self.a['token'])
+                disks = copy.deepcopy(self.aws.volumes); grants = acm._grants(self.aws)
+                def changed():
+                    self.aws.address.update(InstanceId=self.b['instance'], AssociationId='new-owner',
+                                            NetworkInterfaceId=self.b['vm']['NetworkInterfaces'][0]['NetworkInterfaceId'])
+                    next(t for t in self.aws.address['Tags'] if t['Key'] == 'StudioDcvInstanceId')['Value'] = self.b['instance']
+                def fault(service, action, args):
+                    if action == 'describe-stack-resource' and race == 'before-readback': changed()
+                    if action == 'disassociate-address' and race in ('before-detach', 'denied'):
+                        if race == 'before-detach': changed()
+                        raise ClientError({'Error': {'Code': 'InvalidAssociationID.NotFound' if race == 'before-detach' else 'AccessDenied', 'Message': race}}, action)
+                self.aws.before = fault; self.aws.calls.clear()
+                if race == 'denied':
+                    with self.assertRaises(ClientError): release_stopped_hostname(self.aws)
+                else: release_stopped_hostname(self.aws)
+                self.aws.before = None
+                self.assertEqual(self.aws.vms[self.a['instance']]['State']['Name'], 'stopped')
+                self.assertEqual(self.aws.volumes, disks); self.assertEqual(acm._grants(self.aws), grants)
+                if race == 'none':
+                    self.assertIsNone(self.aws.address.get('AssociationId'))
+                    release_stopped_hostname(self.aws)
+                    self.assertEqual(len([c for c in self.aws.calls if c[1] == 'disassociate-address']), 1)
+                elif race != 'denied': self.assertEqual(self.aws.address['AssociationId'], 'new-owner')
+                self.assertFalse(any(c[1] in ('create-tags', 'delete-tags', 'terminate-instances', 'delete-stack', 'delete-volume') for c in self.aws.writes))

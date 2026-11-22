@@ -73,8 +73,9 @@ SSH TCP/22 from `0.0.0.0/0`. `--client-cidr` controls only DCV; its restricted C
 must include the network from which endpoint checks/browser connections run.
 
 CPU/GPU create/start claims the shared hostname automatically when unassigned,
-then prepares trusted TLS. An existing owner keeps it, including a stopped owner;
-publishers and dry runs never claim it. Plain `connect NAME` selects the endpoint
+then prepares trusted TLS. Create/start preserves an existing association; the
+shared stopped-owner cleanup releases it asynchronously after a stop. Publishers
+and dry runs never claim it. Plain `connect NAME` selects the endpoint
 automatically. `--hostname dcv.kwesidavis.com` requires verified ownership and trusted
 TLS; it does not assign the hostname and is unnecessary for ordinary connections.
 Every running desktop must have a current, reachable HTTPS login page. A non-owner uses
@@ -393,11 +394,13 @@ only after successful transfer is previous-owner export access revoked. Cached
 certificates may remain on a former owner, but it has no ongoing export permission.
 Stale grants from terminated owners are reconciled against actual EC2 identity.
 Rollback never steals the EIP from an unexpected new owner. CLI stop/destroy releases
-the selected owner's association; it does not choose a CPU to receive it. Native
-automatic stop keeps the association and certificate permission, so another desktop
-will not claim that stopped owner's hostname. Start reuses its own assignment or
-claims a free hostname. Use explicit assignment/release to change a stopped owner's
-hostname when needed.
+the selected owner's association; it does not choose a CPU to receive it. With the
+[shared cleanup stack](independent-eip.md#automatic-release-after-stopping) deployed,
+native automatic stop also releases the address once its owner is verified stopped.
+Events trigger cleanup, with a one-minute reconciliation fallback; release is
+asynchronous. The next CLI claim reconciles the former owner's certificate grant
+and metadata before assigning the free address. Start claims a free hostname;
+explicit assignment remains available for an intentional transfer or retry.
 
 ## Publisher
 
