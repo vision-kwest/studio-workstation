@@ -71,13 +71,17 @@ def set_default(install, data):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False,
+                                     epilog="Pass native AppImage arguments after -- (normal or --update launch only).")
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--set-default", type=Path, metavar="PATH",
                          help="select an existing /studio installation as the shared default, then exit")
     actions.add_argument("--update", action="store_true",
                          help="apply the shared default locally, then launch (Desktop must be closed)")
-    args, app_args = parser.parse_known_args()
+    arguments = sys.argv[1:]
+    separator = arguments.index("--") if "--" in arguments else len(arguments)
+    args = parser.parse_args(arguments[:separator])
+    app_args = arguments[separator + 1:]
     home = Path.home()
     data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local/share")
     if args.set_default is not None:

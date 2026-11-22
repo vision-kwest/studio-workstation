@@ -63,7 +63,7 @@ class ComfyFirstLaunch(unittest.TestCase):
                               capture_output=True, timeout=5)
 
     def test_fresh_profile_preserves_paths_and_passes_arguments(self):
-        result = self.launch("--example", "argument with spaces")
+        result = self.launch("--", "--example", "argument with spaces")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), ["--no-sandbox", "--example", "argument with spaces"])
         entry, = json.loads(self.catalog.read_text())
@@ -124,7 +124,7 @@ class ComfyFirstLaunch(unittest.TestCase):
                     old_path = self.install if case == "different-id" else self.studio / "old"
                     old = {**shared, "id": selected_id, "installPath": str(old_path)}
                     self.catalog.write_text(json.dumps([old, {**old, "id": "extra"}]))
-                result = self.launch("--update", "--example")
+                result = self.launch("--update", "--", "--example")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout), ["--no-sandbox", "--example"])
                 settings = json.loads(self.settings.read_text())
@@ -165,6 +165,49 @@ class ComfyFirstLaunch(unittest.TestCase):
                 self.assertFalse(self.marker.exists())
                 for path, original in before.items():
                     self.assertEqual(path.read_bytes(), original)
+
+    def test_invalid_helper_options_fail_before_any_setup(self):
+        cases = [("-set-default", "/studio/apps/comfyui/main/StudioComfyUI"),
+                 ("--unknown",), ("--set", str(self.install)), ("--upd",),
+                 ("--set-default",), ("--update", "unexpected argument"),
+                 ("--update", "--set-default", str(self.install)),
+                 ("--set-default", str(self.install), "--", "--example")]
+
+        def snapshot():
+            return {path: (path.read_bytes(), path.stat().st_mtime_ns) if path.is_file() else None
+                    for base in (self.templates, self.home) for path in base.rglob("*")}
+
+        for existing in (False, True):
+            for arguments in cases:
+                with self.subTest(existing=existing, arguments=arguments):
+                    shutil.rmtree(self.home, ignore_errors=True)
+                    self.marker.unlink(missing_ok=True)
+                    if existing:
+                        for path, contents in ((self.settings, '{"theme":"light"}\n'),
+                                               (self.catalog, '[{"id":"personal"}]\n')):
+                            path.parent.mkdir(parents=True, exist_ok=True)
+                            path.write_text(contents)
+                    before = snapshot()
+                    result = self.launch(*arguments)
+                    observed = (result.returncode, "usage:" in result.stderr,
+                                "error:" in result.stderr, self.marker.exists(),
+                                self.home.exists(), snapshot() == before)
+                    self.assertEqual(observed, (2, True, True, False, existing, True),
+                                     f"stdout={result.stdout!r}\nstderr={result.stderr!r}")
+
+    def test_native_suffix_preserves_helper_looking_flags_and_spaces(self):
+        arguments = ["--set-default", "native path with spaces", "--update", "--help",
+                     "--example", "--", "last value"]
+        shared = {path: path.read_bytes() for path in self.templates.iterdir()}
+        for prefix in ((), ("--update",)):
+            with self.subTest(prefix=prefix):
+                self.marker.unlink(missing_ok=True)
+                result = self.launch(*prefix, "--", *arguments)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), ["--no-sandbox", *arguments])
+                self.assertTrue(self.marker.exists())
+                for path, contents in shared.items():
+                    self.assertEqual(path.read_bytes(), contents)
 
     def second_install(self):
         target = self.install.with_name("Studio ComfyUI (2)")
@@ -249,7 +292,7 @@ class ComfyFirstLaunch(unittest.TestCase):
                 self.assertFalse(self.settings.exists())
 
     def test_initialization_lock_is_released_while_app_remains_running(self):
-        app = subprocess.Popen([*self.command, "--hold"], env=self.env, text=True,
+        app = subprocess.Popen([*self.command, "--", "--hold"], env=self.env, text=True,
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             self.assertTrue(select.select([app.stdout], [], [], 5)[0], "AppImage did not start")
