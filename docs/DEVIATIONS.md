@@ -34,6 +34,10 @@ For every additional deviation, document:
 - **Security and cost effects:**
 - **Reviewer approval and date:**
 
+## Shared Comfy default path (Issue #131)
+
+The shipped Comfy template uses name `StudioComfyUI` and path `/studio/apps/comfyui/main/StudioComfyUI`. Deployment uses the existing `--set-default` selector to capture actual registration or manifest metadata. This is a name/path change; the existing helper behavior and RES 2026.06 remain unchanged.
+
 ## Historical warning
 
 Earlier custom Image Builder and v0.6.0 systemd-bootstrap implementations diverged substantially from RES and encountered repeated build failures, including a custom service ordering cycle. These are *not* approved deviations and should not be reused as the canonical implementation.

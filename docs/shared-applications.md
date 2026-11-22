@@ -98,12 +98,12 @@ The profile is installed before VS Code needs to exist, independently of optiona
 
 ## ComfyUI on a replacement GPU workstation
 
-[Issue #131](https://github.com/vision-kwest/studio-workstation/issues/131) adds `scripts/comfy-desktop/studio-comfy` and two small configuration templates. Use the shared **ComfyUI** launcher for the first Desktop launch on a fresh workstation. The helper registers the existing **Studio ComfyUI** installation, selects shared storage, and uses Desktop's native startup preference to open that instance. It does not install or download ComfyUI, Python, models or custom nodes.
+[Issue #131](https://github.com/vision-kwest/studio-workstation/issues/131) adds `scripts/comfy-desktop/studio-comfy` and two small configuration templates. Use the shared **ComfyUI** launcher for the first Desktop launch on a fresh workstation. The helper registers the selected shared instance, selects shared storage, and uses Desktop's native startup preference to open that instance. It does not install or download ComfyUI, Python, models or custom nodes.
 
 | Shared location | Purpose |
 |---|---|
 | `/studio/apps/comfy-desktop/current/Comfy-Desktop.AppImage` | Existing Desktop executable; the `current` symlink pattern is retained |
-| `/studio/apps/comfyui/main/Studio ComfyUI (1)` | Existing standalone installation, including its environment and native user/workflow directory; preserve this exact path |
+| `/studio/apps/comfyui/main/StudioComfyUI` | Default standalone installation, including its environment and native user/workflow directory; select another valid path with `--set-default` |
 | `/studio/models/comfyui` | Model library and default download destination |
 | `/studio/projects/comfyui/input`, `/studio/projects/comfyui/output` | Shared inputs and generated outputs |
 | `/studio/projects/comfyui/workflows` | Existing exported workflow files |
@@ -115,8 +115,8 @@ An ordinary launch seeds only missing `~/.config/comfyui-desktop-2/settings.json
 After installing another standalone instance on EFS, run this as the ordinary desktop user, supplying its full installation path:
 
 ```bash
-/studio/bin/COMFY --set-default \
-  "/studio/apps/comfyui/main/Studio ComfyUI (1)"
+/studio/bin/studio-comfy --set-default \
+  "/studio/apps/comfyui/main/StudioComfyUI"
 ```
 
 The command checks that the target is under `/studio` and has the standalone environment, `ComfyUI/main.py`, and virtual-environment Python. It uses matching local Desktop registration metadata when available, otherwise the target's `manifest.json`. It atomically replaces only the shared `installations.json` beside the helper, then exits. It does not launch Desktop or modify local configuration. A missing/incomplete target or unusable metadata leaves the previous shared selection intact.
@@ -155,11 +155,13 @@ desktop-file-validate /studio/share/applications/menulibre-comfyui.desktop
 
 The no-clobber template copy preserves a previously selected shared default when updating the helper. Keep the helper beside its templates: COMFY delegates to it without copying its registration logic. The legacy `/studio/bin/studio-comfy` link remains available to existing launchers.
 
+When adopting `StudioComfyUI`, `cp -n` preserves the deployed selection, so you must run `--set-default` with the new path shown above to capture its actual registry or manifest metadata. With Desktop fully closed, run `--update` on each existing workstation, then verify the retained instance and its data before deleting the old installation. The helper changes registrations; it does not move or copy installation files.
+
 Replacement workstations reuse those shared files automatically through the existing application-menu integration. The helper checks the shared app, environment and storage paths before creating local configuration; an unavailable path stops launch instead of allowing Desktop to select local fallback storage. It serializes initialization with a local lock, releases it before launching Desktop, and retains the already-required `--no-sandbox` argument. This disables Electron's sandbox; it does not alter the system's AppArmor policy. Errors go to stderr and, when available, a native Zenity dialog.
 
 **Scope:** Ordinary launches seed missing files; `--update` explicitly applies the current shared instance selection to an existing workstation while Desktop is closed. Other existing preferences, including storage paths and onboarding state, remain local; use Desktop's GUI to change those. If an installation moves, select its new path with `--set-default` and run `--update` on workstations that should adopt it. The helper does not synchronize live Desktop sessions or coordinate concurrent installation updates.
 
-**Acceptance:** On a fresh GPU workstation, launch **ComfyUI** from GNOME search, confirm that Studio ComfyUI opens without onboarding or Add Existing Instance, load an existing shared workflow, and generate an image into the shared output directory. Quit Desktop fully, launch again, and confirm local preferences remain. The operator has already reported successful manual reuse of the shared installation/models/workflows/output on a replacement; automatic first-launch acceptance is a separate check. Do not run a second backend against an installation currently being used for this test: native launch preparation can modify that shared environment before checking its port.
+**Acceptance:** On a fresh GPU workstation, launch **ComfyUI** from GNOME search, confirm that the selected shared instance opens without onboarding or Add Existing Instance, load an existing shared workflow, and generate an image into the shared output directory. Quit Desktop fully, launch again, and confirm local preferences remain. The operator has already reported successful manual reuse of the shared installation/models/workflows/output on a replacement; automatic first-launch acceptance is a separate check. Do not run a second backend against an installation currently being used for this test: native launch preparation can modify that shared environment before checking its port.
 
 **Rollback:** Restore `menulibre-comfyui.desktop.before-studio-comfy` over the shared launcher (or set its Command back to `/studio/apps/comfy-desktop/current/Comfy-Desktop.AppImage --no-sandbox`). Keep the shared installation and data. Seeded local profiles remain ordinary Desktop configuration and continue to work without the helper.
 

@@ -130,7 +130,7 @@ class StudioEnvironmentTests(unittest.TestCase):
                  ("BLENDER", "apps/blender/current/blender", ["--background", "scene file.blend"], []),
                  ("COMFY", "apps/comfy-desktop/launcher/studio-comfy", ["--update"], []),
                  ("COMFY", "apps/comfy-desktop/launcher/studio-comfy",
-                  ["--set-default", "/studio/apps/comfyui/Studio ComfyUI (1)"], [])]
+                  ["--set-default", "/studio/apps/comfyui/main/StudioComfyUI"], [])]
         for name, target, arguments, prefix in cases:
             with self.subTest(wrapper=name, arguments=arguments):
                 native = self.payload(self.shared / target)
