@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+if [ ! -e "$config_dir/opencode.json" ] && [ ! -L "$config_dir/opencode.json" ] &&
+   [ ! -e "$config_dir/opencode.jsonc" ] && [ ! -L "$config_dir/opencode.jsonc" ]; then
+  test -r /studio/apps/opencode/config/opencode.json || {
+    echo 'Shared OpenCode settings are missing: /studio/apps/opencode/config/opencode.json' >&2
+    exit 1
+  }
+  mkdir -p "$config_dir"
+  ln -s /studio/apps/opencode/config/opencode.json "$config_dir/opencode.json"
+fi
+exec /studio/apps/opencode/current/opencode "$@"

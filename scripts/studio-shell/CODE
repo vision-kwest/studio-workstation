@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+mkdir -p /studio/apps/vscode/extensions
+exec /studio/apps/vscode/current/bin/code --extensions-dir /studio/apps/vscode/extensions "$@"

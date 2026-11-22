@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+export OLLAMA_MODELS=/studio/models/ollama
+mkdir -p "$OLLAMA_MODELS"
+exec /usr/local/bin/studio-rez-env ollama -- ollama "$@"

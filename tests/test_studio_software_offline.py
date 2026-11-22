@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -105,8 +106,11 @@ class SoftwareRetryCases(unittest.TestCase):
         for source, target in [("/opt/studio/packages", "packages"), ("/etc/fstab", "fstab"),
                                ("/etc/apparmor.d/studio-vscode", "vscode.apparmor"),
                                ("/etc/studio-software-release.env", "absent-release.env"),
+                               ("/usr/local/bin/studio", "shell-command"),
                                ("/studio", "studio")]:
-            code = code.replace(source, str(self.root / target))
+            # Match the mount prefix, not the final name in /studio/bin/studio.
+            code = (re.sub(r"(?<![\w/])/studio\b", str(self.root / target), code)
+                    if source == "/studio" else code.replace(source, str(self.root / target)))
         (self.root / "fstab").touch()
         return '''mount.efs() { :; }
 systemctl() { :; }
@@ -123,6 +127,7 @@ getent() { printf 'workstation:x:2000:2000::/home/workstation:/bin/bash\\n'; }
 runuser() { HOME="$TEST_HOME" bash -se; }
 menulibre() { :; }
 desktop-file-validate() { :; }
+rg() { :; }
 chown() { :; }
 apparmor_parser() { :; }
 aws() { echo 'Unexpected Rez download' >&2; return 99; }

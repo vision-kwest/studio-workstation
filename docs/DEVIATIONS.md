@@ -34,6 +34,10 @@ For every additional deviation, document:
 - **Security and cost effects:**
 - **Reviewer approval and date:**
 
+## Shared Comfy default path (Issue #131)
+
+The shipped Comfy template uses name `StudioComfyUI` and path `/studio/apps/comfyui/main/StudioComfyUI`. Deployment uses the existing `--set-default` selector to capture actual registration or manifest metadata. This is a name/path change; the existing helper behavior and RES 2026.06 remain unchanged.
+
 ## Historical warning
 
 Earlier custom Image Builder and v0.6.0 systemd-bootstrap implementations diverged substantially from RES and encountered repeated build failures, including a custom service ordering cycle. These are *not* approved deviations and should not be reused as the canonical implementation.
@@ -53,3 +57,9 @@ release notification, not manual upgrades or APT security-update policy. These
 preferences are local and precede the first GNOME session. RES 2026.06 commit
 `1f526a241fb293a29fb018f08ccf81c100c05a42` installers, driver handling and reboot
 continuation remain unchanged; this does not resolve later kernel/driver mismatch.
+
+## Studio application shell (Issue #140)
+
+The optional software layer adds `studio env`, a child Bash shell, and small uppercase wrappers for the existing shared application paths. The existing Comfy helper and its registration/default/update behavior are reused unchanged. OpenCode seeds only an individual global configuration link; application databases and service state remain local. OLLAMA resolves the existing Rez package and shared models without starting a server.
+
+The post-DCV setup creates the user-owned shared command/project directories, adds the local `studio` symlink and installs Ubuntu's `ripgrep` alongside the existing menu utilities. These precede optional Rez. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` installers, DCV/GPU behavior, reboot continuation and workstation lifecycle remain unchanged. Source verification and offline checks do not establish live desktop acceptance; the implementation PR records that evidence separately.
