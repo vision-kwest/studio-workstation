@@ -388,18 +388,20 @@ timer before restarting. Assignment does not impose the old acceptance-test
 headroom limits. Unsupported networking, unknown ownership or failed recovery
 is an error, not a successful handoff.
 
-Certificate renewal/export authorization is exact-session scoped to current owner
-and pending destination. The existing pinned AWCP installer and activation are reused;
-only after successful transfer is previous-owner export access revoked. Cached
-certificates may remain on a former owner, but it has no ongoing export permission.
+Certificate renewal/export authorization uses exact-session grants for the current
+owner and pending destination. The existing pinned AWCP installer and activation
+are reused; a completed CLI transfer or manual release revokes previous-owner export
+access. Cached certificates may remain on a former owner after that cleanup, but
+it has no ongoing export permission.
 Stale grants from terminated owners are reconciled against actual EC2 identity.
 Rollback never steals the EIP from an unexpected new owner. CLI stop/destroy releases
 the selected owner's association; it does not choose a CPU to receive it. With the
 [shared cleanup stack](independent-eip.md#automatic-release-after-stopping) deployed,
 native automatic stop also releases the address once its owner is verified stopped.
 Events trigger cleanup, with a one-minute reconciliation fallback; release is
-asynchronous. The next CLI claim reconciles the former owner's certificate grant
-and metadata before assigning the free address. Start claims a free hostname;
+asynchronous. Automatic release retains the stopped former owner's exact-session
+certificate grant and metadata until the next CLI claim reconciles them before
+assigning the free address. Start claims a free hostname;
 explicit assignment remains available for an intentional transfer or retry.
 
 ## Publisher
