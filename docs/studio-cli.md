@@ -68,7 +68,8 @@ a new native deployment identity; a stale safety stack must first be reconciled.
 
 Create is billable unless `--dry-run` is present. The default DCV TCP/8443 CIDR is
 `0.0.0.0/0` with a warning; use `--client-cidr YOUR_PUBLIC_IP/32` to restrict it.
-There is no public-DCV acknowledgment flag and no SSH ingress. A restricted CIDR
+There is no public-DCV acknowledgment flag. Future CPU/GPU desktops also open
+SSH TCP/22 from `0.0.0.0/0`. `--client-cidr` controls only DCV; its restricted CIDR
 must include the network from which endpoint checks/browser connections run.
 
 CPU/GPU create/start claims the shared hostname automatically when unassigned,
@@ -99,6 +100,45 @@ Use `--no-studio-software` to skip the optional Rez setup while retaining shared
 `--rez-version-id`/`--rez-sha256` pairs remain compatible; partial pairs and opt-out
 conflicts are rejected. Software setup completes asynchronously after DCV; a helper
 failure reports incomplete software setup while the desktop remains available.
+
+### SSH access
+
+[Issue #70](https://github.com/vision-kwest/studio-workstation/issues/70) makes SSH
+available by default on new CPU/GPU desktops. After DCV readiness, the existing
+setup service configures and enables Ubuntu's native `ssh.service` on each boot,
+before attempting the EFS mount. This also applies with `--no-studio-software`.
+The service permits only the UID 2000 desktop account (`workstation` in CLI creates),
+requires public-key authentication, disables password, keyboard-interactive and
+root login, and permits TCP forwarding with `GatewayPorts no`.
+
+SSHD retains the local `.ssh/authorized_keys` and `.ssh/authorized_keys2` files
+and also reads the local `.ssh/authorized_keys.studio`. After EFS is ready, setup
+copies `/studio/config/ssh/authorized_keys` into that separate local file. Seed
+the shared source once with the approved **public** key so replacement desktops
+can accept the same client. The private key stays on the Mac. Keep the local key
+path owned by root or the desktop account and not writable by group or others.
+SSHD does not read through the shared mount: its existing root ownership/mode is
+incompatible with OpenSSH `StrictModes` and remains unchanged.
+
+Connect from the Mac using the current public IP shown by `status`, or the stable
+hostname only when that workstation owns it:
+
+```bash
+ssh workstation@PUBLIC_IPV4
+```
+
+Use the existing SSH agent or `-i` with your local private-key path. A fresh
+workstation needs its first successful EFS copy before the shared key works;
+copied keys then survive EFS outages. Setup/reboot refreshes the copy when EFS is
+available. To revoke a key, remove its line from the shared source, refresh setup
+on each workstation, and remove any duplicate from the other local authorized-key
+files. Editing EFS alone does not revoke existing local copies. SSM remains the
+administrative recovery path.
+
+Updating source changes future creates, not existing instance security groups or
+their installed setup scripts. The publisher keeps its existing supplied security
+group and SSM access. Native SSH login, forwarding and reboot persistence must be
+verified on the deployed change; a listening port alone is not authentication proof.
 
 ### Desktop administrator access
 

@@ -42,7 +42,7 @@
     "WorkstationSG": {
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
-        "GroupDescription": "DCV TCP 8443 from configurable IPv4 CIDR (public by default); no inbound SSH",
+        "GroupDescription": "DCV TCP 8443 from configurable IPv4 CIDR; key-authenticated SSH TCP 22 from all IPv4 addresses",
         "VpcId": {
           "Ref": "VpcId"
         },
@@ -54,6 +54,12 @@
             "CidrIp": {
               "Ref": "ClientCidr"
             }
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 22,
+            "ToPort": 22,
+            "CidrIp": "0.0.0.0/0"
           }
         ]
       }

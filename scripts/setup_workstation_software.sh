@@ -1,5 +1,5 @@
 #!/bin/bash
-# Nonblocking shared storage and application menus, followed by optional Rez.
+# Nonblocking SSH, shared storage and application menus, followed by optional Rez.
 set -euo pipefail
 exec >>/var/log/studio-software-setup.log 2>&1
 for _ in $(seq 1 120); do
@@ -7,6 +7,23 @@ for _ in $(seq 1 120); do
   sleep 5
 done
 test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock || { echo "DCV not ready"; exit 1; }
+# RES attempts to disable SSH; restore the approved native service after readiness.
+desktop_user=$(getent passwd 2000 | cut -d: -f1)
+desktop_home=$(getent passwd 2000 | cut -d: -f6)
+cat >/etc/ssh/sshd_config.d/00-studio.conf <<STUDIO_SSH
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+AllowTcpForwarding yes
+GatewayPorts no
+AllowUsers $desktop_user
+AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2 .ssh/authorized_keys.studio
+STUDIO_SSH
+# Native ssh.service creates /run/sshd before its own ExecStartPre validation.
+systemctl enable --now ssh.service
+/usr/sbin/sshd -t
+systemctl reload ssh.service
 # The Studio CLI installs the official EFS client via AWS SSM Distributor.
 # The immutable Rez bundle intentionally does not contain a .deb package.
 # This service retries until the independently managed helper is available.
@@ -45,8 +62,12 @@ if test -e /studio || test -L /studio; then
 else
   ln -s "$shared" /studio
 fi
+# Keep native StrictModes and local access even when EFS is unavailable later.
+if test -f /studio/config/ssh/authorized_keys; then
+  install -d -m 0700 -o 2000 -g 2000 "$desktop_home/.ssh"
+  install -m 0600 -o 2000 -g 2000 /studio/config/ssh/authorized_keys "$desktop_home/.ssh/authorized_keys.studio"
+fi
 # MenuLibre and GNOME use this native user directory; only launchers are shared.
-desktop_user=$(getent passwd 2000 | cut -d: -f1)
 runuser -u "$desktop_user" -- bash -se <<'STUDIO_APPLICATIONS'
 mkdir -p /studio/bin /studio/projects /studio/share/applications /studio/share/icons "$HOME/.local/share"
 applications="$HOME/.local/share/applications"

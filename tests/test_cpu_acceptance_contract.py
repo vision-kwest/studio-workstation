@@ -25,7 +25,10 @@ class DeploymentAcceptanceContracts(unittest.TestCase):
         for invalid in ("999.999.999.999/32","1.2.3.4/33","not-a-cidr"):
             self.assertIsNone(re.fullmatch(cidr["AllowedPattern"],invalid))
         ingress=template["Resources"]["WorkstationSG"]["Properties"]["SecurityGroupIngress"]
-        self.assertEqual(ingress,[{"IpProtocol":"tcp","FromPort":8443,"ToPort":8443,"CidrIp":{"Ref":"ClientCidr"}}])
+        self.assertEqual(ingress,[
+            {"IpProtocol":"tcp","FromPort":8443,"ToPort":8443,"CidrIp":{"Ref":"ClientCidr"}},
+            {"IpProtocol":"tcp","FromPort":22,"ToPort":22,"CidrIp":"0.0.0.0/0"},
+        ])
     def test_instance_remains_single_machine(self):
         template=json.loads((ROOT/"runtime/workstation-template.json").read_text())
         self.assertEqual(template["Resources"]["Workstation"]["Type"],"AWS::EC2::Instance")

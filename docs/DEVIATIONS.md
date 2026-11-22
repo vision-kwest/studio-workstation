@@ -42,6 +42,37 @@ The shipped Comfy template uses name `StudioComfyUI` and path `/studio/apps/comf
 
 The renderer adds the selected CPU/GPU desktop account to Ubuntu's native `sudo` group after account creation, including an existing-account bootstrap retry. Initial password locking/enrollment and other group memberships are preserved. Ubuntu's password-required sudo policy is reused. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` and its standalone bootstrap, driver handling, DCV and reboot continuation remain unchanged; the standalone path already skips directory-service sudoers configuration. Live desktop password authentication remains a separate acceptance check.
 
+## Default desktop SSH access (Issue #70)
+
+The owner approved public IPv4 SSH for all future CPU/GPU desktops. The existing
+workstation security group adds TCP/22 from `0.0.0.0/0`; `ClientCidr` remains the
+DCV-only selector. Publisher retains its supplied security group and SSM bootstrap.
+
+RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` calls
+[`restrict_ssh.configure(session_owner=True)`](https://github.com/aws/res/blob/1f526a241fb293a29fb018f08ccf81c100c05a42/source/idea/idea-bootstrap/src/ideabootstrap/ssh/restrict_ssh.py)
+then [`disable_ssh.configure()`](https://github.com/aws/res/blob/1f526a241fb293a29fb018f08ccf81c100c05a42/source/idea/idea-bootstrap/src/ideabootstrap/ssh/disable_ssh.py).
+The latter attempts to disable/stop `sshd` socket/service aliases and catches errors.
+Those archive contents remain unchanged. After DCV readiness, the existing
+`scripts/setup_workstation_software.sh` applies the approved native sshd settings
+and enables Ubuntu's `ssh.service` on each boot before its EFS mount attempt.
+This reuses the existing setup service without a new RES archive or service.
+
+The effective policy requires public keys for the UID 2000 desktop account,
+disables password, keyboard-interactive and root login, enables TCP forwarding
+with `GatewayPorts no`, and retains local authorized-key files alongside
+the separate local `.ssh/authorized_keys.studio`. After EFS is ready, setup copies
+the public-key source `/studio/config/ssh/authorized_keys` into that local file.
+Live inspection found the EFS mount root owned by UID/GID `1000:1000`, mode `2775`,
+while its shared subtree is `2000:2000`, mode `2755`. Direct sshd reads through that
+mount would violate native `StrictModes`; the local copy preserves shared ownership
+and permissions. SSH starts before EFS, and a previously copied key survives an EFS
+outage. Copies refresh during setup/reboot when the source is available; revocation
+requires refreshing every workstation and removing any duplicate local key.
+Only approved public keys are shared; private keys stay on the client.
+DCV authentication, GPU initialization and native reboot continuation are preserved.
+The implementation PR records offline checks and actual login/forwarding/reboot
+acceptance separately; this entry does not claim those tests have passed.
+
 ## Larger GPU workstation size (Issue #149)
 
 The existing persistent GPU profile also accepts `g4dn.2xlarge` in the CLI,

@@ -9,6 +9,36 @@ ROOT = Path(__file__).resolve().parents[1]
 BUCKET = "studio-workstation-releases-401233741942-us-east-1"
 
 class StudioSoftwareContract(unittest.TestCase):
+    def test_cpu_gpu_templates_include_default_ssh_with_and_without_rez(self):
+        import tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "template.json"
+            for profile in ("cpu", "gpu"):
+                for rez in (False, True):
+                    with self.subTest(profile=profile, rez=rez):
+                        prefix = (render_workstation.PINNED_GPU_PREFIX if profile == "gpu"
+                                  else "releases/v0.1.3/res-2026.06")
+                        args = ["render", "--profile", profile, "--bucket", BUCKET,
+                                "--prefix", prefix, "--output", str(output)]
+                        if profile == "gpu":
+                            args += ["--lifecycle", "persistent"]
+                        if rez:
+                            args += ["--rez-version-id", "Version.1", "--rez-sha256", "a" * 64]
+                        with patch("sys.argv", args):
+                            render_workstation.main()
+                        resources = json.loads(output.read_text())["Resources"]
+                        self.assertIn({"IpProtocol":"tcp","FromPort":22,"ToPort":22,
+                                       "CidrIp":"0.0.0.0/0"},
+                                      resources["WorkstationSG"]["Properties"]["SecurityGroupIngress"])
+                        data = resources["Workstation"]["Properties"]["UserData"]["Fn::Base64"]["Fn::Sub"]
+                        self.assertLessEqual(len(data.encode()), 16384)
+                        subprocess.run(["bash", "-n"], input=data, text=True, check=True)
+                        self.assertLess(data.index('echo "DCV not ready"'),
+                                        data.index("systemctl enable --now ssh.service"))
+                        self.assertLess(data.index("systemctl reload ssh.service"),
+                                        data.index("command -v mount.efs"))
+
     def test_desktop_sudo_grant_covers_creation_retries_and_failures(self):
         stubs = r'''id() { test "$EXISTS" = 1 || return 1; printf '2000\n'; }
 groupadd() { printf 'groupadd %s\n' "$*"; }
@@ -111,6 +141,59 @@ class SoftwareRetryCases(unittest.TestCase):
         return subprocess.run(["bash", "-c", "set -euo pipefail\n" + code],
                               env={**os.environ, **env}, capture_output=True, text=True)
 
+    def test_ssh_configuration_retries_and_reloads_only_after_validation(self):
+        config = self.root / "sshd.conf"
+        code = self.source.split("# RES attempts to disable SSH;", 1)[1]
+        code = code[code.index("desktop_user="):].split("# The Studio CLI installs", 1)[0]
+        code = code.replace("/etc/ssh/sshd_config.d/00-studio.conf", str(config))
+        code = code.replace("/usr/sbin/sshd", "sshd")
+        stubs = '''getent() { printf 'artist:x:2000:2000::%s:/bin/bash\\n' "$TEST_HOME"; }
+systemctl() { printf 'systemctl %s\\n' "$*"; }
+sshd() { printf 'sshd %s\\n' "$*"; return "$VALIDATION_STATUS"; }
+'''
+        expected = {"PubkeyAuthentication": "yes", "PasswordAuthentication": "no",
+                    "KbdInteractiveAuthentication": "no", "PermitRootLogin": "no",
+                    "AllowTcpForwarding": "yes", "GatewayPorts": "no", "AllowUsers": "artist",
+                    "AuthorizedKeysFile": ".ssh/authorized_keys .ssh/authorized_keys2 .ssh/authorized_keys.studio"}
+        for status in (0, 0, 42):
+            with self.subTest(status=status):
+                result = self.execute(stubs + code, TEST_HOME=str(self.root / "home"),
+                                      VALIDATION_STATUS=str(status))
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertEqual(dict(line.split(" ", 1) for line in config.read_text().splitlines()), expected)
+                calls = ["systemctl enable --now ssh.service", "sshd -t"]
+                if status == 0:
+                    calls.append("systemctl reload ssh.service")
+                self.assertEqual(result.stdout.splitlines(), calls)
+
+    def test_shared_ssh_keys_refresh_separately_and_survive_missing_efs(self):
+        home, shared = self.root / "home", self.root / "shared-keys"
+        ssh = home / ".ssh"
+        ssh.mkdir(parents=True)
+        local = ssh / "authorized_keys"
+        local.write_text("existing-local-key\n")
+        code = self.source.split("# Keep native StrictModes", 1)[1]
+        code = code[code.index("if test -f"):].split("# MenuLibre and GNOME", 1)[0]
+        code = code.replace("/studio/config/ssh/authorized_keys", str(shared))
+        # Exercise real install/modes as the test runner, without changing host users.
+        code = code.replace("-o 2000 -g 2000", "")
+        code = 'desktop_home="$TEST_HOME"\n' + code
+        expected = None
+        for content in ("shared-key\n", "shared-key\n", None, "rotated-key\n", ""):
+            with self.subTest(content=content):
+                if content is None:
+                    shared.unlink()
+                else:
+                    shared.write_text(content)
+                    expected = content
+                result = self.execute(code, TEST_HOME=str(home))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(local.read_text(), "existing-local-key\n")
+                copied = ssh / "authorized_keys.studio"
+                self.assertEqual(copied.read_text(), expected)
+                self.assertEqual(copied.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(ssh.stat().st_mode & 0o777, 0o700)
+
     def test_fstab_rejects_duplicate_and_conflict_even_with_expected(self):
         import shlex
         mount = self.root / "packages"
@@ -145,7 +228,9 @@ class SoftwareRetryCases(unittest.TestCase):
             code = (re.sub(r"(?<![\w/])/studio\b", str(self.root / target), code)
                     if source == "/studio" else code.replace(source, str(self.root / target)))
         (self.root / "fstab").touch()
-        return '''mount.efs() { :; }
+        return '''desktop_user=workstation
+desktop_home="$TEST_HOME"
+mount.efs() { :; }
 systemctl() { :; }
 findmnt() {
   case "$2" in

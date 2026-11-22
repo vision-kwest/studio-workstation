@@ -21,6 +21,7 @@ flowchart TD
   Release --> CFN
   CFN --> EC2["Standalone Ubuntu EC2 workstation"]
   EC2 --> DCV["Amazon DCV browser/client"]
+  SSH["SSH client and private key"] --> EC2
   SSM["AWS Systems Manager"] -. "Administrative session" .-> EC2
   CFN --> Scheduler["Configured auto-stop schedule"]
   Scheduler -. "Stop at selected deadline" .-> EC2
@@ -35,7 +36,7 @@ The GPU AMI `ami-027c98f85b155c2ac` passed Image Builder 0.1.11/1, but its **Ima
 - DCV authenticates the local Linux `workstation` user, **not AWS IAM**. A unique password is enrolled interactively through SSM.
 - Each timed workstation has a tag-conditioned Scheduler role permitted to stop its
   instance. Ordinary expiration cannot delete the stack or terminate the instance.
-- Public TCP 8443 may be explicitly enabled for access from changing networks; this is internet exposure, not identity-aware private networking. No inbound SSH. Trusted TLS and broader production access remain deferred.
+- New CPU/GPU desktops expose DCV TCP 8443 and SSH TCP 22 publicly by default. `--client-cidr` restricts DCV only. SSH requires the desktop owner's public key, with password/root login disabled and TCP forwarding enabled. Setup copies `/studio/config/ssh/authorized_keys` into local `~/.ssh/authorized_keys.studio` after EFS is ready; private keys stay on the client. Existing local copies survive EFS outages and refresh during setup/reboot. Publisher retains its separate security group and SSM access.
 - Manual stop and expiration keep the stack and saved EBS files. Start rearms
   a verified timer and may change the public IP. Explicit `destroy --delete-stack`
   deletes the local resources and owned timer, with absence checks.
