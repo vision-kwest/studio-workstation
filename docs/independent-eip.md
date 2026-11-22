@@ -38,12 +38,17 @@ still stops EC2 independently if hostname cleanup fails. Release is asynchronous
 use `hostname status` to check availability and CloudWatch's `/aws/lambda/studio-dcv-stop-release`
 log group to investigate cleanup errors. Logs expire after seven days.
 
+The role's only EC2 write action is `DisassociateAddress`, with separate grants for
+the configured, tagged EIP and network interfaces in the configured VPC. `VpcId`
+defaults to `vpc-01bbe5d01838f70b2`; existing workstation interfaces need no new tags.
+
 Automatic cleanup retains the former-owner tag and certificate grant for the CLI's
 existing reconciliation on the next claim; `owner: null` with a `stale_owner_tag`
 means the address is free. This avoids background certificate changes racing an
 intentional transfer. Manual CLI stop still reconciles permissions immediately.
-The template parameters allow an isolated test allocation; deployment stack names
-must be at most 64 characters. Roll back by deleting only `studio-dcv-stop-release`;
+For an isolated test, override `AllocationId`, `Hostname` and `OwnerStack`, plus
+`VpcId` if using a different VPC. Deployment stack names must be at most 64
+characters. Roll back by deleting only `studio-dcv-stop-release`;
 the EIP allocation, DNS, workstation disks and native stop timers remain intact.
 
 See [Studio CLI](studio-cli.md#explicit-trusted-hostname) for the full owner, TLS,

@@ -1,10 +1,29 @@
 """One hostname owner; automatic claims and explicit transfers preserve reachability."""
 import copy
 import datetime as dt
+import json
 import unittest
 from unittest.mock import patch
 from runtime import independent_eip as eip, dcv_endpoint, pr65_one_shot_guard as guard
-from workstation_fake import AWS, NOW, h, acm, inventory, tagdict, tags, missing, release_stopped_hostname
+from workstation_fake import AWS, NOW, ROOT, h, acm, inventory, tagdict, tags, missing, resolve, release_stopped_hostname
+
+
+class HostnameReleasePolicyTests(unittest.TestCase):
+    def test_disassociation_policy_covers_exact_eip_and_vpc_scoped_interfaces(self):
+        template = json.loads((ROOT / 'infra/workstation-hostname-stop-release.json').read_text())
+        values = {**{k: v['Default'] for k, v in template['Parameters'].items()},
+                  'AWS::Partition': 'aws', 'AWS::Region': h.REGION, 'AWS::AccountId': h.ACCOUNT, 'AWS::StackName': 'release-test'}
+        policy = template['Resources']['ExecutionRole']['Properties']['Policies'][0]['PolicyDocument']
+        statements = resolve(policy, values)['Statement']
+        grants = {s['Resource']: s['Condition'] for s in statements if s['Action'] == 'ec2:DisassociateAddress'}
+        prefix = f'arn:aws:ec2:{h.REGION}:{h.ACCOUNT}:'
+        self.assertEqual(grants, {
+            prefix + 'elastic-ip/' + values['AllocationId']: {'StringEquals': {'ec2:ResourceTag/StudioIssue': '43',
+                'ec2:ResourceTag/StudioDcvHostname': values['Hostname'], 'ec2:ResourceTag/StudioOwnerStack': values['OwnerStack']}},
+            prefix + 'network-interface/*': {'ArnEquals': {'ec2:Vpc': prefix + 'vpc/' + values['VpcId']}}})
+        actions = {a for s in statements for a in ([s['Action']] if isinstance(s['Action'], str) else s['Action'])}
+        self.assertEqual(actions - {'ec2:DescribeAddresses', 'ec2:DescribeInstances', 'cloudformation:DescribeStackResource',
+                                    'logs:CreateLogStream', 'logs:PutLogEvents'}, {'ec2:DisassociateAddress'})
 
 
 class HostnameTests(unittest.TestCase):

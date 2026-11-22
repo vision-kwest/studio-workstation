@@ -4,7 +4,8 @@
   "Parameters": {
     "AllocationId": {"Type": "String", "Default": "eipalloc-0879a34aa1a1298dd", "AllowedPattern": "eipalloc-[0-9a-f]{8,17}"},
     "Hostname": {"Type": "String", "Default": "dcv.kwesidavis.com", "MinLength": 1},
-    "OwnerStack": {"Type": "String", "Default": "studio-independent-dcv", "MinLength": 1}
+    "OwnerStack": {"Type": "String", "Default": "studio-independent-dcv", "MinLength": 1},
+    "VpcId": {"Type": "AWS::EC2::VPC::Id", "Default": "vpc-01bbe5d01838f70b2"}
   },
   "Resources": {
     "ExecutionRole": {
@@ -28,6 +29,9 @@
                "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/${AllocationId}"},
                "Condition": {"StringEquals": {"ec2:ResourceTag/StudioIssue": "43",
                  "ec2:ResourceTag/StudioDcvHostname": {"Ref": "Hostname"}, "ec2:ResourceTag/StudioOwnerStack": {"Ref": "OwnerStack"}}}},
+              {"Effect": "Allow", "Action": "ec2:DisassociateAddress",
+               "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"},
+               "Condition": {"ArnEquals": {"ec2:Vpc": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/${VpcId}"}}}},
               {"Effect": "Allow", "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
                "Resource": {"Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}:*"}}
             ]
