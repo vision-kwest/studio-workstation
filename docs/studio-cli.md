@@ -94,6 +94,33 @@ Use `--no-studio-software` to skip the optional Rez setup while retaining shared
 conflicts are rejected. Software setup completes asynchronously after DCV; a helper
 failure reports incomplete software setup while the desktop remains available.
 
+### Desktop administrator access
+
+New CPU/GPU workstations add the selected desktop account to Ubuntu's `sudo` group.
+Commands such as `sudo apt-get install ripgrep` use the same Linux password as DCV
+login. Initial password enrollment remains required; AWS credentials are separate.
+
+For an existing running workstation, open its administrative SSM session:
+
+```bash
+python3 studio workstation connect NAME --ssm
+```
+
+In that guest session, run the following (substitute a custom desktop username if used):
+
+```bash
+sudo usermod -aG sudo workstation
+sudo -l -U workstation
+```
+
+Log out of the GNOME desktop and log back in to refresh group membership;
+disconnecting the DCV viewer alone keeps the existing desktop session. In the
+fresh desktop terminal, `sudo -k` followed by `sudo -v` checks your password, and
+`sudo id -u` should print `0`. Updating the repository or restarting an existing
+workstation does not rerun initial account setup. Roll back only this grant from
+the administrative SSM session with `sudo gpasswd -d workstation sudo`, then log
+in again. Publisher accounts and shared EFS permissions are unchanged.
+
 ### Ubuntu update prompts
 
 New CPU/GPU desktop accounts disable Ubuntu's automatic update-notifier windows,

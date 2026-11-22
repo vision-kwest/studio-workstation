@@ -49,6 +49,7 @@ ln -sf /dev/null "$HOME/.config/systemd/user/update-notifier-release.path"
 ln -sf /dev/null "$HOME/.config/systemd/user/update-notifier-release.service"
 STUDIO_UPDATE_PROMPTS
 fi
+usermod -aG sudo USERNAME
 cat > /etc/studio-standalone.env <<'CONFIG'
 STUDIO_STANDALONE=true
 STUDIO_APP_PACKAGE_URI=APPURI

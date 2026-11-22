@@ -55,6 +55,9 @@ sudo passwd workstation
 ```
 
 Open the URL from `connect art` and log in as `workstation`, not with AWS credentials.
+New CPU/GPU desktop accounts can use `sudo` with that same Linux password for
+system administration. See [administrator access](docs/studio-cli.md#desktop-administrator-access)
+for the one-time change on an existing workstation.
 Raw-IP HTTPS has an expected certificate warning; unreachable DCV is not success.
 
 To inspect ownership, intentionally transfer the hostname, or retry a failed
