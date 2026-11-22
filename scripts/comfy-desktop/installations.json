@@ -1,9 +1,9 @@
 [
   {
     "id": "inst-1795224457905",
-    "name": "Studio ComfyUI",
+    "name": "StudioComfyUI",
     "createdAt": "2026-11-21T01:27:37.905Z",
-    "installPath": "/studio/apps/comfyui/main/Studio ComfyUI (1)",
+    "installPath": "/studio/apps/comfyui/main/StudioComfyUI",
     "sourceId": "standalone",
     "status": "installed",
     "launchArgs": "--enable-manager --database-url @DATABASE_URL@",

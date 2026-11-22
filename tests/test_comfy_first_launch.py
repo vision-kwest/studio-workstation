@@ -32,7 +32,7 @@ class ComfyFirstLaunch(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.home, self.studio = self.root / "home with spaces", self.root / "studio"
-        self.install = self.studio / "apps/comfyui/main/Studio ComfyUI (1)"
+        self.install = self.studio / "apps/comfyui/main/StudioComfyUI"
         for path in (self.install / "standalone-env", self.install / "ComfyUI/.venv/bin",
                      self.studio / "models/comfyui", self.studio / "projects/comfyui/input",
                      self.studio / "projects/comfyui/output"):
@@ -210,7 +210,7 @@ class ComfyFirstLaunch(unittest.TestCase):
                     self.assertEqual(path.read_bytes(), contents)
 
     def second_install(self):
-        target = self.install.with_name("Studio ComfyUI (2)")
+        target = self.install.with_name("Alternate instance with spaces")
         shutil.copytree(self.install, target)
         return target
 
