@@ -389,8 +389,8 @@ def command(args):
         gpu = args.profile == "gpu"
         expiration = expiration_options(args)
         if gpu:
-            if args.region != "us-east-1" or args.image_id != GPU_AMI or args.instance_type != "g4dn.xlarge":
-                raise ValueError("GPU profile requires us-east-1, validated AMI and g4dn.xlarge")
+            if args.region != "us-east-1" or args.image_id != GPU_AMI:
+                raise ValueError("GPU profile requires us-east-1 and the validated AMI")
             if args.version != "v0.1.3" or args.bucket != DEFAULT_BUCKET:
                 raise ValueError("GPU profile requires the pinned release; --version is CPU-only")
         if args.instance_type not in PROFILES[args.profile]["instance_types"]:
@@ -615,7 +615,7 @@ def main(argv=None):
             s.add_argument("--vpc-id", default=DEFAULT_VPC)
             s.add_argument("--subnet-id", default=DEFAULT_SUBNET)
             s.add_argument("--instance-profile")
-            s.add_argument("--instance-type", choices=["m7i.large", "m7i.xlarge", "g4dn.xlarge"])
+            s.add_argument("--instance-type", choices=["m7i.large", "m7i.xlarge", "g4dn.xlarge", "g4dn.2xlarge"])
             s.add_argument("--disk-size", type=int)
             s.add_argument("--security-group-id", help="Publisher's existing EFS client security group")
             s.add_argument("--client-cidr", default="0.0.0.0/0")

@@ -30,7 +30,7 @@ def fixture(name, number, instance_type="g4dn.xlarge", state="running"):
 
 class InventoryTests(unittest.TestCase):
     def setUp(self):
-        data = [fixture("studio-gpu-art", 1), fixture("studio-gpu-ai", 2),
+        data = [fixture("studio-gpu-art", 1), fixture("studio-gpu-ai", 2, "g4dn.2xlarge"),
                 fixture("studio-cpu-dev", 3, "m7i.large", "stopped")]
         self.stacks, self.vms, records = map(list, zip(*data))
         self.resources = {s["StackId"]: [r] for s, r in zip(self.stacks, records)}
@@ -58,6 +58,8 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertEqual(by_name["studio-gpu-art"]["dcv_url"], "https://203.0.113.1:8443")
         self.assertEqual(by_name["studio-gpu-ai"]["dcv_url"], "https://" + H.HOST + ":8443")
+        for name in ("studio-gpu-art", "studio-gpu-ai"):
+            self.assertEqual(by_name[name]["profile"], "gpu")
         self.assertIsNone(by_name["studio-cpu-dev"]["dcv_url"])
         self.assertEqual(sum(row["hostname_owner"] for row in rows), 1)
         self.assertTrue(all(row["dcv_verified"] is False for row in rows))

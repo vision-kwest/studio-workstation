@@ -29,7 +29,7 @@ For the current user-facing commands, use [Studio CLI](studio-cli.md). Earlier s
 
 ## Runtime and GPU integration
 
-- The renderer in [`runtime/render_workstation.py`](../runtime/render_workstation.py) accepts `--profile gpu`, limits GPU instance type to `g4dn.xlarge`, and invokes the original RES 2026.06 host installer with `-g NVIDIA`.
+- The renderer in [`runtime/render_workstation.py`](../runtime/render_workstation.py) accepts `--profile gpu` and invokes the original RES 2026.06 host installer with `-g NVIDIA`. Ordinary persistent workstations allow `g4dn.xlarge` (default) or `g4dn.2xlarge`, selected at creation with `--instance-type`; the historical temporary Task 7 path remains limited to `g4dn.xlarge`.
 - **Issue #100 installer published, GPU acceptance pending:** new version `sgj5wZfqMTRUImWDDbxR08emK755aU7A` (SHA-256 `6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d`); it retains the original RES signed NVIDIA download plus a checksum/kernel-module check. See [runtime release provenance](../runtime/README.md).
 - New GPU launches use a driver-free Canonical base and let the **existing RES post-reboot installer** install NVIDIA GRID; the immutable RES archives, RES cloud-init/reboot continuation and DCV setup remain unchanged. Verify guest S3 driver download rights and `nvidia-smi` after the final reboot before promoting this candidate.
 - `STUDIO_STANDALONE=true` isolates RES-only broker, cluster-setting and external identity dependencies while using DCV Linux `system` authentication.

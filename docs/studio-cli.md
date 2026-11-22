@@ -24,11 +24,16 @@ python3 studio workstation profiles
 python3 studio workstation profile gpu
 ```
 
-`cpu` supports `m7i.large`/`m7i.xlarge`; `gpu` supports `g4dn.xlarge` with pinned
+`cpu` supports `m7i.large`/`m7i.xlarge`; `gpu` supports `g4dn.xlarge`/`g4dn.2xlarge` with pinned
 Ubuntu 24.04/RES 2026.06 releases. `publisher` uses `m7i.large`, its dedicated
 `StudioEfsCiPublisher` instance profile, existing EFS client group and SSM; it has
 no desktop or trusted-hostname claim. Discovery does not start resources or fetch
 live prices. The supported region, subnet and IAM profiles remain validated inputs.
+
+GPU defaults to `g4dn.xlarge`. Select `--instance-type g4dn.2xlarge` during creation
+for the larger size within the same profile. Existing workstations are not resized.
+Use the updated CLI for all lifecycle operations on the larger size; `start`,
+`stop`, `status` and expiration commands discover its size from AWS.
 
 ## Studio environment on the desktop
 
@@ -47,6 +52,7 @@ exit
 ```bash
 python3 studio workstation create --profile gpu --name art --dry-run
 python3 studio workstation create --profile gpu --name art --expires-in 8h
+python3 studio workstation create --profile gpu --name resolve --instance-type g4dn.2xlarge --expires-in 8h
 python3 studio workstation create --profile cpu --name ayo --expires-in 4h
 python3 studio workstation list
 python3 studio workstation status art

@@ -42,6 +42,17 @@ The shipped Comfy template uses name `StudioComfyUI` and path `/studio/apps/comf
 
 The renderer adds the selected CPU/GPU desktop account to Ubuntu's native `sudo` group after account creation, including an existing-account bootstrap retry. Initial password locking/enrollment and other group memberships are preserved. Ubuntu's password-required sudo policy is reused. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` and its standalone bootstrap, driver handling, DCV and reboot continuation remain unchanged; the standalone path already skips directory-service sudoers configuration. Live desktop password authentication remains a separate acceptance check.
 
+## Larger GPU workstation size (Issue #149)
+
+The existing persistent GPU profile also accepts `g4dn.2xlarge` in the CLI,
+CloudFormation parameters and inventory ownership checks, including inventory's
+legacy profile inference. `g4dn.xlarge` remains the default; the historical Task 7
+temporary renderer and launcher retain their original size restriction. Both
+sizes use the same RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`
+GPU-family path, pinned archives, AMI, storage and native stop schedules. No
+upstream provisioning code changes. Issue #149 records validation results and
+remaining live acceptance.
+
 ## Historical warning
 
 Earlier custom Image Builder and v0.6.0 systemd-bootstrap implementations diverged substantially from RES and encountered repeated build failures, including a custom service ordering cycle. These are *not* approved deviations and should not be reused as the canonical implementation.

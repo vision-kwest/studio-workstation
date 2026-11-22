@@ -43,7 +43,8 @@ class GpuProfileContracts(unittest.TestCase):
             self.assertEqual(p["InstanceInitiatedShutdownBehavior"], "stop")
             self.assertTrue(p["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
             self.assertTrue(p["BlockDeviceMappings"][0]["Ebs"]["Encrypted"])
-            self.assertEqual(t["Parameters"]["InstanceType"]["AllowedValues"], ["g4dn.xlarge"])
+            self.assertEqual(t["Parameters"]["InstanceType"]["AllowedValues"], ["g4dn.xlarge", "g4dn.2xlarge"])
+            self.assertEqual(t["Parameters"]["InstanceType"]["Default"], "g4dn.xlarge")
             self.assertNotIn("Task7", {tag["Key"] for tag in p["Tags"]})
             self.assertIn("-g NVIDIA", p["UserData"]["Fn::Base64"]["Fn::Sub"])
 
@@ -82,7 +83,9 @@ class GpuProfileContracts(unittest.TestCase):
                    "--bucket", "studio-release-bucket", "--prefix", "releases/test/res-2026.06",
                    "--output", str(out)]):
                 render_main()
-            p = json.loads(out.read_text())["Resources"]["Workstation"]["Properties"]
+            template = json.loads(out.read_text())
+            self.assertEqual(template["Parameters"]["InstanceType"]["AllowedValues"], ["g4dn.xlarge"])
+            p = template["Resources"]["Workstation"]["Properties"]
             self.assertEqual(p["InstanceInitiatedShutdownBehavior"], "terminate")
             self.assertTrue(p["BlockDeviceMappings"][0]["Ebs"]["DeleteOnTermination"])
             self.assertIn("Task7", {tag["Key"] for tag in p["Tags"]})

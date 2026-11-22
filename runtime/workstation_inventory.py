@@ -9,7 +9,7 @@ from runtime import issue43_hostname_handoff as hostname
 PROFILES = {
     "cpu": {"instance_types": ["m7i.large", "m7i.xlarge"], "desktop": True,
             "instance_profile": "StudioWorkstationSSMRole", "expires_minutes": None},
-    "gpu": {"instance_types": ["g4dn.xlarge"], "desktop": True,
+    "gpu": {"instance_types": ["g4dn.xlarge", "g4dn.2xlarge"], "desktop": True,
             "instance_profile": "StudioWorkstationSSMRole", "expires_minutes": 150},
     "publisher": {"instance_types": ["m7i.large"], "desktop": False,
                   "instance_profile": "StudioEfsCiPublisher", "expires_minutes": None},
@@ -106,7 +106,7 @@ def list_workstations(aws, region):
                      address.get("PublicIp") == ip and
                      hostname._tags(address).get("StudioDcvInstanceId") == iid)
         instance_type = params.get("InstanceType", vm.get("InstanceType"))
-        profile = tags.get("StudioProfile") or ("gpu" if instance_type == "g4dn.xlarge" else (
+        profile = tags.get("StudioProfile") or ("gpu" if instance_type in PROFILES["gpu"]["instance_types"] else (
             "cpu" if instance_type in ("m7i.large", "m7i.xlarge") else "unknown"))
         rows.append({"name": stack["StackName"], "stack_id": stack["StackId"],
                      "stack_status": stack["StackStatus"], "profile": profile,
