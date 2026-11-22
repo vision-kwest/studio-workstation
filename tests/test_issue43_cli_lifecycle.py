@@ -113,6 +113,13 @@ class NamedLifecycleTests(CliFixture):
         self.assertFalse(json.loads(self.invoke('profile','publisher'))['profiles']['publisher']['desktop'])
         self.assertEqual(self.aws.calls,[])
 
+    def test_instance_type_must_match_profile_before_any_aws_call(self):
+        for profile, instance_type in (('cpu', 'g4dn.2xlarge'), ('publisher', 'g4dn.2xlarge'),
+                                       ('gpu', 'm7i.large'), ('gpu', 'g4dn.4xlarge')):
+            with self.subTest(profile=profile, instance_type=instance_type), self.assertRaises(SystemExit):
+                self.invoke('create', '--profile', profile, '--instance-type', instance_type)
+        self.assertEqual(self.aws.calls, [])
+
     def test_generated_names_for_every_profile_are_unique(self):
         with patch.object(cli,'command') as dispatch:
             for profile in ('cpu','gpu','publisher'):
@@ -476,13 +483,21 @@ class AutoStopLifecycleTests(CliFixture):
 
 class ProfileAutoStopTests(CliFixture):
     def test_every_profile_supports_four_hour_stop_extension_restart_and_destroy(self):
-        for profile in inventory.PROFILES:
-            with self.subTest(profile=profile):
+        cases = [(profile, None) for profile in inventory.PROFILES] + [('gpu', 'g4dn.2xlarge')]
+        for profile, instance_type in cases:
+            with self.subTest(profile=profile, instance_type=instance_type):
                 self.now = NOW
-                name = 'ayo' if profile == 'cpu' else profile + '-timer'
+                name = 'ayo' if profile == 'cpu' else profile + '-timer' + ('-2x' if instance_type else '')
                 self.aws.calls.clear()
-                selected = self.create(profile, name, '--expires-in', '4h')
+                options = ('--instance-type', instance_type) if instance_type else ()
+                selected = self.create(profile, name, '--expires-in', '4h', *options)
                 self.assertEqual(selected['profile'], profile)
+                expected_type = instance_type or ('g4dn.xlarge' if profile == 'gpu' else
+                                                  inventory.PROFILES[profile]['instance_types'][0])
+                self.assertEqual(selected['vm']['InstanceType'], expected_type)
+                listed = next(r for r in json.loads(self.invoke('list')) if r['name'] == name)
+                self.assertEqual((listed['profile'], listed['instance'], listed['state']),
+                                 (profile, selected['instance'], 'running'))
                 if profile == 'publisher':
                     self.assertIsNone(selected['dcv_url'])
                     self.assertFalse(any(c[0] == 'ssm' or c[1] in ('associate-address', 'disassociate-address')
@@ -503,10 +518,12 @@ class ProfileAutoStopTests(CliFixture):
                 self.aws.fire_schedule(timer)
                 stopped = json.loads(self.invoke('status', name))
                 self.assertEqual((stopped['state'], stopped['expiration']['status']), ('stopped', 'expired'))
+                self.assertEqual(self.aws.volumes, volumes)
                 self.assertEqual(self.aws.stacks[selected['stack_id']]['StackStatus'], 'CREATE_COMPLETE')
                 for options, minutes in (((), 240), (('--expires-in', '8h'), 480)):
                     self.aws.calls.clear()
                     started = json.loads(self.invoke('start', name, *options))
+                    self.assertEqual((started['state'], started['instance']), ('running', selected['instance']))
                     self.assertEqual(started['expiration']['duration_minutes'], minutes)
                     self.assertEqual(dt.datetime.fromisoformat(started['expiration']['stop_at']),
                                      self.now + dt.timedelta(minutes=minutes))

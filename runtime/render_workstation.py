@@ -138,6 +138,7 @@ def main():
         template["Resources"]["Workstation"]["Properties"]["Tags"][0]["Value"] = "studio-workstation-res-gpu"
         if a.lifecycle == "persistent":
             instance["InstanceInitiatedShutdownBehavior"] = "stop"
+            template["Parameters"]["InstanceType"]["AllowedValues"] = ["g4dn.xlarge", "g4dn.2xlarge"]
         else:
             instance["Tags"].extend([{"Key":"Task7","Value":"PR61"},{"Key":"Issue","Value":"60"}])
     elif a.lifecycle != "temporary":
