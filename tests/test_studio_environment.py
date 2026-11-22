@@ -145,27 +145,34 @@ class StudioEnvironmentTests(unittest.TestCase):
 
     def test_ollama_uses_production_resolver_and_shared_models(self):
         resolved_bin = self.root / "resolved-bin"
+        # Rez 3.4.0 runs a shell command after resolution; direct argv exec
+        # misses the expansion boundary. Exercise its --command semantics.
         self.write(self.rez, '#!/bin/sh\n'
-                   '[ "$1" = ollama ] && [ "$2" = -- ] || exit 90\n'
-                   'shift 2\n'
+                   '[ "$#" = 5 ] && [ "$1" = ollama ] || exit 90\n'
+                   '[ "$2" = --shell ] && [ "$3" = bash ] || exit 90\n'
+                   '[ "$4" = --command ] || exit 90\n'
                    f'export PATH={shlex.quote(str(resolved_bin))}\n'
-                   'exec "$@"\n')
+                   'exec /bin/bash --noprofile --norc -c "$5"\n')
         self.write(resolved_bin / "ollama", f"#!{sys.executable}\n" + CAPTURE +
                    "import shutil\n"
                    "print(json.dumps({'opencode': shutil.which('opencode')}))\n")
         opencode = self.shared / "apps/opencode/current/opencode"
         self.env["OLLAMA_MODELS"] = "/unwanted/local/models"
-        arguments = ["run", "model:tag", "two words", "$(echo literal)", ""]
+        cases = [[], ["serve"], ["-h"], ["--help"], ["list"],
+                 ["run", "model:tag", "two words", "$(echo literal)", "",
+                  "$PATH", "`echo literal`", "single'quote", 'double"quote',
+                  "line one\nline two"]]
         for installed in (False, True):
-            with self.subTest(opencode_installed=installed):
-                if installed:
-                    self.payload(opencode)
-                result = self.run_command([self.bin / "OLLAMA", *arguments])
-                self.assertEqual(result.returncode, 0, result.stderr)
-                row, resolution = self.rows(result)
-                self.assertEqual(row["args"], arguments)
-                self.assertEqual(row["env"]["OLLAMA_MODELS"], str(self.shared / "models/ollama"))
-                self.assertEqual(resolution["opencode"], str(opencode) if installed else None)
+            if installed:
+                self.payload(opencode)
+            for arguments in cases:
+                with self.subTest(opencode_installed=installed, arguments=arguments):
+                    result = self.run_command([self.bin / "OLLAMA", *arguments])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    row, resolution = self.rows(result)
+                    self.assertEqual(row["args"], arguments)
+                    self.assertEqual(row["env"]["OLLAMA_MODELS"], str(self.shared / "models/ollama"))
+                    self.assertEqual(resolution["opencode"], str(opencode) if installed else None)
         self.assertTrue((self.shared / "models/ollama").is_dir())
 
     def test_opencode_missing_shared_settings_then_first_launch_and_retry(self):

@@ -52,7 +52,7 @@ New workstations receive the local `studio` link during setup, before optional R
 | `CODE` | Launches shared VS Code with `/studio/apps/vscode/extensions` |
 | `COMFY` | Delegates to the existing helper, including `--set-default PATH` and `--update` |
 | `OPENCODE` | Launches `/studio/apps/opencode/current/opencode`; seeds the shared global settings link only when local JSON/JSONC configuration is absent |
-| `OLLAMA` | Uses the installed `studio-rez-env ollama -- ollama` command and shared model directory; requires the existing Rez/Ollama installation |
+| `OLLAMA` | Resolves the existing Ollama Rez package, uses `/studio/models/ollama`, and enables native OpenCode discovery |
 | `UNITY` | Prepares missing local Unity/VS Code settings and the shared .NET environment, then launches the existing shared Unity Hub |
 
 Each wrapper forwards its arguments. Outside the Studio shell, use its absolute path, such as `/studio/bin/CODE`. Use the same absolute paths for Menu Editor commands; `CODE` entries may append `%F`, while terminal commands omit it. Set **Run in terminal** for a terminal application such as OPENCODE. Existing legacy launchers remain usable.
@@ -100,6 +100,8 @@ The model directory is chosen by the Ollama server when it starts. Running `OLLA
 ### Connect OpenCode to a local Ollama model
 
 A running Ollama server needs an installed completion model before OpenCode can offer a local choice. OpenCode 2.3.2 [discovers these models automatically](https://opencode.ai/docs/providers/#ollama) at `http://127.0.0.1:11434`; an empty `OLLAMA list` means there is nothing local to select yet.
+
+The model files are shared, but each workstation needs its own running Ollama server. OpenCode discovers models through that local server, not by scanning EFS. On a replacement workstation, start the server and use `OLLAMA list` to confirm the existing models; there is no need to download `qwen3:8b` again. `OLLAMA -h` should display help even before the server is running.
 
 Start the server in one terminal, or reuse the server if it is already running:
 

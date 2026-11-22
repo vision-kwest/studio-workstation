@@ -1,10 +1,10 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 export OLLAMA_MODELS=/studio/models/ollama
 mkdir -p "$OLLAMA_MODELS"
-exec /usr/local/bin/studio-rez-env ollama -- /bin/sh -c '
+printf -v studio_ollama_command '%q ' ollama "$@"
+exec /usr/local/bin/studio-rez-env ollama --shell bash --command '
 if [ -x /studio/apps/opencode/current/opencode ]; then
   export PATH="/studio/apps/opencode/current:$PATH"
 fi
-exec ollama "$@"
-' ollama "$@"
+exec '"$studio_ollama_command"
