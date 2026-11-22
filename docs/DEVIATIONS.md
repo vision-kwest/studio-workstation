@@ -53,6 +53,15 @@ GPU-family path, pinned archives, AMI, storage and native stop schedules. No
 upstream provisioning code changes. Issue #149 records validation results and
 remaining live acceptance.
 
+## Creation failure diagnostics (Issue #151)
+
+The guarded-create error path reports CloudFormation resource failure reasons and
+the observed workload state, including native rollback to `DELETE_COMPLETE` and
+the existing explicit orphan-safeguard cleanup command. Best-effort diagnostics
+follow the ownership-checked stop attempt and retain the original failure if
+event lookup fails. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`,
+bootstrap, native rollback, stop permissions and cleanup behavior are unchanged.
+
 ## Historical warning
 
 Earlier custom Image Builder and v0.6.0 systemd-bootstrap implementations diverged substantially from RES and encountered repeated build failures, including a custom service ordering cycle. These are *not* approved deviations and should not be reused as the canonical implementation.

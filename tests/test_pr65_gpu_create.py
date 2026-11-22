@@ -49,17 +49,25 @@ class CreationTests(unittest.TestCase):
         self.assertFalse(aws.vms)
         self.assertFalse(aws.schedules)
 
-    def test_timer_setup_failure_stops_compute_and_preserves_local_work(self):
-        for failed_action in ('get-schedule', 'update-schedule'):
+    def test_timer_setup_failure_reports_stop_outcome_and_preserves_local_work(self):
+        for failed_action, stop_fails in (('get-schedule', False), ('update-schedule', False), ('get-schedule', True)):
             aws = AWS()
             def fail(service, action, args):
                 if (service, action) == ('scheduler', failed_action):
                     raise RuntimeError('injected timer failure')
+                if (service, action) == ('ec2', 'stop-instances') and stop_fails:
+                    raise RuntimeError('injected stop failure')
             aws.before = fail
-            with self.subTest(action=failed_action), self.assertRaises(RuntimeError):
+            cause = 'Auto-stop update failed; original schedule is unchanged' if failed_action == 'update-schedule' else 'injected timer failure'
+            with self.subTest(action=failed_action, stop_fails=stop_fails), self.assertRaisesRegex(RuntimeError, cause) as raised:
                 aws.desktop()
+            self.assertEqual('stopping is unverified: injected stop failure' in str(raised.exception), stop_fails)
+            self.assertEqual('; stop requested' in str(raised.exception), not stop_fails)
             self.assertTrue(aws.vms and aws.volumes and aws.schedules)
-            self.assertTrue(all(vm['State']['Name'] == 'stopped' for vm in aws.vms.values()))
+            self.assertTrue(all(vm['State']['Name'] == ('running' if stop_fails else 'stopped') for vm in aws.vms.values()))
+            stop = next(i for i, c in enumerate(aws.calls) if c[:2] == ('ec2', 'stop-instances'))
+            events = next(i for i, c in enumerate(aws.calls) if c[:2] == ('cloudformation', 'describe-stack-events'))
+            self.assertLess(stop, events)
             self.assertFalse(any(c[1] in ('delete-stack', 'terminate-instances', 'delete-volume') for c in aws.calls))
 
     def test_scope_permissions_only_allow_stopping_exact_owned_instances(self):

@@ -4,6 +4,7 @@ import copy
 import datetime as dt
 import io
 import json
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -240,6 +241,46 @@ class NamedLifecycleTests(CliFixture):
         self.create('gpu','art');self.aws.calls=[]
         with self.assertRaises(SystemExit):self.create('gpu','art')
         self.assertEqual(self.aws.writes,[])
+
+    def test_quota_rollback_reports_resource_failure_and_safe_retry_to_cli(self):
+        native_create, dispatch = self.aws.native_create, self.aws.dispatch
+        reason = 'You have requested more vCPU capacity than your current vCPU limit of 8 allows.'
+        for denied in (False, True):
+            name = 'editor-' + ('denied' if denied else 'events')
+            arn = f'arn:aws:cloudformation:{h.REGION}:{h.ACCOUNT}:stack/{name}/quota-failure'
+            def rejected_create(stack, body, parameters, stack_tags):
+                if stack != name:
+                    return native_create(stack, body, parameters, stack_tags)
+                self.aws.stacks[arn] = {'StackName': name, 'StackId': arn, 'StackStatus': 'DELETE_COMPLETE',
+                                        'Tags': tags(stack_tags)}
+                self.aws.resources[arn] = [{'LogicalResourceId': 'Workstation', 'ResourceType': 'AWS::EC2::Instance',
+                                            'ResourceStatus': 'DELETE_COMPLETE', 'PhysicalResourceId': ''}]
+                return {'StackId': arn}
+            def failed_call(service, action, args):
+                if service == 'cloudformation' and arn in args:
+                    if action == 'wait':
+                        raise subprocess.CalledProcessError(255, ['aws', 'cloudformation', 'wait'],
+                                                            stderr='Waiter failed: DELETE_COMPLETE')
+                    if action == 'describe-stack-events':
+                        if denied:
+                            raise RuntimeError('AccessDenied reading events')
+                        return {'StackEvents': [{'LogicalResourceId': 'Workstation', 'ResourceType': 'AWS::EC2::Instance',
+                                                 'ResourceStatus': 'CREATE_FAILED', 'ResourceStatusReason': reason,
+                                                 'ResourceProperties': 'private-user-data'}]}
+                return dispatch(service, action, args)
+            with (self.subTest(events_denied=denied),
+                  patch.object(self.aws, 'native_create', side_effect=rejected_create),
+                  patch.object(self.aws, 'dispatch', side_effect=failed_call), self.assertRaises(SystemExit)):
+                self.invoke('create', '--profile', 'gpu', '--name', name, '--instance-type', 'g4dn.2xlarge', '--expires', '4h')
+            message = self.errors.getvalue()
+            self.assertIn('CloudFormation=DELETE_COMPLETE, EC2=missing', message)
+            self.assertIn('Waiter failed: DELETE_COMPLETE', message)
+            self.assertEqual('Workstation: ' + reason in message, not denied)
+            self.assertIn(f'python3 studio workstation destroy {name} --delete-stack', message)
+            self.assertNotIn('preserved workstation', message)
+            self.assertNotIn('private-user-data', message)
+            self.assertFalse(self.aws.vms)
+            self.assertFalse(any(c[1] in ('stop-instances', 'terminate-instances', 'delete-stack') for c in self.aws.calls))
 
     def test_dry_run_validates_without_creating_any_resource(self):
         for profile in ('cpu','gpu','publisher'):

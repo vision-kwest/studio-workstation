@@ -185,6 +185,21 @@ interrupted safety-only stacks; `destroy NAME --delete-stack` reconciles them
 only after exact-scope absence checks. Legacy untagged stacks are diagnostic inventory,
 not automatically adopted or deleted by the new lifecycle.
 
+### Failed initial creation
+
+When initial CloudFormation creation fails, the CLI reports the resource's AWS
+failure reason and observed stack state. Native rollback can delete the incomplete
+workstation while leaving its separate expiration-role stack. After confirming
+`DELETE_COMPLETE` and no remaining workstation, use `destroy NAME --delete-stack`
+to remove those safeguards before reusing the name. This explicit cleanup checks
+resource ownership and absence; it does not run automatically on a create error.
+
+GPU sizes share the regional **Running On-Demand G and VT instances** vCPU quota.
+A running `g4dn.xlarge` uses 4 vCPUs and `g4dn.2xlarge` needs 8, so running both
+requires at least 12. Free sufficient quota by stopping an unused GPU workstation,
+or request a quota increase before retrying. Optional failure diagnostics query
+CloudFormation events after the existing ownership-checked stop attempt.
+
 ### Progress during waits
 
 Commands print flushed progress to **stderr**, including the operation, selected
