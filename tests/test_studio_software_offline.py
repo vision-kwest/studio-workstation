@@ -9,6 +9,39 @@ ROOT = Path(__file__).resolve().parents[1]
 BUCKET = "studio-workstation-releases-401233741942-us-east-1"
 
 class StudioSoftwareContract(unittest.TestCase):
+    def test_desktop_sudo_grant_covers_creation_retries_and_failures(self):
+        stubs = r'''id() { test "$EXISTS" = 1 || return 1; printf '2000\n'; }
+groupadd() { printf 'groupadd %s\n' "$*"; }
+useradd() { printf 'useradd %s\n' "$*"; EXISTS=1; }
+passwd() { printf 'passwd %s\n' "$*"; }
+runuser() { printf 'runuser %s\n' "$*"; }
+usermod() { printf 'usermod %s\n' "$*"; return "$GRANT_STATUS"; }
+'''
+        creation = [
+            "groupadd --gid 2000 workstation",
+            "useradd --uid 2000 --gid 2000 --create-home --shell /bin/bash workstation",
+            "passwd -l workstation",
+            "runuser -u workstation -- bash -se",
+        ]
+        for profile in ("cpu", "gpu"):
+            rendered = render_workstation.render(
+                BUCKET, "releases/v0.1.3/res-2026.06", "workstation", profile)
+            start = rendered.index("set -e\nif ! id -u workstation")
+            account = rendered[start:rendered.index("cat > /etc/studio-standalone.env", start)]
+            for exists in (0, 1):
+                for grant_status in (0, 42):
+                    with self.subTest(profile=profile, exists=exists, grant_status=grant_status):
+                        result = subprocess.run(
+                            ["bash", "-c", stubs + account + "printf 'continued\\n'\n"],
+                            env={"PATH": "/usr/bin:/bin", "EXISTS": str(exists),
+                                 "GRANT_STATUS": str(grant_status)},
+                            capture_output=True, text=True)
+                        expected = ([] if exists else creation) + ["usermod -aG sudo workstation"]
+                        if grant_status == 0:
+                            expected += ["continued"]
+                        self.assertEqual(result.returncode, grant_status, result.stderr)
+                        self.assertEqual(result.stdout.splitlines(), expected)
+
     def test_shared_storage_is_rendered_without_optional_rez_pin(self):
         for profile in ("cpu", "gpu"):
             user_data = render_workstation.render(BUCKET, "releases/v0.1.3/res-2026.06", "workstation", profile)

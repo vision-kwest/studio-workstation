@@ -38,6 +38,10 @@ For every additional deviation, document:
 
 The shipped Comfy template uses name `StudioComfyUI` and path `/studio/apps/comfyui/main/StudioComfyUI`. Deployment uses the existing `--set-default` selector to capture actual registration or manifest metadata. This is a name/path change; the existing helper behavior and RES 2026.06 remain unchanged.
 
+## Desktop administrator access (Issue #144)
+
+The renderer adds the selected CPU/GPU desktop account to Ubuntu's native `sudo` group after account creation, including an existing-account bootstrap retry. Initial password locking/enrollment and other group memberships are preserved. Ubuntu's password-required sudo policy is reused. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` and its standalone bootstrap, driver handling, DCV and reboot continuation remain unchanged; the standalone path already skips directory-service sudoers configuration. Live desktop password authentication remains a separate acceptance check.
+
 ## Historical warning
 
 Earlier custom Image Builder and v0.6.0 systemd-bootstrap implementations diverged substantially from RES and encountered repeated build failures, including a custom service ordering cycle. These are *not* approved deviations and should not be reused as the canonical implementation.
