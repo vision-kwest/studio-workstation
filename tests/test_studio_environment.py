@@ -1,4 +1,5 @@
 """Run the Studio shell and wrappers against temporary homes and app payloads."""
+import base64
 import json
 from pathlib import Path
 import re
@@ -7,13 +8,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts/studio-shell"
 CAPTURE = """import json, os, sys
 keys = ('PATH', 'STUDIO_ENV', 'STUDIO_ROOT', 'STUDIO_PROJECTS', 'OLLAMA_MODELS',
         'SHELL_PREFERENCE', 'OBSERVED_PROMPT', 'SHELL_FLAGS', 'REZ_CONFIG_FILE',
-        'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME')
+        'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME', 'DOTNET_ROOT')
 print(json.dumps({'args': sys.argv[1:], 'cwd': os.getcwd(),
                   'env': {key: os.environ.get(key) for key in keys}}))
 """
@@ -203,6 +205,87 @@ class StudioEnvironmentTests(unittest.TestCase):
                 self.assertEqual(service.read_text(), '{"port":12345}')
                 self.assertEqual(set(folder.iterdir()), {config, service})
                 config.unlink()
+
+    def unity_payloads(self):
+        android = "unity/current/Editor/Data/PlaybackEngines/AndroidPlayer/"
+        paths = ["unity-hub/current/UnityHub.AppImage", "unity/current/Editor/Unity",
+                 "vscode/current/bin/code", "dotnet/dotnet"] + [android + name for name in
+                 ("SDK/platform-tools/adb", "NDK/ndk-build", "OpenJDK/bin/java")]
+        required = [self.payload(self.shared / "apps" / path) for path in paths]
+        required.append(self.write(self.shared / "apps" / android / "Tools/gradle/lib/gradle-launcher-test.jar", "Gradle"))
+        sdk = self.shared / "apps/dotnet/sdk/10.0.100"
+        sdk.mkdir(parents=True)
+        (self.shared / "apps/vscode/extensions").mkdir()
+        self.unity_prefs = self.home / ".local/share/unity3d/prefs"
+        self.unity_extensions = self.home / ".vscode/extensions"
+        return required + [sdk, self.shared / "apps/vscode/extensions"]
+
+    def test_unity_first_launch_retry_environment_and_arguments(self):
+        self.unity_payloads()
+        arguments = ["project with spaces", "$(echo literal)", ""]
+        for attempt in range(2):
+            result = self.run_command([self.bin / "UNITY", *arguments])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            row, = self.rows(result)
+            self.assertEqual(row["args"], arguments)
+            self.assertEqual(row["env"]["DOTNET_ROOT"], str(self.shared / "apps/dotnet"))
+            self.assertEqual(row["env"]["PATH"], row["env"]["DOTNET_ROOT"] + ":" + self.env["PATH"])
+            self.assertEqual(self.unity_extensions.resolve(), self.shared / "apps/vscode/extensions")
+            if attempt == 0:
+                original = self.unity_prefs.read_bytes()
+            self.assertEqual(self.unity_prefs.read_bytes(), original)
+        prefs = ET.fromstring(original)
+        self.assertEqual((prefs.tag, prefs.attrib), ("unity_prefs", {"version_major": "1", "version_minor": "1"}))
+        editor = prefs.find("pref[@name='kScriptsDefaultApp']")
+        self.assertEqual(editor.get("type"), "string")
+        self.assertEqual(base64.b64decode(editor.text).decode(), str(self.shared / "apps/vscode/current/bin/code"))
+
+    def test_unity_missing_prerequisites_do_not_change_local_configuration(self):
+        for required in self.unity_payloads():
+            with self.subTest(missing=required):
+                hidden = required.with_name("unavailable-" + required.name)
+                required.rename(hidden)
+                result = self.run_command([self.bin / "UNITY"])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.unity_prefs.parent.exists())
+                self.assertFalse(self.unity_extensions.parent.exists())
+                hidden.rename(required)
+
+    def test_unity_preserves_conflicting_extensions_and_invalid_preferences(self):
+        self.unity_payloads()
+        for kind in ("file", "directory", "link", "xml", "prefs-link"):
+            with self.subTest(conflict=kind):
+                target = self.unity_prefs if kind in ("xml", "prefs-link") else self.unity_extensions
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if "link" in kind:
+                    target.symlink_to(self.root / "missing-user-target")
+                else:
+                    self.write(target / "keep" if kind == "directory" else target, "existing data")
+                content = target / "keep" if target.is_dir() else target
+                before = target.readlink() if target.is_symlink() else content.read_bytes()
+                result = self.run_command([self.bin / "UNITY"])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(target.readlink() if target.is_symlink() else content.read_bytes(), before)
+                if target.is_dir():
+                    (target / "keep").unlink()
+                    target.rmdir()
+                else:
+                    target.unlink()
+
+    def test_unity_seeds_only_missing_preference_and_preserves_custom_or_empty_choice(self):
+        self.unity_payloads()
+        for value in (None, "", base64.b64encode(b"/custom/editor").decode()):
+            with self.subTest(editor=value):
+                entry = "" if value is None else f'<pref name="kScriptsDefaultApp" type="string">{value}</pref>'
+                original = '<unity_prefs version_major="1" version_minor="1"><pref name="theme" type="int">7</pref>' + entry + '</unity_prefs>'
+                self.write(self.unity_prefs, original)
+                result = self.run_command([self.bin / "UNITY"])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                prefs = ET.parse(self.unity_prefs).getroot()
+                self.assertEqual(prefs.find("pref[@name='theme']").text, "7")
+                self.assertIsNotNone(prefs.find("pref[@name='kScriptsDefaultApp']"))
+                if value is not None:
+                    self.assertEqual(self.unity_prefs.read_text(), original)
 
     def test_installer_link_retries_and_preserves_collisions(self):
         source = (ROOT / "scripts/setup_workstation_software.sh").read_text()

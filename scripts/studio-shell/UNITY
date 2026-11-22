@@ -1,0 +1,65 @@
+#!/usr/bin/python3
+"""Prepare local Unity preferences, then open the shared Unity Hub."""
+import base64
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+
+apps = Path("/studio/apps")
+hub = apps / "unity-hub/current/UnityHub.AppImage"
+editor = apps / "unity/current/Editor"
+code = apps / "vscode/current/bin/code"
+dotnet = apps / "dotnet"
+android = editor / "Data/PlaybackEngines/AndroidPlayer"
+shared_extensions = apps / "vscode/extensions"
+for executable in (hub, editor / "Unity", code, dotnet / "dotnet",
+                   android / "SDK/platform-tools/adb", android / "NDK/ndk-build",
+                   android / "OpenJDK/bin/java"):
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        sys.exit(f"UNITY: shared executable is unavailable: {executable}")
+if not shared_extensions.is_dir() or not any(p.is_dir() for p in (dotnet / "sdk").glob("10.*")):
+    sys.exit("UNITY: the shared VS Code extensions and .NET 10 SDK must be installed first.")
+if not any(p.is_file() for p in (android / "Tools/gradle/lib").glob("gradle-launcher-*.jar")):
+    sys.exit("UNITY: the Editor's bundled Gradle launcher is unavailable.")
+
+extensions = Path.home() / ".vscode/extensions"
+if extensions.exists() or extensions.is_symlink():
+    if not extensions.exists() or not extensions.samefile(shared_extensions):
+        sys.exit(f"UNITY: preserve and move the conflicting path before retrying: {extensions}")
+prefs = Path.home() / ".local/share/unity3d/prefs"
+if prefs.is_symlink():
+    sys.exit(f"UNITY: resolve the existing preferences symlink before retrying: {prefs}")
+try:
+    tree = ET.parse(prefs, parser=ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))) if prefs.exists() else ET.ElementTree(
+        ET.Element("unity_prefs", version_major="1", version_minor="1"))
+except (ET.ParseError, OSError) as error:
+    sys.exit(f"UNITY: cannot read existing preferences; left unchanged: {error}")
+root = tree.getroot()
+if root.tag != "unity_prefs" or root.attrib != {"version_major": "1", "version_minor": "1"}:
+    sys.exit(f"UNITY: unrecognized preferences format; left unchanged: {prefs}")
+seed_editor = root.find("pref[@name='kScriptsDefaultApp']") is None
+if seed_editor and subprocess.run(
+        ["pgrep", "-u", str(os.getuid()), "-x", "Unity"], stdout=subprocess.DEVNULL).returncode == 0:
+    sys.exit("UNITY: close the Unity Editor once before initializing its missing editor preference.")
+
+extensions.parent.mkdir(parents=True, exist_ok=True)
+if not extensions.exists():
+    extensions.symlink_to(shared_extensions)
+if seed_editor:
+    ET.SubElement(root, "pref", name="kScriptsDefaultApp", type="string").text = base64.b64encode(str(code).encode()).decode()
+    prefs.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=prefs.parent, prefix=".prefs-", delete=False) as temporary:
+        temporary_path = Path(temporary.name)
+        try:
+            tree.write(temporary, encoding="utf-8", xml_declaration=True)
+            temporary.flush()
+            os.replace(temporary_path, prefs)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+os.environ["DOTNET_ROOT"] = str(dotnet)
+os.environ["PATH"] = str(dotnet) + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin")
+os.execv(hub, [str(hub), *sys.argv[1:]])

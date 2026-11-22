@@ -28,7 +28,7 @@ All launchers and overrides saved in the linked applications directory are share
 
 ```bash
 mkdir -p /studio/bin /studio/projects /studio/apps/opencode/config
-install -m 755 scripts/studio-shell/{studio,BLENDER,CODE,COMFY,OPENCODE,OLLAMA} /studio/bin/
+install -m 755 scripts/studio-shell/{studio,BLENDER,CODE,COMFY,OPENCODE,OLLAMA,UNITY} /studio/bin/
 cp -n scripts/studio-shell/opencode.json /studio/apps/opencode/config/opencode.json
 ```
 
@@ -53,8 +53,41 @@ New workstations receive the local `studio` link during setup, before optional R
 | `COMFY` | Delegates to the existing helper, including `--set-default PATH` and `--update` |
 | `OPENCODE` | Launches `/studio/apps/opencode/current/opencode`; seeds the shared global settings link only when local JSON/JSONC configuration is absent |
 | `OLLAMA` | Uses the installed `studio-rez-env ollama -- ollama` command and shared model directory; requires the existing Rez/Ollama installation |
+| `UNITY` | Prepares missing local Unity/VS Code settings and the shared .NET environment, then launches the existing shared Unity Hub |
 
 Each wrapper forwards its arguments. Outside the Studio shell, use its absolute path, such as `/studio/bin/CODE`. Use the same absolute paths for Menu Editor commands; `CODE` entries may append `%F`, while terminal commands omit it. Set **Run in terminal** for a terminal application such as OPENCODE. Existing legacy launchers remain usable.
+
+### Unity on current and replacement workstations
+
+[Issue #153](https://github.com/vision-kwest/studio-workstation/issues/153) adds one shared `UNITY` wrapper. Install it with the commands above; current and future workstations use the same `/studio/bin/UNITY` file. No workstation provisioning change is required.
+
+Before changing local settings, the wrapper checks the existing shared Unity Hub AppImage, selected Editor, VS Code, .NET 10 SDK and the Editor's bundled Android tools. These applications and modules must already be installed; the wrapper does not download or update them.
+
+On launch, it:
+
+- Exports `DOTNET_ROOT` and the required `PATH` for Hub, the Editor and their child processes, including launches from GNOME.
+- Creates `~/.vscode/extensions` pointing to `/studio/apps/vscode/extensions` only when the local path is absent.
+- Seeds only a missing `kScriptsDefaultApp` preference in `~/.local/share/unity3d/prefs` with the shared VS Code path. Existing values, including an explicitly blank choice, are preserved.
+- Runs `/studio/apps/unity-hub/current/UnityHub.AppImage`, forwarding its arguments.
+
+Unity uses its native bundled Android SDK, NDK and JDK defaults; the wrapper does not add custom Android preference keys. Unity/Hub credentials, license state, caches and other local profile data remain local. No profile is copied from another workstation.
+
+The preference seed follows the **observed Unity 6000.3.29f1** Linux XML format, version `1.1`, with base64-encoded string values. Recheck that format when changing the shared Editor version; this is a source/configuration contract, not a claim of fresh-workstation acceptance.
+
+When adopting the wrapper on an existing workstation, save your work and quit Unity, Hub and VS Code normally once. Start Hub through `UNITY` so newly started processes inherit the environment; an already-running Hub or VS Code process retains its previous environment.
+
+```bash
+studio env
+UNITY
+```
+
+For the existing shared `/studio/share/applications/unityhub.desktop`, preserve a backup named `unityhub.desktop.before-UNITY` once, then set `Exec=/studio/bin/UNITY %u` and `TryExec=/studio/bin/UNITY`. Preserve the other fields, including its icon and URI handler, and validate the edited file with `desktop-file-validate`. This single shared launcher serves both existing and replacement workstations.
+
+On a fresh workstation, complete Hub sign-in and license activation normally. If Hub has not listed the shared Editor, use its native **Locate** action. These account and registration steps are not replaced by the wrapper.
+
+**Acceptance:** Verify first launch from GNOME and from a terminal, repeat-launch preservation, Unity opening a shared project, and Unity opening C# scripts in VS Code with the shared extensions and .NET SDK. Check Android tooling in the Editor when Android work is required. Offline checks and local setup probes do not establish these native application results; record actual observations separately.
+
+**Rollback:** Restore `unityhub.desktop.before-UNITY` over the shared launcher. Keep the shared applications, projects and local preferences. The small local settings created by the wrapper are ordinary application configuration.
 
 ### OpenCode settings and local state
 
