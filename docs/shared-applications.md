@@ -64,7 +64,33 @@ Keep OpenCode's database, credentials, caches and service state on local storage
 
 The model directory is chosen by the Ollama server when it starts. Running `OLLAMA list` or `OLLAMA run` does not change the model directory of an already-running server; verify its configuration separately.
 
-**Verification:** The command paths and configuration behavior are source verified. Real Ubuntu/DCV launches and replacement-workstation acceptance for Issue #140 remain separate from offline checks.
+### Connect OpenCode to a local Ollama model
+
+A running Ollama server needs an installed completion model before OpenCode can offer a local choice. OpenCode 2.3.2 [discovers these models automatically](https://opencode.ai/docs/providers/#ollama) at `http://127.0.0.1:11434`; an empty `OLLAMA list` means there is nothing local to select yet.
+
+Start the server in one terminal, or reuse the server if it is already running:
+
+```bash
+studio env
+OLLAMA serve
+```
+
+In another terminal, install a model once on EFS and launch OpenCode:
+
+```bash
+studio env
+OLLAMA pull qwen3:8b
+OLLAMA list
+OPENCODE
+```
+
+[Qwen3 8B](https://ollama.com/library/qwen3:8b) is an initial tool-capable example with an approximately 5.2 GB download. Select `qwen3:8b` under Ollama in OpenCode's `/models` picker. Discovery refreshes about every 30 seconds; reopen the picker after the download finishes. `OPENCODE models` lists the catalog from a terminal. Choose model size and context settings for the workstation's memory; discovering a model does not establish that every context length will fit.
+
+The OLLAMA wrapper also exposes `/studio/apps/opencode/current` to Ollama and its children when the native executable exists. It adds the path after Rez resolves the package environment, because Rez rebuilds PATH. This lets Ollama's **Launch OpenCode** menu reuse the shared binary. `OPENCODE` remains the uppercase Studio wrapper; no lowercase wrapper is installed. On a fresh local profile, run `OPENCODE --version` once before launching OpenCode through Ollama's menu so the existing shared-settings link is initialized. Ollama invokes the native executable directly.
+
+Model downloads follow an explicit pull or model selection; `OLLAMA run` can also download a missing model. Models in `/studio/models/ollama` remain available to replacement workstations using the same shared store.
+
+**Verification:** See [Issue #140](https://github.com/vision-kwest/studio-workstation/issues/140) for live shell activation evidence and [Issue #147](https://github.com/vision-kwest/studio-workstation/issues/147) for Ollama/OpenCode integration acceptance. GUI application and model-inference checks are separate from command resolution.
 
 ## Add an application through the GUI
 

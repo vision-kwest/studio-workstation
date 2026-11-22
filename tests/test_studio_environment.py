@@ -142,13 +142,28 @@ class StudioEnvironmentTests(unittest.TestCase):
         self.assertTrue((self.shared / "apps/vscode/extensions").is_dir())
 
     def test_ollama_uses_production_resolver_and_shared_models(self):
-        self.payload(self.rez)
+        resolved_bin = self.root / "resolved-bin"
+        self.write(self.rez, '#!/bin/sh\n'
+                   '[ "$1" = ollama ] && [ "$2" = -- ] || exit 90\n'
+                   'shift 2\n'
+                   f'export PATH={shlex.quote(str(resolved_bin))}\n'
+                   'exec "$@"\n')
+        self.write(resolved_bin / "ollama", f"#!{sys.executable}\n" + CAPTURE +
+                   "import shutil\n"
+                   "print(json.dumps({'opencode': shutil.which('opencode')}))\n")
+        opencode = self.shared / "apps/opencode/current/opencode"
         self.env["OLLAMA_MODELS"] = "/unwanted/local/models"
-        result = self.run_command([self.bin / "OLLAMA", "run", "model:tag", "two words"])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        row, = self.rows(result)
-        self.assertEqual(row["args"], ["ollama", "--", "ollama", "run", "model:tag", "two words"])
-        self.assertEqual(row["env"]["OLLAMA_MODELS"], str(self.shared / "models/ollama"))
+        arguments = ["run", "model:tag", "two words", "$(echo literal)", ""]
+        for installed in (False, True):
+            with self.subTest(opencode_installed=installed):
+                if installed:
+                    self.payload(opencode)
+                result = self.run_command([self.bin / "OLLAMA", *arguments])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                row, resolution = self.rows(result)
+                self.assertEqual(row["args"], arguments)
+                self.assertEqual(row["env"]["OLLAMA_MODELS"], str(self.shared / "models/ollama"))
+                self.assertEqual(resolution["opencode"], str(opencode) if installed else None)
         self.assertTrue((self.shared / "models/ollama").is_dir())
 
     def test_opencode_missing_shared_settings_then_first_launch_and_retry(self):
