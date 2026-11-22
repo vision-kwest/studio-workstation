@@ -14,6 +14,7 @@
 |---|---|
 | [Main README / Quick Start](../README.md) | Project state, first commands, key costs and access risks |
 | [Studio CLI](studio-cli.md) | **Canonical create, connect, automatic stop, restart, extension and explicit destroy commands** |
+| [SSH access](studio-cli.md#ssh-access) | Public TCP/22 default for future CPU/GPU desktops, shared public-key source and local-copy refresh |
 | [Shared application menus](shared-applications.md) | MenuLibre GUI workflow, shared launchers, migration and refresh |
 | [Shared EFS setup](efs-helper-install.md) | Writable `/studio`, EFS helper and dated CPU storage acceptance |
 | [GPU workstation profile](gpu-workstation-profile.md) | Tesla T4 / RES 2026.06 runtime, timer behavior and dated acceptance |

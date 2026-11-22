@@ -44,8 +44,11 @@ The normal `workstation` account can install and save files under `/studio` with
 Shared application launchers use MenuLibre (**Menu Editor**); see the
 [shared application guide](docs/shared-applications.md) for setup, GUI saves and refresh.
 Default DCV TCP/8443 is public, with a warning; restrict it using
-`--client-cidr YOUR_PUBLIC_IP/32`. No SSH ingress is needed. Run CLI endpoint checks
-from a network allowed by that CIDR.
+`--client-cidr YOUR_PUBLIC_IP/32`. Future CPU/GPU desktops also expose SSH TCP/22
+from `0.0.0.0/0`, using public-key authentication for `workstation`; that CIDR
+option restricts only DCV. Run CLI endpoint checks from a network allowed by the
+DCV CIDR. See [SSH access](docs/studio-cli.md#ssh-access) for the shared public-key
+source, local copies and refresh timing. DCV login remains independent of SSH.
 
 New desktops need a unique Linux password set interactively:
 

@@ -45,7 +45,10 @@ jobs:
           assert not unresolved, f"Unescaped CloudFormation substitutions: {unresolved[:15]}"
           assert len(u.encode())<=16384
           sg=t['Resources']['WorkstationSG']['Properties']['SecurityGroupIngress']
-          assert len(sg)==1 and sg[0]['FromPort']==8443 and sg[0]['IpProtocol']=='tcp'
+          assert sg == [
+              {'IpProtocol':'tcp','FromPort':8443,'ToPort':8443,'CidrIp':{'Ref':'ClientCidr'}},
+              {'IpProtocol':'tcp','FromPort':22,'ToPort':22,'CidrIp':'0.0.0.0/0'},
+          ]
           assert 'WorkstationRole' not in t['Resources']
           assert 'WorkstationProfile' not in t['Resources']
           assert p['IamInstanceProfile']=={'Ref':'InstanceProfileName'}
