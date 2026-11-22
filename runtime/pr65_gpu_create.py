@@ -164,9 +164,24 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
         # if verification fails; failed initial provisioning uses ordinary CFN rollback.
         try:
             selected = context(aws_call, region, stack_id)
+            outcome = f"last observed CloudFormation={selected['stack_status']}, EC2={selected['state']}"
             if selected["state"] == "running":
                 guard.verify_ownership(selected["vm"], stack, token, stack_id)
                 aws_call(region, "ec2", "stop-instances", "--instance-ids", selected["instance"])
+                outcome += "; stop requested"
+            if selected["stack_status"] == "DELETE_COMPLETE" and selected["state"] in ("missing", "terminated"):
+                outcome += f"; clean up remaining safeguards before retrying: python3 studio workstation destroy {stack} --delete-stack"
         except Exception as stop_error:
-            raise RuntimeError("Creation/auto-stop verification failed; stopping is unverified. Inspect " + stack_id) from stop_error
-        raise RuntimeError("Creation/auto-stop verification failed; inspect the preserved workstation " + stack_id) from exc
+            outcome = "stopping is unverified: " + str(stop_error)
+        detail = (getattr(exc, "stderr", None) or str(exc)).strip()
+        # Read-only diagnostics must never prevent the ownership check or stop attempt.
+        try:
+            events = aws_call(region, "cloudformation", "describe-stack-events", "--stack-name", stack_id)["StackEvents"]
+            reasons = [f"{e.get('LogicalResourceId', 'resource')}: {e['ResourceStatusReason']}" for e in events
+                       if e.get("ResourceStatus") == "CREATE_FAILED" and
+                       e.get("ResourceType") != "AWS::CloudFormation::Stack" and e.get("ResourceStatusReason")]
+            if reasons:
+                detail += "\nCloudFormation resource failures: " + "; ".join(reasons)
+        except Exception:
+            pass  # Retain the original cause if diagnostic permissions or AWS fail.
+        raise RuntimeError("Creation/auto-stop verification failed; " + outcome + ". Inspect " + stack_id + "\n" + detail) from exc
