@@ -93,9 +93,10 @@ python3 studio workstation extend-expiration art --additional-minutes 480
 python3 studio workstation destroy art --delete-stack
 ```
 
-CLI stop/destroy releases only the selected owner's hostname. Automatic stop keeps
-its hostname association, so another workstation will not take it. Start reuses
-an existing assignment or claims the hostname if free. Explicit assignment moves
+CLI stop/destroy releases only the selected owner's hostname. With the shared
+[stopped-owner cleanup](docs/independent-eip.md#automatic-release-after-stopping) deployed,
+timer-driven stops also release the association after EC2 reaches `stopped`.
+Start claims the hostname if free. Explicit assignment moves
 the existing shared EIP and prepares
 trusted TLS, checking both affected desktops. A former owner gets
 an auto-assigned public IP, with bounded stop/start recovery if needed. No extra EIP

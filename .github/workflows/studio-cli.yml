@@ -10,6 +10,7 @@ on:
       - 'runtime/cli_progress.py'
       - 'tests/test_cli_progress.py'
       - 'infra/workstation-expiration-role.json'
+      - 'infra/workstation-hostname-stop-release.json'
       - 'runtime/workstation_inventory.py'
       - 'runtime/pr65_gpu_create.py'
       - 'runtime/pr65_one_shot_guard.py'
@@ -42,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: python3 -m pip install 'jinja2>=3,<4' pytest
+      - run: python3 -m pip install 'jinja2>=3,<4' pytest boto3
       - name: Native desktop-entry test dependencies
         run: |
           sudo apt-get update

@@ -53,6 +53,34 @@ def resolve(value, values):
     return {key: resolve(v, values) for key, v in value.items()}
 
 
+def release_stopped_hostname(aws):
+    """Execute the deployed inline handler; adapt only its SDK calls to this fixture."""
+    from functools import partial
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    template = json.loads((ROOT / 'infra/workstation-hostname-stop-release.json').read_text())
+    properties = template['Resources']['ReleaseFunction']['Properties']
+    parameters = {'AllocationIds': '--allocation-ids', 'InstanceIds': '--instance-ids',
+                  'AssociationId': '--association-id', 'StackName': '--stack-name',
+                  'LogicalResourceId': '--logical-resource-id'}
+    def call(service, operation, **values):
+        args = []
+        for key, value in values.items():
+            args.extend([parameters[key], *(value if isinstance(value, list) else [value])])
+        return aws(h.REGION, service, operation.replace('_', '-'), *args)
+    operations = {'ec2': ('describe_addresses', 'describe_instances', 'disassociate_address'),
+                  'cloudformation': ('describe_stack_resource',)}
+    clients = {service: SimpleNamespace(**{op: partial(call, service, op) for op in names})
+               for service, names in operations.items()}
+    env = resolve(properties['Environment']['Variables'], {**{k: v['Default'] for k, v in template['Parameters'].items()}, 'AWS::Region': h.REGION,
+                  'AWS::AccountId': h.ACCOUNT, 'AWS::Partition': 'aws'})
+    separator, lines = properties['Code']['ZipFile']['Fn::Join']
+    with patch.dict('os.environ', env), patch('boto3.client', side_effect=lambda service: clients[service]):
+        namespace = {}
+        exec(compile(separator.join(lines), 'deployed-hostname-release.py', 'exec'), namespace)
+        return namespace['handler']({}, None)
+
+
 class AWS:
     def __init__(self):
         self.calls = []

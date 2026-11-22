@@ -12,7 +12,7 @@ from scripts import studio_workstation_cli as cli
 from runtime import dcv_endpoint, independent_eip as eip, pr65_gpu_create as creator
 from runtime import pr65_one_shot_guard as guard, issue43_hostname_handoff as h
 from runtime import workstation_inventory as inventory
-from workstation_fake import AWS, NOW, tags
+from workstation_fake import AWS, NOW, tags, missing, release_stopped_hostname
 
 
 class CliFixture(unittest.TestCase):
@@ -410,6 +410,25 @@ class StopWaiterRecoveryTests(CliFixture):
 
 
 class AutoStopLifecycleTests(CliFixture):
+    def test_manual_stop_completes_when_background_release_wins_the_detach(self):
+        selected = self.create('gpu', 'art')
+        volumes = copy.deepcopy(self.aws.volumes)
+        raced = []
+        def release_first(service, action, args):
+            if action == 'disassociate-address' and not raced:
+                raced.append(True)
+                with contextlib.redirect_stdout(io.StringIO()):  # Lambda logs are separate from CLI stdout.
+                    release_stopped_hostname(self.aws)
+                raise missing('InvalidAssociationID.NotFound', action)
+        self.aws.before = release_first; self.aws.calls.clear()
+        stopped = json.loads(self.invoke('stop', 'art'))
+        self.assertTrue(raced)
+        self.assertEqual((stopped['instance'], stopped['state']), (selected['instance'], 'stopped'))
+        self.assertEqual(self.aws.volumes, volumes)
+        self.assertIsNone(self.aws.address.get('InstanceId'))
+        self.assertEqual(eip.acm._grants(self.aws)[0], set())
+        self.assertFalse(any(c[1] in ('associate-address', 'start-instances', 'terminate-instances', 'delete-stack', 'delete-volume') for c in self.aws.writes))
+
     def test_create_and_start_accept_minutes_hours_days_without_arbitrary_caps(self):
         with patch.object(cli, 'command') as dispatch:
             for value, expected in (('1m', 1), ('59m', 59), ('480m', 480), ('8h', 480), ('2d', 2880), ('10000m', 10000)):
@@ -447,28 +466,29 @@ class AutoStopLifecycleTests(CliFixture):
         disk = copy.deepcopy(self.aws.volumes[volume_id])
         self.now = NOW + dt.timedelta(minutes=481)
         self.aws.fire_schedule(name)
+        release_stopped_hostname(self.aws)
         stopped = json.loads(self.invoke('status', 'art'))
         self.assertEqual(stopped['state'], 'stopped')
         self.assertEqual(stopped['expiration']['status'], 'expired')
-        self.assertEqual(self.aws.address, owner)
+        self.assertIsNone(self.aws.address.get('InstanceId'))
+        self.assertIn({'Key': 'StudioDcvInstanceId', 'Value': selected['instance']}, self.aws.address['Tags'])
         self.assertEqual(eip.acm._grants(self.aws), grants)
         self.aws.calls.clear()
         contender = json.loads(self.invoke('create', '--profile', 'cpu', '--name', 'edit'))
-        self.assertNotIn(h.HOST, contender['dcv_url'])
+        self.assertIn(h.HOST, contender['dcv_url'])
         self.invoke('stop', 'edit')
         restarted = json.loads(self.invoke('start', 'edit'))
-        self.assertNotIn(h.HOST, restarted['dcv_url'])
-        self.assertEqual(self.aws.address, owner)
-        self.assertEqual(eip.acm._grants(self.aws), grants)
-        self.assertFalse(any(c[1] in ('associate-address', 'disassociate-address',
-                                     'put-role-policy', 'update-assume-role-policy') for c in self.aws.calls))
+        self.assertIn(h.HOST, restarted['dcv_url'])
+        self.assertEqual(self.aws.address['InstanceId'], contender['instance'])
+        self.assertEqual(eip.acm._grants(self.aws)[0], {contender['instance']})
+        self.invoke('stop', 'edit')
         self.aws.calls.clear()
         started = json.loads(self.invoke('start', 'art', '--expires-in', '12h'))
         self.assertEqual(started['dcv_url'], created['dcv_url'])
         self.assertEqual(started['expiration']['duration_minutes'], 720)
         self.assertIn(h.HOST, self.invoke('connect', 'art'))
         self.assertEqual(self.aws.address, owner)
-        self.assertFalse(any(c[1] in ('associate-address', 'disassociate-address') for c in self.aws.calls))
+        self.assertTrue(any(c[1] == 'associate-address' for c in self.aws.calls))
         self.assertEqual(self.aws.volumes[volume_id], disk)
         fresh = inventory.context(self.aws, h.REGION, 'art')
         self.assertEqual((fresh['stack_id'], fresh['instance'], fresh['state']),
@@ -557,8 +577,10 @@ class ProfileAutoStopTests(CliFixture):
                 volumes = copy.deepcopy(self.aws.volumes)
                 self.now += dt.timedelta(hours=6)
                 self.aws.fire_schedule(timer)
+                release_stopped_hostname(self.aws)
                 stopped = json.loads(self.invoke('status', name))
                 self.assertEqual((stopped['state'], stopped['expiration']['status']), ('stopped', 'expired'))
+                self.assertIsNone(self.aws.address.get('InstanceId'))
                 self.assertEqual(self.aws.volumes, volumes)
                 self.assertEqual(self.aws.stacks[selected['stack_id']]['StackStatus'], 'CREATE_COMPLETE')
                 for options, minutes in (((), 240), (('--expires-in', '8h'), 480)):

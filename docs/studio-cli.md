@@ -73,8 +73,9 @@ SSH TCP/22 from `0.0.0.0/0`. `--client-cidr` controls only DCV; its restricted C
 must include the network from which endpoint checks/browser connections run.
 
 CPU/GPU create/start claims the shared hostname automatically when unassigned,
-then prepares trusted TLS. An existing owner keeps it, including a stopped owner;
-publishers and dry runs never claim it. Plain `connect NAME` selects the endpoint
+then prepares trusted TLS. Create/start preserves an existing association; the
+shared stopped-owner cleanup releases it asynchronously after a stop. Publishers
+and dry runs never claim it. Plain `connect NAME` selects the endpoint
 automatically. `--hostname dcv.kwesidavis.com` requires verified ownership and trusted
 TLS; it does not assign the hostname and is unnecessary for ordinary connections.
 Every running desktop must have a current, reachable HTTPS login page. A non-owner uses
@@ -387,17 +388,21 @@ timer before restarting. Assignment does not impose the old acceptance-test
 headroom limits. Unsupported networking, unknown ownership or failed recovery
 is an error, not a successful handoff.
 
-Certificate renewal/export authorization is exact-session scoped to current owner
-and pending destination. The existing pinned AWCP installer and activation are reused;
-only after successful transfer is previous-owner export access revoked. Cached
-certificates may remain on a former owner, but it has no ongoing export permission.
+Certificate renewal/export authorization uses exact-session grants for the current
+owner and pending destination. The existing pinned AWCP installer and activation
+are reused; a completed CLI transfer or manual release revokes previous-owner export
+access. Cached certificates may remain on a former owner after that cleanup, but
+it has no ongoing export permission.
 Stale grants from terminated owners are reconciled against actual EC2 identity.
 Rollback never steals the EIP from an unexpected new owner. CLI stop/destroy releases
-the selected owner's association; it does not choose a CPU to receive it. Native
-automatic stop keeps the association and certificate permission, so another desktop
-will not claim that stopped owner's hostname. Start reuses its own assignment or
-claims a free hostname. Use explicit assignment/release to change a stopped owner's
-hostname when needed.
+the selected owner's association; it does not choose a CPU to receive it. With the
+[shared cleanup stack](independent-eip.md#automatic-release-after-stopping) deployed,
+native automatic stop also releases the address once its owner is verified stopped.
+Events trigger cleanup, with a one-minute reconciliation fallback; release is
+asynchronous. Automatic release retains the stopped former owner's exact-session
+certificate grant and metadata until the next CLI claim reconciles them before
+assigning the free address. Start claims a free hostname;
+explicit assignment remains available for an intentional transfer or retry.
 
 ## Publisher
 

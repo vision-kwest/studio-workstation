@@ -1,0 +1,146 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Release the shared DCV EIP from a verified stopped workstation; retain its allocation, DNS and native stop timers.",
+  "Parameters": {
+    "AllocationId": {"Type": "String", "Default": "eipalloc-0879a34aa1a1298dd", "AllowedPattern": "eipalloc-[0-9a-f]{8,17}"},
+    "Hostname": {"Type": "String", "Default": "dcv.kwesidavis.com", "MinLength": 1},
+    "OwnerStack": {"Type": "String", "Default": "studio-independent-dcv", "MinLength": 1},
+    "VpcId": {"Type": "AWS::EC2::VPC::Id", "Default": "vpc-01bbe5d01838f70b2"}
+  },
+  "Resources": {
+    "ExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+        },
+        "Policies": [{
+          "PolicyName": "ReleaseOnlyStoppedDcvOwner",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {"Effect": "Allow", "Action": ["ec2:DescribeAddresses", "ec2:DescribeInstances"], "Resource": "*",
+               "Condition": {"StringEquals": {"ec2:Region": {"Ref": "AWS::Region"}}}},
+              {"Effect": "Allow", "Action": "cloudformation:DescribeStackResource",
+               "Resource": {"Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/*/*"},
+               "Condition": {"StringEquals": {"aws:ResourceTag/StudioManaged": "true"}}},
+              {"Effect": "Allow", "Action": "ec2:DisassociateAddress",
+               "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/${AllocationId}"},
+               "Condition": {"StringEquals": {"ec2:ResourceTag/StudioIssue": "43",
+                 "ec2:ResourceTag/StudioDcvHostname": {"Ref": "Hostname"}, "ec2:ResourceTag/StudioOwnerStack": {"Ref": "OwnerStack"}}}},
+              {"Effect": "Allow", "Action": "ec2:DisassociateAddress",
+               "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"},
+               "Condition": {"ArnEquals": {"ec2:Vpc": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc/${VpcId}"}}}},
+              {"Effect": "Allow", "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+               "Resource": {"Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}:*"}}
+            ]
+          }
+        }]
+      }
+    },
+    "LogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {"LogGroupName": {"Fn::Sub": "/aws/lambda/${AWS::StackName}"}, "RetentionInDays": 7}
+    },
+    "ReleaseFunction": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "LogGroup",
+      "Properties": {
+        "FunctionName": {"Ref": "AWS::StackName"},
+        "Runtime": "python3.13", "Handler": "index.handler", "Timeout": 30,
+        "MemorySize": 128, "ReservedConcurrentExecutions": 1,
+        "Role": {"Fn::GetAtt": ["ExecutionRole", "Arn"]},
+        "Environment": {"Variables": {
+          "ALLOCATION_ID": {"Ref": "AllocationId"}, "HOSTNAME": {"Ref": "Hostname"}, "OWNER_STACK": {"Ref": "OwnerStack"},
+          "STACK_PREFIX": {"Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/"}
+        }},
+        "Code": {"ZipFile": {"Fn::Join": ["\n", [
+          "import os",
+          "import boto3",
+          "from botocore.exceptions import ClientError",
+          "",
+          "def tags(resource):",
+          "    return {t['Key']: t['Value'] for t in resource.get('Tags', [])}",
+          "",
+          "def handler(event, context):",
+          "    ec2, cfn = boto3.client('ec2'), boto3.client('cloudformation')",
+          "    allocation = os.environ['ALLOCATION_ID']",
+          "    expected = {'StudioIssue': '43', 'StudioDcvHostname': os.environ['HOSTNAME'], 'StudioOwnerStack': os.environ['OWNER_STACK']}",
+          "    def address():",
+          "        [a] = ec2.describe_addresses(AllocationIds=[allocation])['Addresses']",
+          "        if a.get('AllocationId') != allocation or any(tags(a).get(k) != v for k, v in expected.items()):",
+          "            raise ValueError('Shared EIP ownership mismatch')",
+          "        return a",
+          "    def instance(iid):",
+          "        [v] = [v for r in ec2.describe_instances(InstanceIds=[iid])['Reservations'] for v in r['Instances']]",
+          "        if v.get('InstanceId') != iid:",
+          "            raise ValueError('Unexpected EC2 identity')",
+          "        return v",
+          "    before = address()",
+          "    iid, association = before.get('InstanceId'), before.get('AssociationId')",
+          "    if not iid:",
+          "        if association or before.get('NetworkInterfaceId'):",
+          "            raise ValueError('Unknown network interface owns the shared EIP')",
+          "        return {'status': 'unassigned'}",
+          "    if not association or tags(before).get('StudioDcvInstanceId') != iid:",
+          "        raise ValueError('EIP owner metadata mismatch')",
+          "    vm = instance(iid)",
+          "    if vm['State']['Name'] != 'stopped':",
+          "        return {'status': 'owner-not-stopped', 'instance': iid}",
+          "    metadata, interfaces = tags(vm), vm.get('NetworkInterfaces', [])",
+          "    stack = metadata.get('StudioStackId', '')",
+          "    if (metadata.get('StudioManaged') != 'true' or metadata.get('StudioProfile') not in ('cpu', 'gpu') or",
+          "            stack != metadata.get('aws:cloudformation:stack-id') or not stack.startswith(os.environ['STACK_PREFIX']) or",
+          "            len(stack.removeprefix(os.environ['STACK_PREFIX']).split('/')) != 2 or",
+          "            len(interfaces) != 1 or interfaces[0].get('Attachment', {}).get('DeviceIndex') != 0 or",
+          "            interfaces[0].get('NetworkInterfaceId') != before.get('NetworkInterfaceId')):",
+          "        raise ValueError('Stopped owner is not the expected managed desktop')",
+          "    resource = cfn.describe_stack_resource(StackName=stack, LogicalResourceId='Workstation')['StackResourceDetail']",
+          "    if (resource.get('StackId') != stack or resource.get('LogicalResourceId') != 'Workstation' or",
+          "            resource.get('ResourceType') != 'AWS::EC2::Instance' or resource.get('PhysicalResourceId') != iid or",
+          "            resource.get('ResourceStatus') not in ('CREATE_COMPLETE', 'UPDATE_COMPLETE')):",
+          "        raise ValueError('CloudFormation workstation ownership mismatch')",
+          "    current = address()",
+          "    if any(current.get(k) != before.get(k) for k in ('InstanceId', 'AssociationId', 'NetworkInterfaceId')):",
+          "        return {'status': 'owner-changed'}",
+          "    if tags(current).get('StudioDcvInstanceId') != iid:",
+          "        raise ValueError('EIP owner metadata changed')",
+          "    if instance(iid)['State']['Name'] != 'stopped':",
+          "        return {'status': 'owner-not-stopped', 'instance': iid}",
+          "    try:",
+          "        ec2.disassociate_address(AssociationId=association)",
+          "    except ClientError as exc:",
+          "        if exc.response['Error']['Code'] != 'InvalidAssociationID.NotFound':",
+          "            raise",
+          "        return {'status': 'association-already-gone'}",
+          "    # The CLI reconciles the former owner's tag and certificate grant on the next claim.",
+          "    print('Released stopped DCV owner', iid, association)",
+          "    return {'status': 'released', 'instance': iid, 'association_id': association}",
+          ""
+        ]]} }
+      }
+    },
+    "ReleaseRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "Release stopped hostname owners; retry periodically if a state event is missed.",
+        "EventPattern": {"source": ["aws.ec2"], "detail-type": ["EC2 Instance State-change Notification"],
+          "account": [{"Ref": "AWS::AccountId"}], "region": [{"Ref": "AWS::Region"}], "detail": {"state": ["stopped"]}},
+        "ScheduleExpression": "rate(1 minute)", "State": "ENABLED",
+        "Targets": [{"Arn": {"Fn::GetAtt": ["ReleaseFunction", "Arn"]}, "Id": "ReleaseStoppedOwner"}]
+      }
+    },
+    "InvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {"Action": "lambda:InvokeFunction", "FunctionName": {"Ref": "ReleaseFunction"},
+        "Principal": "events.amazonaws.com", "SourceArn": {"Fn::GetAtt": ["ReleaseRule", "Arn"]},
+        "SourceAccount": {"Ref": "AWS::AccountId"}}
+    }
+  },
+  "Outputs": {
+    "FunctionName": {"Value": {"Ref": "ReleaseFunction"}},
+    "FunctionArn": {"Value": {"Fn::GetAtt": ["ReleaseFunction", "Arn"]}},
+    "RuleName": {"Value": {"Ref": "ReleaseRule"}}
+  }
+}

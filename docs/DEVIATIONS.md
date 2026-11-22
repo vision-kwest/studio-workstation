@@ -93,6 +93,16 @@ follow the ownership-checked stop attempt and retain the original failure if
 event lookup fails. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`,
 bootstrap, native rollback, stop permissions and cleanup behavior are unchanged.
 
+## Hostname release after timed stops (Issue #156)
+
+A shared EC2 stopped-event handler, with periodic reconciliation, detaches only the
+verified stopped owner's exact EIP association. Existing native stop schedules and
+IAM scopes remain unchanged; certificate reconciliation stays in the existing CLI
+claim path. Manual release accepts the same stopped-owner association already
+detached by background cleanup. RES 2026.06 commit
+`1f526a241fb293a29fb018f08ccf81c100c05a42`, bootstrap, DCV, EFS and disk lifecycle
+remain unchanged. The implementation PR records offline and live acceptance.
+
 ## Historical warning
 
 Earlier custom Image Builder and v0.6.0 systemd-bootstrap implementations diverged substantially from RES and encountered repeated build failures, including a custom service ordering cycle. These are *not* approved deviations and should not be reused as the canonical implementation.
