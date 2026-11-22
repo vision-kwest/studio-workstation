@@ -110,6 +110,8 @@ The profile is installed before VS Code needs to exist, independently of optiona
 
 An ordinary launch seeds only missing `~/.config/comfyui-desktop-2/settings.json` and `~/.local/share/comfyui-desktop-2/installations.json`. It carries forward the operator's disabled telemetry/beta preferences, omits the old workstation's local model fallback, and puts SQLite at `~/.local/share/comfyui-studio/comfyui.db`. It honors `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` when set; keep those on local storage. Electron caches, credentials and runtime state remain local. Without `--update`, existing files are left byte-for-byte unchanged by the helper; Desktop can subsequently update its own files normally.
 
+Helper options must match exactly: `--set-default PATH`, `--update`, or `--help`. Unknown options (including `-set-default`) and stray arguments produce usage help and exit with status 2 before any configuration changes or app launch. Native AppImage arguments must follow an explicit `--` separator and are forwarded unchanged; they cannot be combined with `--set-default`.
+
 ### Select the default for fresh workstations
 
 After installing another standalone instance on EFS, run this as the ordinary desktop user, supplying its full installation path:
@@ -154,6 +156,8 @@ desktop-file-validate /studio/share/applications/menulibre-comfyui.desktop
 ```
 
 The no-clobber template copy preserves a previously selected shared default when updating the helper. Keep the helper beside its templates: COMFY delegates to it without copying its registration logic. The legacy `/studio/bin/studio-comfy` link remains available to existing launchers.
+
+When adopting `StudioComfyUI`, `cp -n` preserves the deployed selection, so you must run `--set-default` with the new path shown above to capture its actual registry or manifest metadata. With Desktop fully closed, run `--update` on each existing workstation, then verify the retained instance and its data before deleting the old installation. The helper changes registrations; it does not move or copy installation files.
 
 When adopting `StudioComfyUI`, `cp -n` preserves the deployed selection, so you must run `--set-default` with the new path shown above to capture its actual registry or manifest metadata. With Desktop fully closed, run `--update` on each existing workstation, then verify the retained instance and its data before deleting the old installation. The helper changes registrations; it does not move or copy installation files.
 
