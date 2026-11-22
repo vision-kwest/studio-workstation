@@ -48,7 +48,7 @@ fi
 # MenuLibre and GNOME use this native user directory; only launchers are shared.
 desktop_user=$(getent passwd 2000 | cut -d: -f1)
 runuser -u "$desktop_user" -- bash -se <<'STUDIO_APPLICATIONS'
-mkdir -p /studio/share/applications /studio/share/icons "$HOME/.local/share"
+mkdir -p /studio/bin /studio/projects /studio/share/applications /studio/share/icons "$HOME/.local/share"
 applications="$HOME/.local/share/applications"
 if test -L "$applications"; then
   test "$(readlink "$applications")" = /studio/share/applications || { echo "Conflicting applications link"; exit 1; }
@@ -62,9 +62,15 @@ else
   ln -s /studio/share/applications "$applications"
 fi
 STUDIO_APPLICATIONS
-if ! command -v menulibre >/dev/null || ! command -v desktop-file-validate >/dev/null; then
+# The shell and app wrappers are installed once in shared /studio/bin.
+if test -e /usr/local/bin/studio || test -L /usr/local/bin/studio; then
+  test "$(readlink /usr/local/bin/studio)" = /studio/bin/studio || { echo 'Conflicting studio command'; exit 1; }
+else
+  ln -s /studio/bin/studio /usr/local/bin/studio
+fi
+if ! command -v menulibre >/dev/null || ! command -v desktop-file-validate >/dev/null || ! command -v rg >/dev/null; then
   apt-get -o DPkg::Lock::Timeout=300 update
-  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends menulibre desktop-file-utils
+  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y --no-install-recommends menulibre desktop-file-utils ripgrep
 fi
 # Permit VS Code's own sandbox at the resolved EFS path, including future versions.
 cat >/etc/apparmor.d/studio-vscode <<'STUDIO_VSCODE_APPARMOR'

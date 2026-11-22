@@ -53,3 +53,9 @@ release notification, not manual upgrades or APT security-update policy. These
 preferences are local and precede the first GNOME session. RES 2026.06 commit
 `1f526a241fb293a29fb018f08ccf81c100c05a42` installers, driver handling and reboot
 continuation remain unchanged; this does not resolve later kernel/driver mismatch.
+
+## Studio application shell (Issue #140)
+
+The optional software layer adds `studio env`, a child Bash shell, and small uppercase wrappers for the existing shared application paths. The existing Comfy helper and its registration/default/update behavior are reused unchanged. OpenCode seeds only an individual global configuration link; application databases and service state remain local. OLLAMA resolves the existing Rez package and shared models without starting a server.
+
+The post-DCV setup creates the user-owned shared command/project directories, adds the local `studio` symlink and installs Ubuntu's `ripgrep` alongside the existing menu utilities. These precede optional Rez. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` installers, DCV/GPU behavior, reboot continuation and workstation lifecycle remain unchanged. Source verification and offline checks do not establish live desktop acceptance; the implementation PR records that evidence separately.

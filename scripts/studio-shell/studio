@@ -1,0 +1,26 @@
+#!/bin/bash
+# Executed as the launcher, then sourced by its interactive child as an rcfile.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  if [[ "$*" == --help || "$*" == 'env --help' ]]; then
+    printf 'Usage: studio env\nOpen a Studio shell; exit returns to the original terminal.\n'
+    exit 0
+  fi
+  [[ $# == 1 && $1 == env ]] || { echo 'Usage: studio env' >&2; exit 2; }
+  [[ -d /studio/bin ]] || { echo 'Shared /studio/bin is unavailable.' >&2; exit 1; }
+  exec /bin/bash --noprofile --rcfile "$(readlink -f "${BASH_SOURCE[0]}")" -i
+fi
+
+[[ ! -r $HOME/.bashrc ]] || source "$HOME/.bashrc"
+[[ ! -r /opt/studio/studio-rez/env/studio-prod.sh ]] || source /opt/studio/studio-rez/env/studio-prod.sh
+export STUDIO_ENV=1 STUDIO_ROOT=/studio STUDIO_PROJECTS=/studio/projects
+export OLLAMA_MODELS=/studio/models/ollama
+for studio_path in /opt/studio/rez/3.4.0/bin/rez /studio/bin; do
+  [[ -d $studio_path ]] || continue
+  case ":$PATH:" in
+    *":$studio_path:"*) ;;
+    *) PATH="$studio_path:$PATH" ;;
+  esac
+done
+export PATH
+unset studio_path
+PS1="(studio) ${PS1#(studio) }"

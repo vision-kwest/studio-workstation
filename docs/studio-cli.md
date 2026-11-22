@@ -30,6 +30,18 @@ Ubuntu 24.04/RES 2026.06 releases. `publisher` uses `m7i.large`, its dedicated
 no desktop or trusted-hostname claim. Discovery does not start resources or fetch
 live prices. The supported region, subnet and IAM profiles remain validated inputs.
 
+## Studio environment on the desktop
+
+After the [shared command installation](shared-applications.md#studio-shell-and-application-commands), open a terminal in the DCV desktop and run:
+
+```bash
+studio env
+CODE /studio/projects
+exit
+```
+
+`studio env` opens a child Bash shell with `/studio/bin` and the available production Rez environment. Uppercase `BLENDER`, `CODE`, `COMFY`, `OPENCODE` and `OLLAMA` apply the established shared settings and forward application arguments. `exit` restores the original terminal environment. On an existing desktop, `/studio/bin/studio env` or `python3 studio env` from the repository works before an administrator adds `/usr/local/bin/studio`. This requires no desktop-user sudo. The commands below remain the repository's AWS lifecycle interface.
+
 ## Create, list and connect
 
 ```bash
