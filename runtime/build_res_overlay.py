@@ -29,6 +29,14 @@ EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf"""
         raise ValueError("Pinned RES DPMS source anchor changed")
     return raw.replace(old, new)
 
+def patch_gpu_prerequisites(raw):
+    """Install DKMS before NVIDIA; keep headers following the AWS kernel stream."""
+    old = b'  EVALUATED_GPU_DRIVER_PREREQUISITES=()'
+    new = old + b'\n  if [[ "$GPU_FAMILY" == NVIDIA ]]; then\n    EVALUATED_GPU_DRIVER_PREREQUISITES+=(dkms linux-headers-aws)\n  fi'
+    if raw.count(old) != 1:
+        raise ValueError("Pinned RES GPU prerequisites source anchor changed")
+    return raw.replace(old, new)
+
 def patch_post_reboot_dpms(raw):
     """Repair preinstalled DCV/Xorg configuration in standalone mode.
 
@@ -38,10 +46,30 @@ def patch_post_reboot_dpms(raw):
     old = b'      /bin/bash "${SCRIPT_DIR}/../../dcv/linux/dcv_server.sh" -o $BASE_OS -g $GPU_FAMILY -s "${SCRIPT_DIR}/.."'
     fix = b"""      if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
         if [[ "${GPU_FAMILY}" == "NVIDIA" ]]; then
-          command -v nvidia-smi >/dev/null && modinfo -k "$(uname -r)" nvidia >/dev/null || {
-            echo "RES NVIDIA driver missing for active kernel" >&2
+          nvidia_dkms_ready() {
+            local status
+            status=$(dkms status -m nvidia -v 595.91.07 -k "$1") || return 1
+            [[ "$status" == "nvidia/595.91.07, $1, "*": installed" ]] &&
+              [[ "$(modinfo -k "$1" -F version nvidia)" == 595.91.07 ]]
+          }
+          running_kernel=$(uname -r)
+          command -v nvidia-smi >/dev/null && nvidia_dkms_ready "$running_kernel" &&
+            grep -Eq '^[[:space:]]*AUTOINSTALL=("yes"|yes)[[:space:]]*$' /usr/src/nvidia-595.91.07/dkms.conf || {
+            echo "RES NVIDIA DKMS registration or AUTOINSTALL missing for active kernel" >&2
             exit 1
           }
+          # APT may have staged a newer kernel before NVIDIA was registered.
+          for image in /boot/vmlinuz-*-aws; do
+            [[ -f "$image" ]] || continue
+            kernel="${image#/boot/vmlinuz-}"
+            dpkg --compare-versions "$kernel" gt "$running_kernel" || continue
+            DEBIAN_FRONTEND=noninteractive apt install -y "linux-headers-$kernel" &&
+              dkms install -m nvidia -v 595.91.07 -k "$kernel" &&
+              nvidia_dkms_ready "$kernel" || {
+              echo "RES NVIDIA DKMS missing for installed kernel $kernel" >&2
+              exit 1
+            }
+          done
         fi
         # The base AMI may contain a malformed DPMS file even when DCV install is skipped.
         mkdir -p /etc/X11/xorg.conf.d
@@ -59,7 +87,10 @@ def patch_gpu_driver_checksum(raw):
              b"NVIDIA-Linux-x86_64-595.91.07-grid-aws.run' | sha256sum -c - || return $?")
     if raw.count(old) != 1:
         raise ValueError("Pinned RES GPU download source anchor changed")
-    return raw.replace(old, old + check)
+    installer = b'/bin/sh NVIDIA-Linux-x86_64*.run --no-precompiled-interface --run-nvidia-xconfig --accept-license --silent'
+    if raw.count(installer) != 1:
+        raise ValueError("Pinned RES GRID installer source anchor changed")
+    return raw.replace(old, old + check).replace(installer, installer + b' --dkms')
 
 def patch_xserver_dcv_access(raw):
     """Grant only the local DCV service user, only in standalone mode."""
@@ -155,7 +186,7 @@ def main():
             drivers="scripts/dcv/linux/gpu_drivers.sh"
             gpu_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==drivers)).read()
         output=rewrite(raw,mapping,replacements={
-            matches[0]:patch_dcv_dpms(original),
+            matches[0]:patch_gpu_prerequisites(patch_dcv_dpms(original)),
             post[0]:patch_post_reboot_dpms(post_raw),
             drivers:patch_gpu_driver_checksum(gpu_raw),
         })

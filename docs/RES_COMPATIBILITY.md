@@ -65,3 +65,14 @@ EC2 launched from stock Ubuntu AMI
 **Required validation:** CPU GNOME/DCV browser login, stop/start, GPU `nvidia-smi` and accelerated renderer, independent first-boot provisioning, and cleanup without RES resources. Passing `systemctl` or `dcv list-sessions` alone is insufficient.
 
 No implementation is authorized by this document alone. Record proposed modifications in `docs/DEVIATIONS.md` and obtain review first.
+
+## November 2026 follow-up: NVIDIA DKMS (Issue #168)
+
+For upstream commit `1f526a241fb293a29fb018f08ccf81c100c05a42`, the confirmed GPU
+path is `dcv/linux/dcv_server.sh` → Debian `install_gpu_driver_prerequisites()` →
+`gpu_drivers.sh` → DCV server/USB setup. DKMS previously arrived in that last USB
+step. The approved overlay adds it to GPU prerequisites, enables the NVIDIA
+installer's native registration, and checks registration/kernel coverage in the
+existing `install_post_reboot.sh` GPU gate. RES orchestration and update policy
+are retained. See [the deviation](DEVIATIONS.md#nvidia-kernel-updates-issue-168)
+and the implementation PR for offline versus live evidence.

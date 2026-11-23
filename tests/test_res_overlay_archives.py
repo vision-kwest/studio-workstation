@@ -62,7 +62,7 @@ def run(directory):
                 assert b"install_post_reboot.sh" in modified["scripts/virtual-desktop-host/linux/install.sh"]
                 assert b"printf" in modified["scripts/dcv/linux/debian/dcv_server.sh"]
                 assert b"STUDIO_STANDALONE" in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
-                assert b'modinfo -k "$(uname -r)" nvidia' in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
+                assert b'modinfo -k "$1" -F version nvidia' in modified["scripts/virtual-desktop-host/linux/install_post_reboot.sh"]
                 driver=modified["scripts/dcv/linux/gpu_drivers.sh"]
                 upstream=original["scripts/dcv/linux/gpu_drivers.sh"]
                 signed=b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive $NVIDIA_S3_BUCKET_PATH .'
