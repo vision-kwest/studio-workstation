@@ -144,3 +144,24 @@ if test -e /usr/local/bin/studio-rez-env; then
 else
   install -m 0755 "$dir/studio-rez-env" /usr/local/bin/studio-rez-env
 fi
+# Start the shared Ollama server on every boot; models load only on request.
+cat >/etc/systemd/system/studio-ollama.service <<STUDIO_OLLAMA
+[Unit]
+Description=Studio Ollama server
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=$desktop_user
+Environment="HOME=$desktop_home"
+Environment=OLLAMA_HOST=127.0.0.1:11434
+ExecStart=/bin/bash /studio/bin/OLLAMA serve
+Restart=always
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
+STUDIO_OLLAMA
+systemctl daemon-reload
+systemctl enable --now --no-block studio-ollama.service

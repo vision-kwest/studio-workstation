@@ -143,6 +143,54 @@ class SoftwareRetryCases(unittest.TestCase):
         return subprocess.run(["bash", "-c", "set -euo pipefail\n" + code],
                               env={**os.environ, **env}, capture_output=True, text=True)
 
+    def test_ollama_service_install_and_missing_shared_wrapper_recovery(self):
+        import shlex
+        unit = self.root / "studio-ollama.service"
+        wrapper = self.root / "OLLAMA"
+        home = self.root / "artist-home"
+        start = self.source.index("cat >/etc/systemd/system/studio-ollama.service")
+        self.assertLess(self.source.index('install -m 0755 "$dir/studio-rez-env"'), start)
+        code = self.source[start:].replace("/etc/systemd/system/studio-ollama.service", str(unit))
+        code = code.replace("/studio/bin/OLLAMA", str(wrapper))
+        stubs = '''desktop_user=artist
+desktop_home="$TEST_HOME"
+systemctl() { printf '%s\\n' "$*"; }
+'''
+        original = None
+        for _ in range(2):
+            result = self.execute(stubs + code, TEST_HOME=str(home))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), ["daemon-reload",
+                             "enable --now --no-block studio-ollama.service"])
+            if original is not None:
+                self.assertEqual(unit.read_text(), original)
+            original = unit.read_text()
+        entries = [line.split("=", 1) for line in original.splitlines() if "=" in line]
+        settings = dict(entries)
+        for key, value in {"Type": "simple", "User": "artist", "Restart": "always",
+                           "RestartSec": "30s", "StartLimitIntervalSec": "0",
+                           "After": "network-online.target", "WantedBy": "multi-user.target"}.items():
+            self.assertEqual(settings[key], value)
+        # Missing EFS must cause a retryable process failure, not a skipped unit
+        # or a mount/health-check dependency that holds up the desktop boot.
+        self.assertFalse(any(key.startswith(("Condition", "Assert", "ExecCondition", "ExecStartPre", "ExecStartPost"))
+                             for key in settings))
+        self.assertFalse({"Requires", "RequiresMountsFor", "BindsTo"} & settings.keys())
+        verification = subprocess.run(["systemd-analyze", "verify", str(unit)],
+                                      capture_output=True, text=True)
+        self.assertEqual(verification.returncode, 0, verification.stderr)
+        environment = dict(item.split("=", 1) for key, value in entries if key == "Environment"
+                           for item in shlex.split(value))
+        command = shlex.split(settings["ExecStart"])
+        self.assertEqual(command, ["/bin/bash", str(wrapper), "serve"])
+        # Exercise the same command before and after the shared payload appears.
+        missing = subprocess.run(command, env=environment, capture_output=True, text=True)
+        self.assertNotEqual(missing.returncode, 0)
+        wrapper.write_text('printf \'%s\\n\' "$#" "$@" "$HOME" "$OLLAMA_HOST"\n')
+        ready = subprocess.run(command, env=environment, capture_output=True, text=True)
+        self.assertEqual(ready.returncode, 0, ready.stderr)
+        self.assertEqual(ready.stdout.splitlines(), ["1", "serve", str(home), "127.0.0.1:11434"])
+
     def test_ssh_configuration_retries_and_reloads_only_after_validation(self):
         config = self.root / "sshd.conf"
         code = self.source.split("# RES attempts to disable SSH;", 1)[1]
@@ -224,6 +272,7 @@ sshd() { printf 'sshd %s\\n' "$*"; return "$VALIDATION_STATUS"; }
         for source, target in [("/opt/studio/packages", "packages"), ("/etc/fstab", "fstab"),
                                ("/etc/apparmor.d/studio-vscode", "vscode.apparmor"),
                                ("/etc/studio-software-release.env", "absent-release.env"),
+                               ("/etc/systemd/system/studio-ollama.service", "studio-ollama.service"),
                                ("/usr/local/bin/studio", "shell-command"),
                                ("/studio", "studio")]:
             # Match the mount prefix, not the final name in /studio/bin/studio.
@@ -269,6 +318,7 @@ aws() { echo 'Unexpected Rez download' >&2; return 99; }
         (self.root / "read-only").touch()
         result = self.run_storage(code)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root / "studio-ollama.service").exists())
         self.assertEqual((self.root / "vscode.apparmor").stat().st_mode & 0o777, 0o644)
         self.assertEqual(studio.resolve(), shared)
         calls = (self.root / "calls").read_text()

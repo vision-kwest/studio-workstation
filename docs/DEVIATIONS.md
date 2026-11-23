@@ -145,3 +145,7 @@ remain editable and take precedence. RES 2026.06 commit
 reboot continuation and authentication remain unchanged. The upstream
 `gnome_utils.configure()` animation workaround applies only to AL2023.
 The implementation PR distinguishes native schema checks from fresh-login proof.
+
+## Ollama startup service (Issue #92)
+
+The owner now requests an Ollama server on every normal workstation boot. The optional software setup enables a native systemd service after verifying Rez, running the existing uppercase wrapper as the desktop user with a localhost listener and the shared model store. systemd retries failures without an EFS readiness dependency or a custom startup manager; no model is downloaded or preloaded. The deliberate `--no-studio-software` opt-out also skips this service. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`, desktop readiness, GPU setup and shared model/context configuration are unchanged. Real boot and GPU acceptance remain separate from offline validation.
