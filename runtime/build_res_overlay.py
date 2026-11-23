@@ -32,7 +32,11 @@ EndSection' > /etc/X11/xorg.conf.d/99-disable-dpms.conf"""
 def patch_gpu_prerequisites(raw):
     """Install DKMS before NVIDIA; keep headers following the AWS kernel stream."""
     old = b'  EVALUATED_GPU_DRIVER_PREREQUISITES=()'
-    new = old + b'\n  if [[ "$GPU_FAMILY" == NVIDIA ]]; then\n    EVALUATED_GPU_DRIVER_PREREQUISITES+=(dkms linux-headers-aws)\n  fi'
+    new = b'''  # A missing legacy RES package must not prevent DKMS installation.
+  if [[ "$GPU_FAMILY" == NVIDIA ]]; then
+    DEBIAN_FRONTEND=noninteractive apt install -y dkms linux-headers-aws || exit $?
+  fi
+''' + old
     if raw.count(old) != 1:
         raise ValueError("Pinned RES GPU prerequisites source anchor changed")
     return raw.replace(old, new)

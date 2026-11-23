@@ -82,13 +82,42 @@ class NvidiaDkmsTests(unittest.TestCase):
         self.assertEqual(calls, "")
         self.assertTrue(completed)
 
-    def test_prerequisites_preserve_non_nvidia_behavior_and_reject_source_drift(self):
-        source = b'  EVALUATED_GPU_DRIVER_PREREQUISITES=()\nprintf "%s\\n" "${EVALUATED_GPU_DRIVER_PREREQUISITES[@]}"'
-        for gpu, expected in (("NVIDIA", "dkms\nlinux-headers-aws\n"), ("NONE", "\n"), ("AMD", "\n")):
-            result = subprocess.run(["bash", "-c", overlay.patch_gpu_prerequisites(source).decode()],
-                                    text=True, capture_output=True, env={**os.environ, "GPU_FAMILY": gpu})
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout, expected)
+    def test_prerequisites_are_independent_of_failing_legacy_batch(self):
+        # Match RES's unset-IFS tail and unchecked caller, explicitly without set -e.
+        source = br'''set +e
+DKMS_INSTALLED=0
+apt() {
+  printf 'apt'; printf ' %s' "$@"; printf '\n'
+  if [[ "$3" == dkms ]]; then
+    [[ "$FAIL_EARLY" != true ]] || return 23
+    DKMS_INSTALLED=1
+    return 0
+  fi
+  return 42  # Atomic legacy APT failure: linux-modules-extra is unavailable.
+}
+install_gpu_driver_prerequisites() {
+  IFS=$'\n'
+  EVALUATED_GPU_DRIVER_PREREQUISITES=()
+  EVALUATED_GPU_DRIVER_PREREQUISITES+=(gcc linux-headers-7.0.0-1014-aws linux-modules-extra-7.0.0-1014-aws)
+  DEBIAN_FRONTEND=noninteractive apt install -y ${EVALUATED_GPU_DRIVER_PREREQUISITES[*]}
+  unset IFS
+}
+install_gpu_driver_prerequisites
+printf 'driver dkms=%s\n' "$DKMS_INSTALLED"
+'''
+        early = 'apt install -y dkms linux-headers-aws'
+        legacy = 'apt install -y gcc linux-headers-7.0.0-1014-aws linux-modules-extra-7.0.0-1014-aws'
+        for gpu, fail, code, expected in (
+                ("NVIDIA", "false", 0, [early, legacy, 'driver dkms=1']),
+                ("NVIDIA", "true", 23, [early]),
+                ("NONE", "true", 0, [legacy, 'driver dkms=0']),
+                ("AMD", "true", 0, [legacy, 'driver dkms=0'])):
+            with self.subTest(gpu=gpu, fail_early=fail):
+                result = subprocess.run(["bash", "-c", overlay.patch_gpu_prerequisites(source).decode()],
+                                        text=True, capture_output=True,
+                                        env={**os.environ, "GPU_FAMILY": gpu, "FAIL_EARLY": fail})
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertEqual(result.stdout.splitlines(), expected)
         with self.assertRaises(ValueError):
             overlay.patch_gpu_prerequisites(b"changed upstream")
 

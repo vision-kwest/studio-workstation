@@ -154,8 +154,13 @@ The owner now requests an Ollama server on every normal workstation boot. The op
 
 RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` installs Ubuntu's
 `dkms` in DCV USB setup, after the NVIDIA installer has already run. The overlay
-adds DKMS to the existing GPU prerequisites and requests `--dkms` on the full
-GRID installation. The standalone GPU post-install check requires the installed
+installs DKMS and the AWS header metapackage in a separate, checked APT step within
+the existing GPU prerequisites, then requests `--dkms` on the full GRID installation.
+The first live test showed that the legacy batch can fail because the older AMI's
+`linux-modules-extra-7.0.0-1014-aws` package is unavailable, preventing every package
+in that transaction from installing. The dedicated step exits on its own failure;
+the original RES package selection and diagnostics remain intact.
+The standalone GPU post-install check requires the installed
 driver's DKMS registration, `AUTOINSTALL="yes"`, and matching NVIDIA modules for
 the running and staged newer AWS kernels before RES can mark setup ready.
 Native DKMS performs builds; there is no additional driver manager or boot service.
