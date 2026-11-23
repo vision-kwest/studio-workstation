@@ -38,6 +38,8 @@ class StudioSoftwareContract(unittest.TestCase):
                                         data.index("systemctl enable --now ssh.service"))
                         self.assertLess(data.index("systemctl reload ssh.service"),
                                         data.index("command -v mount.efs"))
+                        self.assertLess(data.index("99_studio-desktop.gschema.override"),
+                                        data.index("/bin/bash scripts/virtual-desktop-host/linux/install.sh"))
 
     def test_desktop_sudo_grant_covers_creation_retries_and_failures(self):
         stubs = r'''id() { test "$EXISTS" = 1 || return 1; printf '2000\n'; }
