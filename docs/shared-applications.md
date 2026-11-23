@@ -28,7 +28,7 @@ All launchers and overrides saved in the linked applications directory are share
 
 ```bash
 mkdir -p /studio/bin /studio/projects /studio/apps/opencode/config
-install -m 755 scripts/studio-shell/{studio,BLENDER,CODE,COMFY,OPENCODE,OLLAMA,UNITY} /studio/bin/
+install -m 755 scripts/studio-shell/{studio,BLENDER,CODE,COMFY,OPENCODE,OLLAMA,UNITY,RESOLVE} /studio/bin/
 cp -n scripts/studio-shell/opencode.json /studio/apps/opencode/config/opencode.json
 ```
 
@@ -54,8 +54,45 @@ New workstations receive the local `studio` link during setup, before optional R
 | `OPENCODE` | Launches `/studio/apps/opencode/current/opencode`; seeds the shared global settings link only when local JSON/JSONC configuration is absent |
 | `OLLAMA` | Resolves the existing Ollama Rez package, uses `/studio/models/ollama`, and enables native OpenCode discovery |
 | `UNITY` | Prepares missing local Unity/VS Code settings and the shared .NET environment, then launches the existing shared Unity Hub |
+| `RESOLVE` | Checks the shared Resolve payload and prepared local state, creates missing local cache, and launches the native application |
 
 Each wrapper forwards its arguments. Outside the Studio shell, use its absolute path, such as `/studio/bin/CODE`. Use the same absolute paths for Menu Editor commands; `CODE` entries may append `%F`, while terminal commands omit it. Set **Run in terminal** for a terminal application such as OPENCODE. Existing legacy launchers remain usable.
+
+### DaVinci Resolve Free on prepared GPU workstations
+
+[Issue #160](https://github.com/vision-kwest/studio-workstation/issues/160) adds `RESOLVE` for the existing **21.2-free** EFS installation. The [installation README](https://docs.google.com/document/d/e/2PACX-1vS6rO-gmE-zdIpZtyKLDADvPY4AFy0LpSEro3dveRhlim8bstc-T7kxx2cBKYVB1WFnMu3GVBYQaej3/pub) and [wrapper handoff](https://docs.google.com/document/d/e/2PACX-1vSbhdh_EC-QTXYSZd16TeUe-_jvQsAkbV5jddIo0B5c7k1evf3QPN-W_0a5pu28g98IDb8zf1O8SmgK/pub) describe the existing native installation; this wrapper does not install Resolve or its OS/GPU prerequisites.
+
+On each Ubuntu 24.04 GPU workstation, with `/studio` mounted and Resolve closed, prepare the machine using the existing shared helper:
+
+```bash
+sudo /studio/apps/davinci-resolve/setup-local.sh --user "$(id -un)"
+```
+
+This creates `/opt/resolve` pointing to the selected shared release and the machine-local writable targets under `/var/lib/davinci-resolve/<release>`. `RESOLVE` verifies all eight mappings (`.license`, `LUT`, `easyDCP`, `Extras`, `Fairlight`, `Immersive`, `Apple Immersive`, `logs`), directory access, and actual resolved local storage before launching. Missing preparation reports the command above; ordinary launches never run sudo or APT. This PR does not add the helper to automatic workstation provisioning.
+
+The wrapper creates only missing `~/.cache/davinci-resolve/CacheClip` directories. Resolve creates its own native profile and project library under `~/.local/share/DaVinciResolve`; the wrapper leaves existing preferences, project databases and LUTs unchanged. It checks the data directory, configurations, project library, logs and cache for local storage, including symlink destinations. These paths follow the observed home-relative Resolve layout; the wrapper does not relocate them through `XDG_*` settings. Network, memory-backed and unrecognized filesystems are rejected for active state. Put source media, renders, project exports and backups under `/studio/projects/<project>/`.
+
+To adopt the uppercase command and retain the existing `studio-resolve` command, run these commands **once on EFS** from the repository root as the desktop user. The backups retain the previous shared launcher and menu entry:
+
+```bash
+cp -pn /studio/bin/studio-resolve /studio/bin/studio-resolve.before-RESOLVE
+cp -pn /studio/share/applications/studio-resolve.desktop /studio/share/applications/studio-resolve.desktop.before-RESOLVE
+install -m 755 scripts/studio-shell/{RESOLVE,studio-resolve} /studio/bin/
+desktop-file-edit --set-key=Exec --set-value='/studio/bin/RESOLVE %u' \
+  --set-key=TryExec --set-value=/studio/bin/RESOLVE --remove-key=Path \
+  /studio/share/applications/studio-resolve.desktop
+desktop-file-validate /studio/share/applications/studio-resolve.desktop
+```
+
+The menu keeps the name **DaVinci Resolve** and its existing icon/other fields. Removing its redundant `Path=/opt/resolve` lets the wrapper report missing local preparation before changing directory. Errors appear on stderr and through Zenity when available in an X11 desktop. The legacy command delegates to the same wrapper; both preserve native arguments and exit status. From a terminal, use `studio env` followed by `RESOLVE`.
+
+**First launch still requires native preferences:** In **Preferences → System → Media Storage**, set the ordered list to the expanded paths `~/.cache/davinci-resolve`, `~/Videos`, `/studio`, and restart when prompted. In **User → Project Save and Load**, enable Live save, project backups and timeline backups, and select an intentional EFS backup directory for your work. Keep project cache local and set Gallery stills to the project's EFS directory. The wrapper does not seed unverified config files, copy another workstation's device/library settings, or use the acceptance project's backup path as a production default.
+
+Before replacing a workstation, export the project **with stills and LUTs** to `/studio/projects/<project>/resolve/exports` and keep its media on EFS. The active project database remains local. After import, recheck Gallery, cache and backup paths; the installation notes report that import can reset working folders.
+
+**Acceptance:** Wrapper argument forwarding, prerequisite failures and preservation are tested offline. Fresh-workstation GUI launch, preference initialization, EFS project import/render/reopen, backups and stop/start remain pending; use the supplied [GUI testing reference](https://docs.google.com/document/d/e/2PACX-1vS1VedykcOJq2UDN1-xwZLJa6khM1GiKtlDsTbfZje94gWUHGxV2WJxLBOXm_eIc5LDRdPK1zZOz5Hv/pub) for that later acceptance. No shared deployment or GUI session change is implied by the wrapper PR.
+
+**Rollback:** Restore `studio-resolve.before-RESOLVE` and `studio-resolve.desktop.before-RESOLVE` over their original paths, then remove only `/studio/bin/RESOLVE` if desired. Keep the installed application, setup helper, local projects/preferences and shared data.
 
 ### Unity on current and replacement workstations
 

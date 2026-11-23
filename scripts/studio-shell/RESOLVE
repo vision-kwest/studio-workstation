@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Launch the staged shared payload using prepared machine-local writable state.
+set -euo pipefail
+base=/studio/apps/davinci-resolve
+selected=$(readlink -f "$base/current") || selected=
+setup="Close Resolve and run: sudo $base/setup-local.sh --user $(id -un)"
+
+fail() {
+    printf 'DaVinci Resolve: %s\n' "$*" >&2
+    if [[ -n ${DISPLAY:-} ]] && command -v zenity >/dev/null; then
+        zenity --error --no-markup --title='DaVinci Resolve' --text="$*" || true
+    fi
+    exit 1
+}
+
+local_directory() {
+    local path=$1 probe filesystem
+    [[ ! -e "$path" || -d "$path" ]] || fail "Expected a local directory: $path"
+    [[ ! -L "$path" || -e "$path" ]] || fail "Dangling local directory link: $path"
+    [[ ! -e "$path" || ( -r "$path" && -w "$path" && -x "$path" ) ]] || fail "Local directory is not accessible: $path"
+    probe=$(realpath -m -- "$path") || fail "Cannot resolve local storage: $path"
+    while [[ ! -e "$probe" ]]; do probe=$(dirname -- "$probe"); done
+    filesystem=$(findmnt -n -o FSTYPE -T "$probe") || fail "Cannot identify storage for $path"
+    case "$filesystem" in
+        ext2|ext3|ext4|xfs|btrfs|zfs|f2fs) ;;
+        *) fail "Resolve's active state must use local disk: $path ($filesystem). Preserve it before changing this path." ;;
+    esac
+}
+
+[[ -n "$selected" && -f "$selected/.shared-payload-ready" && -x "$selected/bin/resolve" ]] ||
+    fail "Shared installation unavailable at $base/current. Check the /studio mount and selected release."
+[[ "$(readlink -f /opt/resolve)" == "$selected" ]] || fail "$setup"
+state="/var/lib/davinci-resolve/${selected##*/}"
+for name in .license LUT easyDCP Extras Fairlight Immersive 'Apple Immersive' logs; do
+    [[ -L "$selected/$name" && "$(readlink -- "$selected/$name")" == "$state/$name" ]] ||
+        fail "Unexpected writable-path mapping: $selected/$name. $setup"
+    [[ -d "$state/$name" && -w "$state/$name" && -x "$state/$name" ]] ||
+        fail "Local writable state is unavailable: $state/$name. $setup"
+    local_directory "$state/$name"
+done
+
+# Resolve owns profile creation; do not copy another workstation's preferences.
+data="$HOME/.local/share/DaVinciResolve"
+cache="$HOME/.cache/davinci-resolve"
+for path in "$data" "$data/configs" "$data/Resolve Project Library" "$data/logs" \
+            "$cache" "$cache/CacheClip"; do
+    local_directory "$path"
+done
+mkdir -p -- "$cache/CacheClip" || fail "Cannot create the local cache: $cache/CacheClip"
+cd /opt/resolve || fail "$setup"
+exec /opt/resolve/bin/resolve "$@"
