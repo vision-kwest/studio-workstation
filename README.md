@@ -39,7 +39,7 @@ All profiles accept `--expires-in` and stop the instance while preserving saved 
 For example: `python3 studio workstation create --profile cpu --name ayo --expires-in 4h`.
 Choose a positive whole duration in minutes, hours or days. GPU defaults to `150m`;
 CPU and publisher remain untimed when the option is omitted.
-Use `--no-studio-software` to skip Rez; shared storage still follows DCV setup.
+Use `--no-studio-software` to skip Rez and the Ollama startup service; shared storage still follows DCV setup.
 The normal `workstation` account can install and save files under `/studio` without sudo.
 Shared application launchers use MenuLibre (**Menu Editor**); see the
 [shared application guide](docs/shared-applications.md) for setup, GUI saves and refresh.

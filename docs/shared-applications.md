@@ -8,7 +8,7 @@ CPU/GPU templates with and without Rez rendered and passed `bash -n` (largest us
 
 ## Locations and setup
 
-CPU/GPU setup uses the existing asynchronous post-DCV service. It finds the desktop account by UID 2000, creates the shared directories as that user, and installs Ubuntu's `menulibre`, `desktop-file-utils` and `ripgrep` packages. It links `/usr/local/bin/studio` to the shared shell entry point. `--no-studio-software` still skips only Rez. Menu setup may finish after the desktop becomes available.
+CPU/GPU setup uses the existing asynchronous post-DCV service. It finds the desktop account by UID 2000, creates the shared directories as that user, and installs Ubuntu's `menulibre`, `desktop-file-utils` and `ripgrep` packages. It links `/usr/local/bin/studio` to the shared shell entry point. `--no-studio-software` skips Rez and the Ollama service while retaining shared storage and menus. Menu setup may finish after the desktop becomes available.
 
 | Location | Purpose |
 |---|---|
@@ -130,7 +130,7 @@ The local cache regenerates on a fresh workstation and survives stop/start while
 
 On a fresh local configuration, OPENCODE links only `~/.config/opencode/opencode.json` to `/studio/apps/opencode/config/opencode.json`, honoring `XDG_CONFIG_HOME`. Existing `opencode.json` or `opencode.jsonc` files and links are preserved. The supplied shared setting disables OpenCode's automatic update checks so the shared version is selected deliberately.
 
-Keep OpenCode's database, credentials, caches and service state on local storage; keep XDG directories local, as with ComfyUI. Provider login and local history remain workstation-specific. After changing the shared executable, restart any existing OpenCode background server before checking the running version. Start Ollama explicitly with `OLLAMA serve` when needed; entering `studio env` does not start a model server. Existing model files stay in place, and the wrappers do not download models automatically.
+Keep OpenCode's database, credentials, caches and service state on local storage; keep XDG directories local, as with ComfyUI. Provider login and local history remain workstation-specific. After changing the shared executable, restart any existing OpenCode background server before checking the running version. The workstation's Ollama service starts independently of `studio env`; entering the shell does not start another server. Existing model files stay in place, and the wrappers do not download models automatically.
 
 The model directory is chosen by the Ollama server when it starts. Running `OLLAMA list` or `OLLAMA run` does not change the model directory of an already-running server; verify its configuration separately.
 
@@ -138,25 +138,36 @@ The model directory is chosen by the Ollama server when it starts. Running `OLLA
 
 A running Ollama server needs an installed completion model before OpenCode can offer a local choice. OpenCode 2.3.2 [discovers these models automatically](https://opencode.ai/docs/providers/#ollama) at `http://127.0.0.1:11434`; an empty `OLLAMA list` means there is nothing local to select yet.
 
-The model files are shared, but each workstation needs its own running Ollama server. OpenCode discovers models through that local server, not by scanning EFS. On a replacement workstation, start the server and use `OLLAMA list` to confirm the existing models; there is no need to download `qwen3:8b` again. `OLLAMA -h` should display help even before the server is running.
+The model files are shared, but each workstation runs its own Ollama server. OpenCode discovers models through that local server, not by scanning EFS. Normal CPU/GPU setup installs and enables `studio-ollama.service` after Rez is ready. On later boots, systemd runs `/studio/bin/OLLAMA serve` as the desktop account with `OLLAMA_MODELS=/studio/models/ollama` and a listener at `127.0.0.1:11434`. It retries failures every 30 seconds without making desktop readiness depend on EFS or Ollama.
 
-Start the server in one terminal, or reuse the server if it is already running:
+The service follows Ollama's [native Linux startup-service approach](https://docs.ollama.com/linux#adding-ollama-as-a-startup-service-recommended). It does not pull or preload a model. Model weights load when requested; GPU discovery may still use transient resources. After inference, normal Ollama [keep-alive behavior](https://docs.ollama.com/faq#how-do-i-keep-a-model-loaded-in-memory-or-make-it-unload-immediately) applies. Model files, Modelfile parameters and OpenCode settings are preserved. Set server-wide environment overrides with `sudo systemctl edit studio-ollama.service`; a system service does not inherit exports from your terminal.
 
-```bash
-studio env
-OLLAMA serve
-```
-
-In another terminal, install a model once on EFS and launch OpenCode:
+On a replacement workstation, confirm the existing shared models and open OpenCode; no second terminal or repeated model download is needed:
 
 ```bash
 studio env
-OLLAMA pull qwen3:8b
 OLLAMA list
 OPENCODE
 ```
 
-[Qwen3 8B](https://ollama.com/library/qwen3:8b) is an initial tool-capable example with an approximately 5.2 GB download. Select `qwen3:8b` under Ollama in OpenCode's `/models` picker. Discovery refreshes about every 30 seconds; reopen the picker after the download finishes. `OPENCODE models` lists the catalog from a terminal. Choose model size and context settings for the workstation's memory; discovering a model does not establish that every context length will fit.
+For an existing workstation, apply the updated setup from the repository once. Finish active model requests and stop any manually launched `OLLAMA serve` first, so it releases port 11434:
+
+```bash
+sudo install -m 700 scripts/setup_workstation_software.sh /usr/local/sbin/studio-software-setup
+sudo systemctl restart --no-block studio-software-setup.service
+```
+
+The setup keeps an already managed Ollama server running when repeated. Inspect the service and its logs with:
+
+```bash
+systemctl status studio-ollama.service --no-pager
+journalctl -u studio-ollama.service -b --no-pager -n 50
+curl --fail --silent --show-error http://127.0.0.1:11434/api/ps
+```
+
+Before the first model request, `/api/ps` should report an empty `models` array. Use `sudo systemctl restart studio-ollama.service` after changing server environment overrides, or `sudo systemctl stop studio-ollama.service` to stop it temporarily. Setup re-enables it on subsequent boots. `OLLAMA -h` works without a server. `OLLAMA serve` remains available for deliberate foreground debugging after stopping the managed service.
+
+If the shared store has no suitable model yet, install one once with `OLLAMA pull qwen3:8b`. [Qwen3 8B](https://ollama.com/library/qwen3:8b) is an initial tool-capable example with an approximately 5.2 GB download. Select it under Ollama in OpenCode's `/models` picker. Discovery refreshes about every 30 seconds; reopen the picker after the download finishes. `OPENCODE models` lists the catalog from a terminal. Choose model size and context settings for the workstation's memory; discovering a model does not establish that every context length will fit.
 
 The OLLAMA wrapper also exposes `/studio/apps/opencode/current` to Ollama and its children when the native executable exists. It adds the path after Rez resolves the package environment, because Rez rebuilds PATH. This lets Ollama's **Launch OpenCode** menu reuse the shared binary. `OPENCODE` remains the uppercase Studio wrapper; no lowercase wrapper is installed. On a fresh local profile, run `OPENCODE --version` once before launching OpenCode through Ollama's menu so the existing shared-settings link is initialized. Ollama invokes the native executable directly.
 
