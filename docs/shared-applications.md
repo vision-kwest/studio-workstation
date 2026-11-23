@@ -61,18 +61,31 @@ Each wrapper forwards its arguments. Outside the Studio shell, use its absolute 
 
 [Issue #153](https://github.com/vision-kwest/studio-workstation/issues/153) adds one shared `UNITY` wrapper. Install it with the commands above; current and future workstations use the same `/studio/bin/UNITY` file. No workstation provisioning change is required.
 
-Before changing local settings, the wrapper checks the existing shared Unity Hub AppImage, selected Editor, VS Code, .NET 10 SDK and the Editor's bundled Android tools. These applications and modules must already be installed; the wrapper does not download or update them.
+Install the native Unity CLI and Editor menu entry **once on EFS**, from the repository root as the desktop user. The verified source below is Unity CLI **1.0.0**, installed by Hub **4.0.1** at `~/.local/bin/unity`. If absent, obtain the matching official artifact first; the wrapper has no downloader.
+
+```bash
+printf '%s  %s\n' bd680055cb4a8d9d244c70d79eefa5828f6668075097559547e1ca4aece07b2b "$HOME/.local/bin/unity" | sha256sum -c - &&
+install -D -m 755 "$HOME/.local/bin/unity" /studio/apps/unity-cli/1.0.0/unity &&
+ln -sfnT 1.0.0 /studio/apps/unity-cli/current &&
+install -m 644 share/applications/unity-editor.desktop /studio/share/applications/unity-editor.desktop &&
+desktop-file-validate /studio/share/applications/unity-editor.desktop
+```
+
+Before changing local settings, the wrapper checks the shared Unity CLI, Hub AppImage, selected Editor, VS Code, .NET 10 SDK and the Editor's bundled Android tools. These applications and modules must already be installed; the wrapper does not download or update them.
 
 On launch, it:
 
 - Exports `DOTNET_ROOT` and the required `PATH` for Hub, the Editor and their child processes, including launches from GNOME.
 - Creates `~/.vscode/extensions` pointing to `/studio/apps/vscode/extensions` only when the local path is absent.
 - Seeds only a missing `kScriptsDefaultApp` preference in `~/.local/share/unity3d/prefs` with the shared VS Code path. Existing values, including an explicitly blank choice, are preserved.
-- Runs `/studio/apps/unity-hub/current/UnityHub.AppImage`, forwarding its arguments.
+- Registers the resolved shared Editor through the native CLI and adds missing project records for `/studio/projects/unity/*/ProjectSettings/ProjectVersion.txt`. Discovery examines only these immediate project directories; existing registrations and project files are preserved.
+- Runs `/studio/apps/unity-hub/current/UnityHub.AppImage` by default. `UNITY --editor [args]` uses the same preparation and environment, then launches the shared Editor directly with those arguments.
+
+The native editor-add result for an already-registered Editor (code `6`) is accepted. Other CLI errors stop launch. Projects are added only when absent from the native project-list query; no Hub registry or authentication profile is copied between workstations.
 
 Unity uses its native bundled Android SDK, NDK and JDK defaults; the wrapper does not add custom Android preference keys. Unity/Hub credentials, license state, caches and other local profile data remain local. No profile is copied from another workstation.
 
-The preference seed follows the **observed Unity 6000.3.29f1** Linux XML format, version `1.1`, with base64-encoded string values. Recheck that format when changing the shared Editor version; this is a source/configuration contract, not a claim of fresh-workstation acceptance.
+The preference seed follows the **observed Unity 6000.3.29f1** Linux XML format, version `1.1`, with base64-encoded string values. Registration uses the observed Hub 4.0.1 / CLI 1.0.0 native contract. Recheck these contracts when upgrading; they are not a claim of full fresh-workstation GUI acceptance.
 
 When adopting the wrapper on an existing workstation, save your work and quit Unity, Hub and VS Code normally once. Start Hub through `UNITY` so newly started processes inherit the environment; an already-running Hub or VS Code process retains its previous environment.
 
@@ -81,13 +94,17 @@ studio env
 UNITY
 ```
 
-For the existing shared `/studio/share/applications/unityhub.desktop`, preserve a backup named `unityhub.desktop.before-UNITY` once, then set `Exec=/studio/bin/UNITY %u` and `TryExec=/studio/bin/UNITY`. Preserve the other fields, including its icon and URI handler, and validate the edited file with `desktop-file-validate`. This single shared launcher serves both existing and replacement workstations.
+The existing shared `unityhub.desktop` remains unchanged, using `Exec=/studio/bin/UNITY %u` and `TryExec=/studio/bin/UNITY`. The new **Unity Editor** entry calls `/studio/bin/UNITY --editor` and uses `/studio/apps/unity/current/Editor/Data/Resources/LargeUnityIcon.png`. Both shared menu entries serve existing and replacement workstations.
 
-On a fresh workstation, complete Hub sign-in and license activation normally. If Hub has not listed the shared Editor, use its native **Locate** action. These account and registration steps are not replaced by the wrapper.
+On a fresh workstation, complete Hub sign-in and license activation normally. The wrapper registers the existing shared Editor and discovered projects before launch; no reinstall or manual **Locate** step is required for that registration.
 
-**Acceptance:** Verify first launch from GNOME and from a terminal, repeat-launch preservation, Unity opening a shared project, and Unity opening C# scripts in VS Code with the shared extensions and .NET SDK. Check Android tooling in the Editor when Android work is required. Offline checks and local setup probes do not establish these native application results; record actual observations separately.
+**Observed deployment and native validation:** The shared wrapper and new `unity-editor.desktop` are deployed and match the local source. An empty local HOME/XDG profile ran the actual registration and preparation twice, producing one registered Editor and two projects without duplicates; only the final GUI `os.execv` was stubbed. Both launchers pass `desktop-file-validate`. Native GIO discovers **Unity Editor** with the expected command and icon and `should_show=true`; this proves menu discovery, not an observed desktop click.
 
-**Rollback:** Restore `unityhub.desktop.before-UNITY` over the shared launcher. Keep the shared applications, projects and local preferences. The small local settings created by the wrapper are ordinary application configuration.
+The current profile's native CLI lists Editor **6000.3.29f1**, its Android/modules information, and the intact shared `UnitySmokeTest` and `QuestSmokeTest` projects. The real `UNITY --editor -version` command returned `6000.3.29f1` successfully. After a normal restart, Hub displayed the native Unity sign-in screen. Sign-in remains local on each fresh workstation.
+
+**Remaining GUI acceptance:** After the operator signs in, visually confirm the Hub's Projects and Installs lists and launch through both menu entries. Opening an Editor project, C# editing in VS Code and an Android build have not been accepted by these checks; record those results separately.
+
+**Rollback:** Restore the previous shared `UNITY` executable and remove only the added `unity-editor.desktop` if reverting this extension. Keep the existing Hub launcher, shared applications/projects and local settings. Native registrations remain ordinary Hub configuration.
 
 ### OpenCode settings and local state
 

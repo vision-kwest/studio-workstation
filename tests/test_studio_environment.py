@@ -19,6 +19,16 @@ keys = ('PATH', 'STUDIO_ENV', 'STUDIO_ROOT', 'STUDIO_PROJECTS', 'OLLAMA_MODELS',
 print(json.dumps({'args': sys.argv[1:], 'cwd': os.getcwd(),
                   'env': {key: os.environ.get(key) for key in keys}}))
 """
+UNITY_CLI = """import json, os, sys
+with open(os.environ['UNITY_CLI_CALLS'], 'a') as journal:
+    journal.write(json.dumps(sys.argv[1:]) + '\\n')
+operation = ' '.join(sys.argv[4:6])
+if operation == os.environ.get('UNITY_CLI_FAILURE'):
+    print(os.environ['UNITY_CLI_RESPONSE'])
+    sys.exit(int(os.environ['UNITY_CLI_STATUS']))
+print(json.dumps({'success': True, 'errors': [], 'data': {'partial': False, 'nextPage': None,
+    'items': [{'path': p} for p in json.loads(os.environ.get('UNITY_CLI_REGISTERED', '[]'))]}}))
+"""
 
 
 class StudioEnvironmentTests(unittest.TestCase):
@@ -219,6 +229,10 @@ class StudioEnvironmentTests(unittest.TestCase):
                  "vscode/current/bin/code", "dotnet/dotnet"] + [android + name for name in
                  ("SDK/platform-tools/adb", "NDK/ndk-build", "OpenJDK/bin/java")]
         required = [self.payload(self.shared / "apps" / path) for path in paths]
+        self.cli_calls = self.root / "unity-cli-calls.jsonl"
+        self.env["UNITY_CLI_CALLS"] = str(self.cli_calls)
+        required.append(self.write(self.shared / "apps/unity-cli/current/unity",
+                                   f"#!{sys.executable}\n" + UNITY_CLI))
         required.append(self.write(self.shared / "apps" / android / "Tools/gradle/lib/gradle-launcher-test.jar", "Gradle"))
         sdk = self.shared / "apps/dotnet/sdk/10.0.100"
         sdk.mkdir(parents=True)
@@ -226,6 +240,77 @@ class StudioEnvironmentTests(unittest.TestCase):
         self.unity_prefs = self.home / ".local/share/unity3d/prefs"
         self.unity_extensions = self.home / ".vscode/extensions"
         return required + [sdk, self.shared / "apps/vscode/extensions"]
+
+    def test_unity_registers_resolved_editor_and_only_missing_immediate_projects(self):
+        self.unity_payloads()
+        editor = self.shared / "apps/unity/current/Editor/Unity"
+        resolved = self.payload(self.root / "editor with spaces/Unity")
+        editor.unlink()
+        editor.symlink_to(resolved)
+        project_root = self.shared / "projects/unity"
+        projects = [project_root / name for name in ("Alpha", "Quest with spaces")]
+        for project in projects + [project_root / "nested/Ignore"]:
+            self.write(project / "ProjectSettings/ProjectVersion.txt", "6000.3.29f1")
+        (project_root / "Invalid/ProjectSettings/ProjectVersion.txt").mkdir(parents=True)
+        registered_alias = self.root / "registered project alias"
+        registered_alias.symlink_to(projects[0], target_is_directory=True)
+        flags = ["--non-interactive", "--format", "json"]
+        expected = [flags + ["projects"], flags + ["editors", "add", str(resolved)],
+                    flags + ["projects", "add", *map(str, projects)]]
+        for attempt in range(2):
+            result = self.run_command([self.bin / "UNITY"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(self.rows(result)), 1)
+            self.assertEqual([json.loads(line) for line in self.cli_calls.read_text().splitlines()], expected)
+            self.env.update(UNITY_CLI_FAILURE="editors add", UNITY_CLI_STATUS="6",
+                            UNITY_CLI_RESPONSE='{"errors":[{"code":"EDITORS_ADD_ALREADY_IN_LIST"}]}',
+                            UNITY_CLI_REGISTERED=json.dumps([str(registered_alias), str(projects[1])]))
+            expected += expected[:2]
+
+    def test_unity_registration_errors_prevent_launch(self):
+        self.unity_payloads()
+        self.write(self.shared / "projects/unity/Test/ProjectSettings/ProjectVersion.txt", "6000.3.29f1")
+        duplicate = {"code": "EDITORS_ADD_ALREADY_IN_LIST"}
+        cases = [("projects", 0, "not JSON"), ("projects", 1, '{"success":false}'),
+                 ("projects", 0, '{"success":true,"data":{"items":[],"partial":true}}'),
+                 ("projects", 0, '{"success":true,"data":{"items":[],"nextPage":1}}'),
+                 ("editors add", 6, "not JSON"), ("editors add", 6, "[]"),
+                 ("editors add", 6, '{"errors":[]}'),
+                 ("editors add", 6, json.dumps({"errors": [duplicate, {"code": "OTHER"}]})),
+                 ("editors add", 1, json.dumps({"errors": [duplicate]})),
+                 ("projects add", 6, '{"errors":[{"code":"COMMAND_FAILED"}]}')]
+        for operation, status, response in cases:
+            with self.subTest(operation=operation, status=status, response=response):
+                self.env.update(UNITY_CLI_FAILURE=operation, UNITY_CLI_STATUS=str(status),
+                                UNITY_CLI_RESPONSE=response)
+                result = self.run_command([self.bin / "UNITY"])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "", "Hub or Editor must not launch after registration failure")
+
+    def test_unity_direct_editor_and_hub_preserve_literal_arguments(self):
+        self.unity_payloads()
+        editor = self.shared / "apps/unity/current/Editor/Unity"
+        self.write(editor, f"#!{sys.executable}\n" + CAPTURE.replace(
+            "'args': sys.argv[1:]", "'executable': sys.argv[0], 'args': sys.argv[1:]"))
+        arguments = ["--projectPath", "project with spaces", "$(echo literal)", "--editor", ""]
+        for prefix in ([], ["--editor"]):
+            result = self.run_command([self.bin / "UNITY", *prefix, *arguments])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            row, = self.rows(result)
+            self.assertEqual(row["args"], arguments)
+            self.assertEqual(row.get("executable"), str(editor) if prefix else None)
+            self.assertEqual(row["env"]["DOTNET_ROOT"], str(self.shared / "apps/dotnet"))
+
+    def test_unity_editor_desktop_entry(self):
+        import shutil
+        entry = ROOT / "share/applications/unity-editor.desktop"
+        fields = dict(line.split("=", 1) for line in entry.read_text().splitlines() if "=" in line)
+        for key, value in {"Type": "Application", "Exec": "/studio/bin/UNITY --editor",
+                           "TryExec": "/studio/bin/UNITY", "Terminal": "false",
+                           "Icon": "/studio/apps/unity/current/Editor/Data/Resources/LargeUnityIcon.png"}.items():
+            self.assertEqual(fields[key], value)
+        if shutil.which("desktop-file-validate"):
+            subprocess.run(["desktop-file-validate", str(entry)], check=True)
 
     def test_unity_first_launch_retry_environment_and_arguments(self):
         self.unity_payloads()
