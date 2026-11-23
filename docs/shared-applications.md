@@ -78,7 +78,7 @@ On launch, it:
 - Exports `DOTNET_ROOT` and the required `PATH` for Hub, the Editor and their child processes, including launches from GNOME.
 - Creates `~/.vscode/extensions` pointing to `/studio/apps/vscode/extensions` only when the local path is absent.
 - Seeds only a missing `kScriptsDefaultApp` preference in `~/.local/share/unity3d/prefs` with the shared VS Code path. Existing values, including an explicitly blank choice, are preserved.
-- Registers the resolved shared Editor through the native CLI and adds missing project records for `/studio/projects/unity/*/ProjectSettings/ProjectVersion.txt`. Discovery examines only these immediate project directories; existing registrations and project files are preserved.
+- Registers the resolved shared Editor through the native CLI and adds missing project records for `/studio/projects/unity/*/ProjectSettings/ProjectVersion.txt`. Discovery examines only these immediate project directories; existing registrations and project source files are preserved.
 - Runs `/studio/apps/unity-hub/current/UnityHub.AppImage` by default. `UNITY --editor [args]` uses the same preparation and environment, then launches the shared Editor directly with those arguments.
 
 The native editor-add result for an already-registered Editor (code `6`) is accepted. Other CLI errors stop launch. Projects are added only when absent from the native project-list query; no Hub registry or authentication profile is copied between workstations.
@@ -98,13 +98,33 @@ The existing shared `unityhub.desktop` remains unchanged, using `Exec=/studio/bi
 
 On a fresh workstation, complete Hub sign-in and license activation normally. The wrapper registers the existing shared Editor and discovered projects before launch; no reinstall or manual **Locate** step is required for that registration.
 
-**Observed deployment and native validation:** The shared wrapper and new `unity-editor.desktop` are deployed and match the local source. An empty local HOME/XDG profile ran the actual registration and preparation twice, producing one registered Editor and two projects without duplicates; only the final GUI `os.execv` was stubbed. Both launchers pass `desktop-file-validate`. Native GIO discovers **Unity Editor** with the expected command and icon and `should_show=true`; this proves menu discovery, not an observed desktop click.
+**Hub discovery validation (Issue #153):** The registration wrapper and new `unity-editor.desktop` were deployed. An empty local HOME/XDG profile ran the actual registration and preparation twice, producing one registered Editor and two projects without duplicates; only the final GUI `os.execv` was stubbed. Both launchers passed `desktop-file-validate`. Native GIO discovered **Unity Editor** with the expected command and icon and `should_show=true`.
 
 The current profile's native CLI lists Editor **6000.3.29f1**, its Android/modules information, and the intact shared `UnitySmokeTest` and `QuestSmokeTest` projects. The real `UNITY --editor -version` command returned `6000.3.29f1` successfully. After a normal restart, Hub displayed the native Unity sign-in screen. Sign-in remains local on each fresh workstation.
 
-**Remaining GUI acceptance:** After the operator signs in, visually confirm the Hub's Projects and Installs lists and launch through both menu entries. Opening an Editor project, C# editing in VS Code and an Android build have not been accepted by these checks; record those results separately.
+**Operator acceptance (Issue #153):** The user confirmed that both projects appeared in Hub and opened and ran one. Project discovery and that project launch are user-accepted; C# editing and an Android build remain separate checks. The reported Editor slowness is tracked independently in Issue #163 below.
 
 **Rollback:** Restore the previous shared `UNITY` executable and remove only the added `unity-editor.desktop` if reverting this extension. Keep the existing Hub launcher, shared applications/projects and local settings. Native registrations remain ordinary Hub configuration.
+
+#### Local project Library cache (Issue #163)
+
+[Issue #163](https://github.com/vision-kwest/studio-workstation/issues/163) moves each discovered project's generated `Library` to local EBS while keeping application binaries and project source on EFS. Unity documents [Library regeneration from project source](https://docs.unity3d.com/6000.3/Documentation/Manual/ImportingAssets.html); its manual also classifies cloud-stored projects as unsupported, so this EFS layout remains a Studio-specific integration.
+
+Live diagnosis found the correct NVIDIA T4 OpenGL renderer, but the Editor and two workers waited in NFS writeback on `Library/*DB-lock` files. Host I/O pressure was about 55%; EFS used Elastic throughput with `PercentIOLimit` below 1%. This evidence motivates moving the cache write path; it does not establish the fix's performance yet.
+
+For each discovered project, `UNITY` hashes its resolved absolute path with SHA-256 and uses the first 16 hex characters as `<key>`. The local target is `$HOME/.cache/studio-unity/<key>/Library`; the project's EFS `Library` becomes a symlink to it.
+
+An existing EFS `Library` directory is preserved as `Library.efs-backup` before linking. The wrapper recreates a missing local target on later launches when the existing link matches the expected target. It preserves conflicting links and backups and reports the conflict rather than replacing them.
+
+Save and close all Unity Editors before migration. The wrapper refuses migration while a Unity process is running or the project's `Temp/UnityLockfile` exists. Only `Library` moves: `Temp` stays on EFS with Unity's native project lock. This assumes the same default workstation account and home path on replacement instances.
+
+The local cache regenerates on a fresh workstation and survives stop/start while that workstation's EBS remains. The first import rebuilds generated data; projects and their source assets remain shared. The symlink needs no elevated privileges or new service; bind mounts were rejected because they require password-based sudo and boot integration.
+
+**Native cache validation:** A disposable copy of the same scene, with source on EFS and Library on local EBS, completed two native Editor batch Play/close cycles at 55.8 and 56.2 frames/second over five seconds. The Library link survived both exits and the native Temp lock was removed. An initial probe used an incorrect scene path and was corrected; the two completed runs also logged a Unity Search indexing exception, so this does not establish error-free GUI acceptance. The 18 wrapper/environment tests pass, including cache preservation, repeat launch, missing local targets and active-project/conflict refusal. Interactive playback and the reported persistent splash window are checked separately on the original project.
+
+**Deployment:** After all Editors had exited, the shared wrapper prepared local Library targets for both `UnitySmokeTest` and `QuestSmokeTest` on `editor`. The source folders remain on EFS. The existing smoke-test Library is preserved as `Library.efs-backup`; Quest had no previous Library to preserve. The previous shared wrapper is saved as `/studio/bin/UNITY.before-local-library`.
+
+**Cache rollback:** With Editors closed, restore the prior wrapper and replace only the expected `Library` symlink with the preserved `Library.efs-backup`, when present. If there was no previous Library, Unity can regenerate it on EFS. Keep project source files and the local cache intact.
 
 ### OpenCode settings and local state
 

@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """Register shared Unity tools/projects, prepare preferences, and launch Hub or Editor."""
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -66,6 +67,32 @@ os.environ["DOTNET_ROOT"] = str(dotnet)
 os.environ["PATH"] = str(dotnet) + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin")
 projects = sorted({str(p.parent.parent) for p in Path("/studio/projects/unity").glob(
     "*/ProjectSettings/ProjectVersion.txt") if p.is_file()})
+for path in projects:
+    project = Path(path).resolve()
+    library = project / "Library"
+    key = hashlib.sha256(str(project).encode()).hexdigest()[:16]
+    cache = Path.home() / ".cache/studio-unity" / key / "Library"
+    if library.is_symlink():
+        if library.resolve() != cache.resolve():
+            sys.exit(f"UNITY: preserve the different Library link before retrying: {library}")
+        cache.mkdir(parents=True, exist_ok=True)
+        continue
+    if (project / "Temp/UnityLockfile").exists() or subprocess.run(
+            ["pgrep", "-u", str(os.getuid()), "-x", "Unity"], stdout=subprocess.DEVNULL).returncode != 1:
+        sys.exit(f"UNITY: save and close all Unity Editors before preparing the local Library: {project}")
+    backup = project / "Library.efs-backup"
+    if library.exists() and (not library.is_dir() or os.path.lexists(backup)):
+        sys.exit(f"UNITY: preserve the existing Library/backup before retrying: {project}")
+    cache.mkdir(parents=True, exist_ok=True)
+    moved = library.exists()
+    if moved:
+        library.rename(backup)
+    try:
+        library.symlink_to(cache, target_is_directory=True)
+    except OSError:
+        if moved and not os.path.lexists(library):
+            backup.rename(library)
+        raise
 if projects:
     result = subprocess.run([str(cli), "--non-interactive", "--format", "json", "projects"],
                             capture_output=True, text=True)
