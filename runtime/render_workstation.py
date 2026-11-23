@@ -63,6 +63,19 @@ chmod 600 /etc/studio-standalone.env
 set -a
 source /etc/studio-standalone.env
 set +a
+# Set desktop defaults before RES installs GNOME and starts the first session.
+install -d -m 0755 /usr/share/glib-2.0/schemas
+cat > /usr/share/glib-2.0/schemas/99_studio-desktop.gschema.override <<'STUDIO_IDLE_DEFAULTS'
+[org.gnome.desktop.session]
+idle-delay=uint32 0
+[org.gnome.desktop.screensaver]
+lock-enabled=false
+STUDIO_IDLE_DEFAULTS
+chmod 0644 /usr/share/glib-2.0/schemas/99_studio-desktop.gschema.override
+# Initial package installation compiles schemas; reentry handles installed GNOME.
+if test -f /usr/share/glib-2.0/schemas/org.gnome.desktop.session.gschema.xml; then
+  glib-compile-schemas /usr/share/glib-2.0/schemas
+fi
 /bin/bash scripts/virtual-desktop-host/linux/install.sh -p false -m vdi-app -g GPUFAMILY -e standalone -n standalone -o USERNAME -d CONSOLE -i standalone-console -a REGION
 """.replace("USERNAME",user).replace("APPURI",app).replace("REGION",REGION).replace("GPUFAMILY",gpu_family).replace(
         "APP_VERSION_LINE", "STUDIO_APP_VERSION_ID="+GPU_ARCHIVES["virtual-desktop.tar.gz"][0] if pinned else "").replace(
