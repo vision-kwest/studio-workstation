@@ -1,6 +1,7 @@
 #!/usr/bin/python3
-"""Prepare local Unity preferences, then open the shared Unity Hub."""
+"""Register shared Unity tools/projects, prepare preferences, and launch Hub or Editor."""
 import base64
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -10,12 +11,13 @@ import xml.etree.ElementTree as ET
 
 apps = Path("/studio/apps")
 hub = apps / "unity-hub/current/UnityHub.AppImage"
+cli = apps / "unity-cli/current/unity"
 editor = apps / "unity/current/Editor"
 code = apps / "vscode/current/bin/code"
 dotnet = apps / "dotnet"
 android = editor / "Data/PlaybackEngines/AndroidPlayer"
 shared_extensions = apps / "vscode/extensions"
-for executable in (hub, editor / "Unity", code, dotnet / "dotnet",
+for executable in (hub, cli, editor / "Unity", code, dotnet / "dotnet",
                    android / "SDK/platform-tools/adb", android / "NDK/ndk-build",
                    android / "OpenJDK/bin/java"):
     if not executable.is_file() or not os.access(executable, os.X_OK):
@@ -62,4 +64,35 @@ if seed_editor:
 
 os.environ["DOTNET_ROOT"] = str(dotnet)
 os.environ["PATH"] = str(dotnet) + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin")
-os.execv(hub, [str(hub), *sys.argv[1:]])
+projects = sorted({str(p.parent.parent) for p in Path("/studio/projects/unity").glob(
+    "*/ProjectSettings/ProjectVersion.txt") if p.is_file()})
+if projects:
+    result = subprocess.run([str(cli), "--non-interactive", "--format", "json", "projects"],
+                            capture_output=True, text=True)
+    try:
+        report = json.loads(result.stdout)
+        if result.returncode or report["success"] is not True or report["data"].get("partial") or report["data"].get("nextPage"):
+            raise ValueError("incomplete project listing")
+        registered = {Path(p["path"]).resolve() for p in report["data"]["items"]}
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        sys.exit(f"UNITY: cannot read the native project list ({error}):\n{result.stderr}{result.stdout}")
+    projects = [p for p in projects if Path(p).resolve() not in registered]
+for kind, paths in (("editors", [str((editor / "Unity").resolve())]), ("projects", projects)):
+    if not paths:
+        continue
+    result = subprocess.run([str(cli), "--non-interactive", "--format", "json", kind, "add", *paths],
+                            capture_output=True, text=True)
+    if result.returncode:
+        try:
+            errors = json.loads(result.stdout).get("errors", [])
+        except (json.JSONDecodeError, AttributeError):
+            errors = []
+        if kind == "editors" and result.returncode == 6 and isinstance(errors, list) and errors and all(
+                isinstance(e, dict) and e.get("code") == "EDITORS_ADD_ALREADY_IN_LIST" for e in errors):
+            continue
+        sys.exit(f"UNITY: native {kind} registration failed:\n{result.stderr}{result.stdout}")
+arguments = sys.argv[1:]
+application = hub
+if arguments[:1] == ["--editor"]:
+    application, arguments = editor / "Unity", arguments[1:]
+os.execv(application, [str(application), *arguments])

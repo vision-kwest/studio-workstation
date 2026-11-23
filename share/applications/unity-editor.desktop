@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Unity Editor
+Comment=Open the shared Unity Editor with the Studio development environment
+Exec=/studio/bin/UNITY --editor
+TryExec=/studio/bin/UNITY
+Icon=/studio/apps/unity/current/Editor/Data/Resources/LargeUnityIcon.png
+Terminal=false
+Categories=Development;
+StartupWMClass=Unity
