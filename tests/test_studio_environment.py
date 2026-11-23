@@ -224,6 +224,8 @@ class StudioEnvironmentTests(unittest.TestCase):
                 config.unlink()
 
     def unity_payloads(self):
+        self.write(self.localbin / "pgrep", '#!/bin/sh\nexit "${UNITY_PGREP_STATUS:-1}"\n')
+        self.env["PATH"] = str(self.localbin) + ":/usr/bin:/bin"
         android = "unity/current/Editor/Data/PlaybackEngines/AndroidPlayer/"
         paths = ["unity-hub/current/UnityHub.AppImage", "unity/current/Editor/Unity",
                  "vscode/current/bin/code", "dotnet/dotnet"] + [android + name for name in
@@ -240,6 +242,60 @@ class StudioEnvironmentTests(unittest.TestCase):
         self.unity_prefs = self.home / ".local/share/unity3d/prefs"
         self.unity_extensions = self.home / ".vscode/extensions"
         return required + [sdk, self.shared / "apps/vscode/extensions"]
+
+    def test_unity_library_migration_repeat_and_missing_local_cache(self):
+        self.unity_payloads()
+        project = self.shared / "projects/unity/Project with spaces"
+        self.write(project / "ProjectSettings/ProjectVersion.txt", "6000.3.29f1")
+        self.write(project / "Library/SourceAssetDB", "original EFS cache bytes")
+        temp = self.write(project / "Temp/keep", "native project temp")
+        library, backup = project / "Library", project / "Library.efs-backup"
+        for attempt in range(3):
+            result = self.run_command([self.bin / "UNITY"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(library.is_symlink())
+            cache = library.resolve()
+            self.assertTrue(cache.is_relative_to(self.home / ".cache/studio-unity"))
+            self.assertTrue(cache.is_dir())
+            self.assertEqual((backup / "SourceAssetDB").read_bytes(), b"original EFS cache bytes")
+            self.assertEqual(temp.read_text(), "native project temp")
+            self.assertFalse(temp.parent.is_symlink())
+            if attempt == 0:
+                self.write(cache / "warm", "local cache survives repeat")
+            elif attempt == 1:
+                self.assertEqual((cache / "warm").read_text(), "local cache survives repeat")
+                (cache / "warm").unlink()
+                cache.rmdir()  # Same shared link, but no local cache on a fresh workstation.
+
+    def test_unity_library_refuses_active_project_and_preserves_conflicts(self):
+        import shutil
+        self.unity_payloads()
+        self.write(self.unity_prefs, '<unity_prefs version_major="1" version_minor="1">'
+                   '<pref name="kScriptsDefaultApp" type="string" /></unity_prefs>')
+        for kind in ("active", "probe-error", "lock", "foreign-link", "backup", "file"):
+            with self.subTest(conflict=kind):
+                project = self.shared / "projects/unity/Test"
+                self.write(project / "ProjectSettings/ProjectVersion.txt", "6000.3.29f1")
+                library = project / "Library"
+                if kind == "foreign-link":
+                    library.symlink_to(self.root / "foreign-cache")
+                else:
+                    self.write(library if kind == "file" else library / "keep", "preserved")
+                if kind == "backup":
+                    self.write(project / "Library.efs-backup/keep", "previous backup")
+                if kind == "lock":
+                    self.write(project / "Temp/UnityLockfile", "active on another workstation")
+                self.env["UNITY_PGREP_STATUS"] = {"active": "0", "probe-error": "2"}.get(kind, "1")
+                protected = library / "keep" if library.is_dir() else library
+                before = library.readlink() if library.is_symlink() else protected.read_bytes()
+                result = self.run_command([self.bin / "UNITY"])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(self.cli_calls.exists())
+                self.assertEqual(library.readlink() if library.is_symlink() else protected.read_bytes(), before)
+                if kind == "backup":
+                    self.assertEqual((project / "Library.efs-backup/keep").read_text(), "previous backup")
+                shutil.rmtree(project)
 
     def test_unity_registers_resolved_editor_and_only_missing_immediate_projects(self):
         self.unity_payloads()
