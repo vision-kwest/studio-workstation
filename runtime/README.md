@@ -92,11 +92,27 @@ by exact-version byte-for-byte readback. The Task 7 application archive is uncha
 `StudioWorkstationReleaseRead` gained only the new exact-key/version read statement
 from `infra/workstation-release-read-policy.json`; existing permissions were retained.
 Policy simulation allows that version and denies a wrong version or unrelated key.
-Reproducible builds, shell syntax, and offline failure tests pass. **Fresh GPU install,
-an APT-triggered later-kernel rebuild/reboot, and authenticated DCV login remain live
-acceptance gates.** The first candidate's live gate correctly rejected missing DKMS
-registration: an unavailable legacy `linux-modules-extra-7.0.0-1014-aws` package
-aborted the combined APT transaction. This revision isolates the required DKMS
-packages; the original RES batch and its diagnostics are retained. The first test
-stack was removed. The PR records the second fresh test's result separately.
+Reproducible builds, shell syntax, and offline failure tests pass. Fresh installation
+on a Canonical Ubuntu 24.04 `g4dn.xlarge` passed the exact artifact checksum,
+NVIDIA 595.91.07 registration, T4 accelerated OpenGL, Xorg, GDM, and native DCV
+console checks. Installing the header metapackage also staged kernel
+`7.0.0-1018-aws`; the readiness gate built its NVIDIA module and the original RES
+reboot sequence booted it successfully. Both 1014 and 1018 were registered as
+installed, `AUTOINSTALL="yes"` was present, APT timers were enabled, and no
+packages were held. SSM baseline: `b53b1a66-53a6-454c-818b-33d61b4c97cc`.
+
+The unchanged CLI desktop-readiness command passed
+(`30f52f3f-47c8-4b36-87b0-3abda2e23972`), as did its HTTPS probes executed from
+the test guest. These checks do not establish authenticated browser login.
+The independent APT-triggered 1014-to-1017 replay was prepared but **not run**
+after tool execution was canceled. Staged-kernel coverage and a future APT
+update are distinct acceptance cases; the PR remains draft with the latter
+and authenticated DCV login pending. EFS/shared-software integration was
+condition-disabled for test isolation; the shared hostname was not assigned.
+
+The first candidate's live gate correctly rejected missing DKMS registration:
+an unavailable legacy `linux-modules-extra-7.0.0-1014-aws` package aborted the
+combined APT transaction. This revision isolates the required DKMS packages;
+the original RES batch and its diagnostics are retained. Test cleanup and full
+evidence are recorded in [PR #169](https://github.com/vision-kwest/studio-workstation/pull/169).
 Roll back by restoring the previous CLI/renderer pins; old S3 objects are preserved.
