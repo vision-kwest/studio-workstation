@@ -39,7 +39,7 @@ for name in .license LUT easyDCP Extras Fairlight Immersive 'Apple Immersive' lo
     local_directory "$state/$name"
 done
 
-# Resolve owns profile creation; do not copy another workstation's preferences.
+# Resolve owns project-library creation; seed only missing native preferences.
 data="$HOME/.local/share/DaVinciResolve"
 cache="$HOME/.cache/davinci-resolve"
 for path in "$data" "$data/configs" "$data/Resolve Project Library" "$data/logs" \
@@ -47,5 +47,6 @@ for path in "$data" "$data/configs" "$data/Resolve Project Library" "$data/logs"
     local_directory "$path"
 done
 mkdir -p -- "$cache/CacheClip" || fail "Cannot create the local cache: $cache/CacheClip"
+python3 "$base/launcher/prepare-user.py" || fail "Could not initialize local Resolve preferences. See the error above."
 cd /opt/resolve || fail "$setup"
 exec /opt/resolve/bin/resolve "$@"

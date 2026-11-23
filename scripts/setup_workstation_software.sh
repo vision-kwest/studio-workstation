@@ -105,7 +105,15 @@ STUDIO_VSCODE_APPARMOR
 chown root:root /etc/apparmor.d/studio-vscode
 chmod 0644 /etc/apparmor.d/studio-vscode
 apparmor_parser -r /etc/apparmor.d/studio-vscode
-test -f /etc/studio-software-release.env || exit 0
+# Prepare shared Resolve on NVIDIA desktops after DCV/EFS; retry failures after Rez.
+resolve_status=0
+if command -v nvidia-smi >/dev/null && test -d /studio/apps/davinci-resolve; then
+  if ! /studio/apps/davinci-resolve/setup-local.sh --user "$desktop_user"; then
+    echo "Resolve local setup failed; software setup will retry after optional Rez" >&2
+    resolve_status=1
+  fi
+fi
+test -f /etc/studio-software-release.env || exit "$resolve_status"
 . /etc/studio-software-release.env
 dir=$(mktemp -d)
 stage=""
@@ -144,3 +152,4 @@ if test -e /usr/local/bin/studio-rez-env; then
 else
   install -m 0755 "$dir/studio-rez-env" /usr/local/bin/studio-rez-env
 fi
+exit "$resolve_status"

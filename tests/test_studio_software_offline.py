@@ -141,6 +141,73 @@ class SoftwareRetryCases(unittest.TestCase):
         return subprocess.run(["bash", "-c", "set -euo pipefail\n" + code],
                               env={**os.environ, **env}, capture_output=True, text=True)
 
+    def test_resolve_preparation_retries_after_optional_rez_and_skips_cpu(self):
+        import hashlib
+        import tarfile
+        bundle = self.root / "bundle"
+        for name in ("studio-rez/config/rezconfig.prod.py", "studio-rez/env/studio-prod.sh",
+                     "studio-rez-env"):
+            path = bundle / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("preserved-rez\n")
+        archive = self.root / "bundle.tgz"
+        with tarfile.open(archive, "w:gz") as output:
+            for path in bundle.iterdir():
+                output.add(path, arcname=path.name)
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        # Execute the actual Resolve/Rez tail, using real archive/copy/checksum operations.
+        tail = self.source[self.source.index("# Prepare shared Resolve"):]
+        stubs = '''desktop_user=artist
+command() {
+  if test "$*" = '-v nvidia-smi'; then test "$GPU" = 1
+  else builtin command "$@"; fi
+}
+aws() { printf '%s\\n' "$*" > "$AWS_CALL"; cp "$BUNDLE" "${@: -1}"; }
+'''
+        cases = [(False, "ready", 42), (True, "absent", 0), (True, "missing", 0),
+                 (True, "nonexecutable", 0), (True, "ready", 42), (True, "ready", 0)]
+        for index, (gpu, helper, status) in enumerate(cases):
+            for rez in (False, True):
+                with self.subTest(gpu=gpu, helper=helper, status=status, rez=rez):
+                    root = self.root / f"case-{index}-{rez}"
+                    app = root / "resolve"
+                    if helper != "absent":
+                        app.mkdir(parents=True)
+                    if helper in ("ready", "nonexecutable"):
+                        setup = app / "setup-local.sh"
+                        setup.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$RESOLVE_CALLS"\n'
+                                         'exit "$HELPER_STATUS"\n')
+                        setup.chmod(0o755 if helper == "ready" else 0o644)
+                    (root / "bin").mkdir(parents=True)
+                    installed = root / "opt/rez/3.4.0/bin/rez"
+                    installed.mkdir(parents=True)
+                    (installed / "rez-env").write_text("#!/bin/sh\nexit 0\n")
+                    (installed / "rez-env").chmod(0o755)
+                    (installed / ".rez_production_install").write_text("3.4.0")
+                    if rez:
+                        (root / "release.env").write_text(
+                            f"STUDIO_REZ_VERSION_ID=Version.1\nSTUDIO_REZ_SHA256={digest}\n")
+                    code = tail.replace("/studio/apps/davinci-resolve", str(app))
+                    code = code.replace("/etc/studio-software-release.env", str(root / "release.env"))
+                    code = code.replace("/opt/studio", str(root / "opt"))
+                    code = code.replace("/usr/local/bin/studio-rez-env", str(root / "bin/studio-rez-env"))
+                    calls, aws_call = root / "resolve-calls", root / "aws-call"
+                    for attempt in range(2):
+                        result = self.execute(stubs + code, GPU=str(int(gpu)),
+                                              HELPER_STATUS=str(status), RESOLVE_CALLS=str(calls),
+                                              BUNDLE=str(archive), AWS_CALL=str(aws_call))
+                        failed = gpu and helper != "absent" and (helper != "ready" or status != 0)
+                        self.assertEqual(result.returncode, int(failed), result.stderr)
+                        if gpu and helper == "ready":
+                            self.assertEqual(calls.read_text().splitlines(),
+                                             ["--user artist"] * (attempt + 1))
+                        else:
+                            self.assertFalse(calls.exists())
+                        self.assertEqual(aws_call.exists(), rez)
+                        if rez:
+                            self.assertEqual((root / "bin/studio-rez-env").read_text(), "preserved-rez\n")
+                        self.assertEqual("Resolve local setup failed" in result.stderr, failed)
+
     def test_ssh_configuration_retries_and_reloads_only_after_validation(self):
         config = self.root / "sshd.conf"
         code = self.source.split("# RES attempts to disable SSH;", 1)[1]

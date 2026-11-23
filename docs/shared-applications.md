@@ -28,11 +28,11 @@ All launchers and overrides saved in the linked applications directory are share
 
 ```bash
 mkdir -p /studio/bin /studio/projects /studio/apps/opencode/config
-install -m 755 scripts/studio-shell/{studio,BLENDER,CODE,COMFY,OPENCODE,OLLAMA,UNITY,RESOLVE} /studio/bin/
+install -m 755 scripts/studio-shell/{studio,BLENDER,CODE,COMFY,OPENCODE,OLLAMA,UNITY} /studio/bin/
 cp -n scripts/studio-shell/opencode.json /studio/apps/opencode/config/opencode.json
 ```
 
-This installs launch commands; application binaries remain in their existing directories. The no-clobber configuration copy preserves shared OpenCode settings. COMFY uses the existing helper and adjacent templates; its separate installation/update instructions appear below.
+This installs launch commands; application binaries remain in their existing directories. The no-clobber configuration copy preserves shared OpenCode settings. COMFY uses the existing helper and adjacent templates; its separate installation/update instructions appear below. Install RESOLVE with its required preference helper using the Resolve-specific commands below.
 
 From a desktop terminal, enter the environment in the project directory you want to use:
 
@@ -54,29 +54,30 @@ New workstations receive the local `studio` link during setup, before optional R
 | `OPENCODE` | Launches `/studio/apps/opencode/current/opencode`; seeds the shared global settings link only when local JSON/JSONC configuration is absent |
 | `OLLAMA` | Resolves the existing Ollama Rez package, uses `/studio/models/ollama`, and enables native OpenCode discovery |
 | `UNITY` | Prepares missing local Unity/VS Code settings and the shared .NET environment, then launches the existing shared Unity Hub |
-| `RESOLVE` | Checks the shared Resolve payload and prepared local state, creates missing local cache, and launches the native application |
+| `RESOLVE` | Checks the shared Resolve payload and local state, initializes missing storage/backup preferences, and launches the native application |
 
 Each wrapper forwards its arguments. Outside the Studio shell, use its absolute path, such as `/studio/bin/CODE`. Use the same absolute paths for Menu Editor commands; `CODE` entries may append `%F`, while terminal commands omit it. Set **Run in terminal** for a terminal application such as OPENCODE. Existing legacy launchers remain usable.
 
-### DaVinci Resolve Free on prepared GPU workstations
+### DaVinci Resolve Free on GPU workstations
 
 [Issue #160](https://github.com/vision-kwest/studio-workstation/issues/160) adds `RESOLVE` for the existing **21.2-free** EFS installation. The [installation README](https://docs.google.com/document/d/e/2PACX-1vS6rO-gmE-zdIpZtyKLDADvPY4AFy0LpSEro3dveRhlim8bstc-T7kxx2cBKYVB1WFnMu3GVBYQaej3/pub) and [wrapper handoff](https://docs.google.com/document/d/e/2PACX-1vSbhdh_EC-QTXYSZd16TeUe-_jvQsAkbV5jddIo0B5c7k1evf3QPN-W_0a5pu28g98IDb8zf1O8SmgK/pub) describe the existing native installation; this wrapper does not install Resolve or its OS/GPU prerequisites.
 
-On each Ubuntu 24.04 GPU workstation, with `/studio` mounted and Resolve closed, prepare the machine using the existing shared helper:
+The post-DCV software setup automatically invokes the existing shared helper on NVIDIA workstations when `/studio/apps/davinci-resolve` is present. It runs after EFS/menu setup and independently of optional Rez. A Resolve preparation failure is logged, optional Rez setup still runs, and the existing software service retries. DCV readiness remains independent. For an existing workstation provisioned before this integration, with `/studio` mounted and Resolve closed, the same preparation can be run once:
 
 ```bash
 sudo /studio/apps/davinci-resolve/setup-local.sh --user "$(id -un)"
 ```
 
-This creates `/opt/resolve` pointing to the selected shared release and the machine-local writable targets under `/var/lib/davinci-resolve/<release>`. `RESOLVE` verifies all eight mappings (`.license`, `LUT`, `easyDCP`, `Extras`, `Fairlight`, `Immersive`, `Apple Immersive`, `logs`), directory access, and actual resolved local storage before launching. Missing preparation reports the command above; ordinary launches never run sudo or APT. This PR does not add the helper to automatic workstation provisioning.
+This creates `/opt/resolve` pointing to the selected shared release and the machine-local writable targets under `/var/lib/davinci-resolve/<release>`. The existing helper checks Ubuntu 24.04, the selected 21.2-free payload, and the NVIDIA driver, installs native runtime packages, and seeds missing local state/LUTs. `RESOLVE` verifies all eight mappings (`.license`, `LUT`, `easyDCP`, `Extras`, `Fairlight`, `Immersive`, `Apple Immersive`, `logs`), directory access, and actual resolved local storage before launching. Missing preparation reports the command above; ordinary launches never run sudo or APT.
 
-The wrapper creates only missing `~/.cache/davinci-resolve/CacheClip` directories. Resolve creates its own native profile and project library under `~/.local/share/DaVinciResolve`; the wrapper leaves existing preferences, project databases and LUTs unchanged. It checks the data directory, configurations, project library, logs and cache for local storage, including symlink destinations. These paths follow the observed home-relative Resolve layout; the wrapper does not relocate them through `XDG_*` settings. Network, memory-backed and unrecognized filesystems are rejected for active state. Put source media, renders, project exports and backups under `/studio/projects/<project>/`.
+The wrapper's unprivileged `prepare-user.py` initializes only missing native files in `~/.local/share/DaVinciResolve/configs`. Existing preferences, project databases and LUTs remain unchanged. Resolve creates its own project library and device configuration. The wrapper checks the data directory, configurations, project library, logs and cache for local storage, including symlink destinations. These paths follow the observed home-relative Resolve layout; the wrapper does not relocate them through `XDG_*` settings. Network, memory-backed and unrecognized filesystems are rejected for active state. Put source media, renders, project exports and Gallery stills under `/studio/projects/<project>/`.
 
 To adopt the uppercase command and retain the existing `studio-resolve` command, run these commands **once on EFS** from the repository root as the desktop user. The backups retain the previous shared launcher and menu entry:
 
 ```bash
 cp -pn /studio/bin/studio-resolve /studio/bin/studio-resolve.before-RESOLVE
 cp -pn /studio/share/applications/studio-resolve.desktop /studio/share/applications/studio-resolve.desktop.before-RESOLVE
+install -D -m 755 scripts/resolve/prepare-user.py /studio/apps/davinci-resolve/launcher/prepare-user.py
 install -m 755 scripts/studio-shell/{RESOLVE,studio-resolve} /studio/bin/
 desktop-file-edit --set-key=Exec --set-value='/studio/bin/RESOLVE %u' \
   --set-key=TryExec --set-value=/studio/bin/RESOLVE --remove-key=Path \
@@ -86,11 +87,11 @@ desktop-file-validate /studio/share/applications/studio-resolve.desktop
 
 The menu keeps the name **DaVinci Resolve** and its existing icon/other fields. Removing its redundant `Path=/opt/resolve` lets the wrapper report missing local preparation before changing directory. Errors appear on stderr and through Zenity when available in an X11 desktop. The legacy command delegates to the same wrapper; both preserve native arguments and exit status. From a terminal, use `studio env` followed by `RESOLVE`.
 
-**First launch still requires native preferences:** In **Preferences → System → Media Storage**, set the ordered list to the expanded paths `~/.cache/davinci-resolve`, `~/Videos`, `/studio`, and restart when prompted. In **User → Project Save and Load**, enable Live save, project backups and timeline backups, and select an intentional EFS backup directory for your work. Keep project cache local and set Gallery stills to the project's EFS directory. The wrapper does not seed unverified config files, copy another workstation's device/library settings, or use the acceptance project's backup path as a production default.
+**Fresh-profile defaults:** Missing `config.dat` is derived from the selected release's `share/default-config.dat`, with ordered Media Storage roots at the expanded paths `~/.cache/davinci-resolve`, `~/Videos`, `/studio`, followed by Resolve's virtual entry. Missing `config.user.xml` receives only the five observed save/backup fields: project Live Save, project backups at ten-minute intervals, timeline backups, and the owner-approved destination `/studio/projects/resolve/backups`. The native **Studio Defaults** export supplied by the owner confirmed the XML schema; its preset ID and unrelated preferences are not copied. Initial seeding is specific to **21.2-free** and requires Resolve to be closed. A local lock and atomic create-without-overwrite preserve files created concurrently; an interrupted attempt can initialize whichever file is still missing. Ordinary launches preserve existing settings byte-for-byte. Change existing choices in Resolve's native Preferences UI.
 
 Before replacing a workstation, export the project **with stills and LUTs** to `/studio/projects/<project>/resolve/exports` and keep its media on EFS. The active project database remains local. After import, recheck Gallery, cache and backup paths; the installation notes report that import can reset working folders.
 
-**Acceptance:** Wrapper argument forwarding, prerequisite failures and preservation are tested offline. Fresh-workstation GUI launch, preference initialization, EFS project import/render/reopen, backups and stop/start remain pending; use the supplied [GUI testing reference](https://docs.google.com/document/d/e/2PACX-1vS1VedykcOJq2UDN1-xwZLJa6khM1GiKtlDsTbfZje94gWUHGxV2WJxLBOXm_eIc5LDRdPK1zZOz5Hv/pub) for that later acceptance. No shared deployment or GUI session change is implied by the wrapper PR.
+**Acceptance:** Record native fresh-profile initialization and restart separately from offline wrapper/provisioning tests. The [GUI testing reference](https://docs.google.com/document/d/e/2PACX-1vS1VedykcOJq2UDN1-xwZLJa6khM1GiKtlDsTbfZje94gWUHGxV2WJxLBOXm_eIc5LDRdPK1zZOz5Hv/pub) covers EFS project import/render/reopen, actual automatic backup creation/recovery, and stop/start. Use a separate local profile and unique test output paths, then a genuinely fresh GPU workstation; preserve the existing acceptance baseline. The current evidence and remaining gates are tracked in [PR #161](https://github.com/vision-kwest/studio-workstation/pull/161).
 
 **Rollback:** Restore `studio-resolve.before-RESOLVE` and `studio-resolve.desktop.before-RESOLVE` over their original paths, then remove only `/studio/bin/RESOLVE` if desired. Keep the installed application, setup helper, local projects/preferences and shared data.
 
@@ -98,18 +99,31 @@ Before replacing a workstation, export the project **with stills and LUTs** to `
 
 [Issue #153](https://github.com/vision-kwest/studio-workstation/issues/153) adds one shared `UNITY` wrapper. Install it with the commands above; current and future workstations use the same `/studio/bin/UNITY` file. No workstation provisioning change is required.
 
-Before changing local settings, the wrapper checks the existing shared Unity Hub AppImage, selected Editor, VS Code, .NET 10 SDK and the Editor's bundled Android tools. These applications and modules must already be installed; the wrapper does not download or update them.
+Install the native Unity CLI and Editor menu entry **once on EFS**, from the repository root as the desktop user. The verified source below is Unity CLI **1.0.0**, installed by Hub **4.0.1** at `~/.local/bin/unity`. If absent, obtain the matching official artifact first; the wrapper has no downloader.
+
+```bash
+printf '%s  %s\n' bd680055cb4a8d9d244c70d79eefa5828f6668075097559547e1ca4aece07b2b "$HOME/.local/bin/unity" | sha256sum -c - &&
+install -D -m 755 "$HOME/.local/bin/unity" /studio/apps/unity-cli/1.0.0/unity &&
+ln -sfnT 1.0.0 /studio/apps/unity-cli/current &&
+install -m 644 share/applications/unity-editor.desktop /studio/share/applications/unity-editor.desktop &&
+desktop-file-validate /studio/share/applications/unity-editor.desktop
+```
+
+Before changing local settings, the wrapper checks the shared Unity CLI, Hub AppImage, selected Editor, VS Code, .NET 10 SDK and the Editor's bundled Android tools. These applications and modules must already be installed; the wrapper does not download or update them.
 
 On launch, it:
 
 - Exports `DOTNET_ROOT` and the required `PATH` for Hub, the Editor and their child processes, including launches from GNOME.
 - Creates `~/.vscode/extensions` pointing to `/studio/apps/vscode/extensions` only when the local path is absent.
 - Seeds only a missing `kScriptsDefaultApp` preference in `~/.local/share/unity3d/prefs` with the shared VS Code path. Existing values, including an explicitly blank choice, are preserved.
-- Runs `/studio/apps/unity-hub/current/UnityHub.AppImage`, forwarding its arguments.
+- Registers the resolved shared Editor through the native CLI and adds missing project records for `/studio/projects/unity/*/ProjectSettings/ProjectVersion.txt`. Discovery examines only these immediate project directories; existing registrations and project source files are preserved.
+- Runs `/studio/apps/unity-hub/current/UnityHub.AppImage` by default. `UNITY --editor [args]` uses the same preparation and environment, then launches the shared Editor directly with those arguments.
+
+The native editor-add result for an already-registered Editor (code `6`) is accepted. Other CLI errors stop launch. Projects are added only when absent from the native project-list query; no Hub registry or authentication profile is copied between workstations.
 
 Unity uses its native bundled Android SDK, NDK and JDK defaults; the wrapper does not add custom Android preference keys. Unity/Hub credentials, license state, caches and other local profile data remain local. No profile is copied from another workstation.
 
-The preference seed follows the **observed Unity 6000.3.29f1** Linux XML format, version `1.1`, with base64-encoded string values. Recheck that format when changing the shared Editor version; this is a source/configuration contract, not a claim of fresh-workstation acceptance.
+The preference seed follows the **observed Unity 6000.3.29f1** Linux XML format, version `1.1`, with base64-encoded string values. Registration uses the observed Hub 4.0.1 / CLI 1.0.0 native contract. Recheck these contracts when upgrading; they are not a claim of full fresh-workstation GUI acceptance.
 
 When adopting the wrapper on an existing workstation, save your work and quit Unity, Hub and VS Code normally once. Start Hub through `UNITY` so newly started processes inherit the environment; an already-running Hub or VS Code process retains its previous environment.
 
@@ -118,13 +132,37 @@ studio env
 UNITY
 ```
 
-For the existing shared `/studio/share/applications/unityhub.desktop`, preserve a backup named `unityhub.desktop.before-UNITY` once, then set `Exec=/studio/bin/UNITY %u` and `TryExec=/studio/bin/UNITY`. Preserve the other fields, including its icon and URI handler, and validate the edited file with `desktop-file-validate`. This single shared launcher serves both existing and replacement workstations.
+The existing shared `unityhub.desktop` remains unchanged, using `Exec=/studio/bin/UNITY %u` and `TryExec=/studio/bin/UNITY`. The new **Unity Editor** entry calls `/studio/bin/UNITY --editor` and uses `/studio/apps/unity/current/Editor/Data/Resources/LargeUnityIcon.png`. Both shared menu entries serve existing and replacement workstations.
 
-On a fresh workstation, complete Hub sign-in and license activation normally. If Hub has not listed the shared Editor, use its native **Locate** action. These account and registration steps are not replaced by the wrapper.
+On a fresh workstation, complete Hub sign-in and license activation normally. The wrapper registers the existing shared Editor and discovered projects before launch; no reinstall or manual **Locate** step is required for that registration.
 
-**Acceptance:** Verify first launch from GNOME and from a terminal, repeat-launch preservation, Unity opening a shared project, and Unity opening C# scripts in VS Code with the shared extensions and .NET SDK. Check Android tooling in the Editor when Android work is required. Offline checks and local setup probes do not establish these native application results; record actual observations separately.
+**Hub discovery validation (Issue #153):** The registration wrapper and new `unity-editor.desktop` were deployed. An empty local HOME/XDG profile ran the actual registration and preparation twice, producing one registered Editor and two projects without duplicates; only the final GUI `os.execv` was stubbed. Both launchers passed `desktop-file-validate`. Native GIO discovered **Unity Editor** with the expected command and icon and `should_show=true`.
 
-**Rollback:** Restore `unityhub.desktop.before-UNITY` over the shared launcher. Keep the shared applications, projects and local preferences. The small local settings created by the wrapper are ordinary application configuration.
+The current profile's native CLI lists Editor **6000.3.29f1**, its Android/modules information, and the intact shared `UnitySmokeTest` and `QuestSmokeTest` projects. The real `UNITY --editor -version` command returned `6000.3.29f1` successfully. After a normal restart, Hub displayed the native Unity sign-in screen. Sign-in remains local on each fresh workstation.
+
+**Operator acceptance (Issue #153):** The user confirmed that both projects appeared in Hub and opened and ran one. Project discovery and that project launch are user-accepted; C# editing and an Android build remain separate checks. The reported Editor slowness is tracked independently in Issue #163 below.
+
+**Rollback:** Restore the previous shared `UNITY` executable and remove only the added `unity-editor.desktop` if reverting this extension. Keep the existing Hub launcher, shared applications/projects and local settings. Native registrations remain ordinary Hub configuration.
+
+#### Local project Library cache (Issue #163)
+
+[Issue #163](https://github.com/vision-kwest/studio-workstation/issues/163) moves each discovered project's generated `Library` to local EBS while keeping application binaries and project source on EFS. Unity documents [Library regeneration from project source](https://docs.unity3d.com/6000.3/Documentation/Manual/ImportingAssets.html); its manual also classifies cloud-stored projects as unsupported, so this EFS layout remains a Studio-specific integration.
+
+Live diagnosis found the correct NVIDIA T4 OpenGL renderer, but the Editor and two workers waited in NFS writeback on `Library/*DB-lock` files. Host I/O pressure was about 55%; EFS used Elastic throughput with `PercentIOLimit` below 1%. This evidence motivates moving the cache write path; it does not establish the fix's performance yet.
+
+For each discovered project, `UNITY` hashes its resolved absolute path with SHA-256 and uses the first 16 hex characters as `<key>`. The local target is `$HOME/.cache/studio-unity/<key>/Library`; the project's EFS `Library` becomes a symlink to it.
+
+An existing EFS `Library` directory is preserved as `Library.efs-backup` before linking. The wrapper recreates a missing local target on later launches when the existing link matches the expected target. It preserves conflicting links and backups and reports the conflict rather than replacing them.
+
+Save and close all Unity Editors before migration. The wrapper refuses migration while a Unity process is running or the project's `Temp/UnityLockfile` exists. Only `Library` moves: `Temp` stays on EFS with Unity's native project lock. This assumes the same default workstation account and home path on replacement instances.
+
+The local cache regenerates on a fresh workstation and survives stop/start while that workstation's EBS remains. The first import rebuilds generated data; projects and their source assets remain shared. The symlink needs no elevated privileges or new service; bind mounts were rejected because they require password-based sudo and boot integration.
+
+**Native cache validation:** A disposable copy of the same scene, with source on EFS and Library on local EBS, completed two native Editor batch Play/close cycles at 55.8 and 56.2 frames/second over five seconds. The Library link survived both exits and the native Temp lock was removed. An initial probe used an incorrect scene path and was corrected; the two completed runs also logged a Unity Search indexing exception, so this does not establish error-free GUI acceptance. The 18 wrapper/environment tests pass, including cache preservation, repeat launch, missing local targets and active-project/conflict refusal. Interactive playback and the reported persistent splash window are checked separately on the original project.
+
+**Deployment:** After all Editors had exited, the shared wrapper prepared local Library targets for both `UnitySmokeTest` and `QuestSmokeTest` on `editor`. The source folders remain on EFS. The existing smoke-test Library is preserved as `Library.efs-backup`; Quest had no previous Library to preserve. The previous shared wrapper is saved as `/studio/bin/UNITY.before-local-library`.
+
+**Cache rollback:** With Editors closed, restore the prior wrapper and replace only the expected `Library` symlink with the preserved `Library.efs-backup`, when present. If there was no previous Library, Unity can regenerate it on EFS. Keep project source files and the local cache intact.
 
 ### OpenCode settings and local state
 

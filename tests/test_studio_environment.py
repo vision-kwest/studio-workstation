@@ -19,6 +19,16 @@ keys = ('PATH', 'STUDIO_ENV', 'STUDIO_ROOT', 'STUDIO_PROJECTS', 'OLLAMA_MODELS',
 print(json.dumps({'args': sys.argv[1:], 'cwd': os.getcwd(),
                   'env': {key: os.environ.get(key) for key in keys}}))
 """
+UNITY_CLI = """import json, os, sys
+with open(os.environ['UNITY_CLI_CALLS'], 'a') as journal:
+    journal.write(json.dumps(sys.argv[1:]) + '\\n')
+operation = ' '.join(sys.argv[4:6])
+if operation == os.environ.get('UNITY_CLI_FAILURE'):
+    print(os.environ['UNITY_CLI_RESPONSE'])
+    sys.exit(int(os.environ['UNITY_CLI_STATUS']))
+print(json.dumps({'success': True, 'errors': [], 'data': {'partial': False, 'nextPage': None,
+    'items': [{'path': p} for p in json.loads(os.environ.get('UNITY_CLI_REGISTERED', '[]'))]}}))
+"""
 
 
 class StudioEnvironmentTests(unittest.TestCase):
@@ -149,6 +159,10 @@ class StudioEnvironmentTests(unittest.TestCase):
         payload = self.shared / "apps/davinci-resolve/21.2-free"
         self.payload(payload / "bin/resolve")
         self.write(payload / ".shared-payload-ready", "ready\n")
+        self.write(payload / "share/default-config.dat", "Default.Sentinel = preserve\n"
+                   "Site.1.FS.Count = 1\nSite.1.FS.1.Type = IOFileSys\nSite.1.FS.1.Root = HOMEDIR\n")
+        self.resolve_prepare = self.write(payload.parent / "launcher/prepare-user.py",
+            self.relocate((ROOT / "scripts/resolve/prepare-user.py").read_text()))
         (payload.parent / "current").symlink_to(payload)
         self.opt.mkdir(exist_ok=True)
         (self.opt / "resolve").symlink_to(payload)
@@ -177,6 +191,75 @@ class StudioEnvironmentTests(unittest.TestCase):
             self.assertEqual(self.rows(result)[0]["cwd"], str(payload))
             self.assertTrue((cache / "CacheClip").is_dir())
             self.assertEqual([p.read_text() for p in originals], ["existing preferences", "existing project", "custom LUT"])
+        self.assertEqual(ET.parse(data / "configs/config.user.xml").findtext("AutoSaveDuration"), "10")
+
+    def test_resolve_seeds_native_preferences_and_repairs_only_missing_files(self):
+        payload, local, data, cache = self.resolve_fixture()
+        configs = data / "configs"
+        configs.rmdir()
+        result = self.run_command([self.bin / "RESOLVE", "clip with spaces.mov"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows(result)[0]["args"], ["clip with spaces.mov"])
+        system, user = configs / "config.dat", configs / "config.user.xml"
+        values = dict(line.split(" = ", 1) for line in system.read_text().splitlines() if " = " in line)
+        self.assertEqual(values["Default.Sentinel"], "preserve")
+        self.assertEqual(values["Site.1.FS.Count"], "4")
+        self.assertEqual([values[f"Site.1.FS.{i}.Root"] for i in range(1, 5)],
+                         [str(cache), str(self.home / "Videos"), str(self.shared), "ResolveVirtual"])
+        prefs = ET.parse(user).getroot()
+        self.assertEqual(prefs.tag, "SM_UserPrefs")
+        self.assertEqual({e.tag: e.text for e in prefs}, {
+            "AutoSaveMode": "1", "AutoSaveDuration": "10", "IsProjectLiveSaveEnabled": "true",
+            "IsTimelineBackupsEnabled": "true", "ProjectBackupLocation": str(self.shared / "projects/resolve/backups")})
+        self.assertTrue((self.shared / "projects/resolve/backups").is_dir())
+        for missing, retained in ((system, user), (user, system)):
+            with self.subTest(missing=missing.name):
+                self.write(retained, "existing customized settings\n")
+                missing.unlink()
+                result = self.run_command([self.bin / "RESOLVE"])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(missing.is_file())
+                self.assertEqual(retained.read_text(), "existing customized settings\n")
+        before = {p: p.read_bytes() for p in (system, user)}
+        (payload / "share/default-config.dat").unlink()
+        self.assertEqual(self.run_command([self.bin / "RESOLVE"]).returncode, 0)
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+
+    def test_resolve_conflicting_preference_paths_fail_before_seeding(self):
+        _, _, data, _ = self.resolve_fixture()
+        configs = data / "configs"
+        for name in ("config.dat", "config.user.xml"):
+            for kind in ("directory", "dangling-link"):
+                with self.subTest(name=name, kind=kind):
+                    target = configs / name
+                    target.mkdir() if kind == "directory" else target.symlink_to(self.root / "missing")
+                    result = self.run_command([self.bin / "RESOLVE"])
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertTrue(target.is_dir() if kind == "directory" else target.is_symlink())
+                    self.assertFalse((configs / ("config.user.xml" if name == "config.dat" else "config.dat")).exists())
+                    target.rmdir() if kind == "directory" else target.unlink()
+
+    def test_resolve_running_native_process_blocks_seed_and_concurrent_retries_are_valid(self):
+        import shutil
+        payload, _, data, _ = self.resolve_fixture()
+        binary = payload / "bin/resolve"
+        shutil.copyfile("/bin/sleep", binary)
+        with subprocess.Popen([str(binary), "30"], env=self.env) as running:
+            try:
+                result = self.run_command([sys.executable, self.resolve_prepare])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((data / "configs/config.dat").exists())
+                self.assertFalse((data / "configs/config.user.xml").exists())
+            finally:
+                running.terminate()
+        children = [subprocess.Popen([sys.executable, str(self.resolve_prepare)], env=self.env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
+        for child in children:
+            _, error = child.communicate(timeout=15)
+            self.assertEqual(child.returncode, 0, error)
+        self.assertEqual(ET.parse(data / "configs/config.user.xml").findtext("AutoSaveDuration"), "10")
+        self.assertIn("Site.1.FS.Count = 4", (data / "configs/config.dat").read_text())
 
     def test_resolve_missing_prerequisites_fail_before_launch_or_cache_creation(self):
         payload, local, data, cache = self.resolve_fixture()
@@ -298,11 +381,17 @@ class StudioEnvironmentTests(unittest.TestCase):
                 config.unlink()
 
     def unity_payloads(self):
+        self.write(self.localbin / "pgrep", '#!/bin/sh\nexit "${UNITY_PGREP_STATUS:-1}"\n')
+        self.env["PATH"] = str(self.localbin) + ":/usr/bin:/bin"
         android = "unity/current/Editor/Data/PlaybackEngines/AndroidPlayer/"
         paths = ["unity-hub/current/UnityHub.AppImage", "unity/current/Editor/Unity",
                  "vscode/current/bin/code", "dotnet/dotnet"] + [android + name for name in
                  ("SDK/platform-tools/adb", "NDK/ndk-build", "OpenJDK/bin/java")]
         required = [self.payload(self.shared / "apps" / path) for path in paths]
+        self.cli_calls = self.root / "unity-cli-calls.jsonl"
+        self.env["UNITY_CLI_CALLS"] = str(self.cli_calls)
+        required.append(self.write(self.shared / "apps/unity-cli/current/unity",
+                                   f"#!{sys.executable}\n" + UNITY_CLI))
         required.append(self.write(self.shared / "apps" / android / "Tools/gradle/lib/gradle-launcher-test.jar", "Gradle"))
         sdk = self.shared / "apps/dotnet/sdk/10.0.100"
         sdk.mkdir(parents=True)
@@ -310,6 +399,131 @@ class StudioEnvironmentTests(unittest.TestCase):
         self.unity_prefs = self.home / ".local/share/unity3d/prefs"
         self.unity_extensions = self.home / ".vscode/extensions"
         return required + [sdk, self.shared / "apps/vscode/extensions"]
+
+    def test_unity_library_migration_repeat_and_missing_local_cache(self):
+        self.unity_payloads()
+        project = self.shared / "projects/unity/Project with spaces"
+        self.write(project / "ProjectSettings/ProjectVersion.txt", "6000.3.29f1")
+        self.write(project / "Library/SourceAssetDB", "original EFS cache bytes")
+        temp = self.write(project / "Temp/keep", "native project temp")
+        library, backup = project / "Library", project / "Library.efs-backup"
+        for attempt in range(3):
+            result = self.run_command([self.bin / "UNITY"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(library.is_symlink())
+            cache = library.resolve()
+            self.assertTrue(cache.is_relative_to(self.home / ".cache/studio-unity"))
+            self.assertTrue(cache.is_dir())
+            self.assertEqual((backup / "SourceAssetDB").read_bytes(), b"original EFS cache bytes")
+            self.assertEqual(temp.read_text(), "native project temp")
+            self.assertFalse(temp.parent.is_symlink())
+            if attempt == 0:
+                self.write(cache / "warm", "local cache survives repeat")
+            elif attempt == 1:
+                self.assertEqual((cache / "warm").read_text(), "local cache survives repeat")
+                (cache / "warm").unlink()
+                cache.rmdir()  # Same shared link, but no local cache on a fresh workstation.
+
+    def test_unity_library_refuses_active_project_and_preserves_conflicts(self):
+        import shutil
+        self.unity_payloads()
+        self.write(self.unity_prefs, '<unity_prefs version_major="1" version_minor="1">'
+                   '<pref name="kScriptsDefaultApp" type="string" /></unity_prefs>')
+        for kind in ("active", "probe-error", "lock", "foreign-link", "backup", "file"):
+            with self.subTest(conflict=kind):
+                project = self.shared / "projects/unity/Test"
+                self.write(project / "ProjectSettings/ProjectVersion.txt", "6000.3.29f1")
+                library = project / "Library"
+                if kind == "foreign-link":
+                    library.symlink_to(self.root / "foreign-cache")
+                else:
+                    self.write(library if kind == "file" else library / "keep", "preserved")
+                if kind == "backup":
+                    self.write(project / "Library.efs-backup/keep", "previous backup")
+                if kind == "lock":
+                    self.write(project / "Temp/UnityLockfile", "active on another workstation")
+                self.env["UNITY_PGREP_STATUS"] = {"active": "0", "probe-error": "2"}.get(kind, "1")
+                protected = library / "keep" if library.is_dir() else library
+                before = library.readlink() if library.is_symlink() else protected.read_bytes()
+                result = self.run_command([self.bin / "UNITY"])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(self.cli_calls.exists())
+                self.assertEqual(library.readlink() if library.is_symlink() else protected.read_bytes(), before)
+                if kind == "backup":
+                    self.assertEqual((project / "Library.efs-backup/keep").read_text(), "previous backup")
+                shutil.rmtree(project)
+
+    def test_unity_registers_resolved_editor_and_only_missing_immediate_projects(self):
+        self.unity_payloads()
+        editor = self.shared / "apps/unity/current/Editor/Unity"
+        resolved = self.payload(self.root / "editor with spaces/Unity")
+        editor.unlink()
+        editor.symlink_to(resolved)
+        project_root = self.shared / "projects/unity"
+        projects = [project_root / name for name in ("Alpha", "Quest with spaces")]
+        for project in projects + [project_root / "nested/Ignore"]:
+            self.write(project / "ProjectSettings/ProjectVersion.txt", "6000.3.29f1")
+        (project_root / "Invalid/ProjectSettings/ProjectVersion.txt").mkdir(parents=True)
+        registered_alias = self.root / "registered project alias"
+        registered_alias.symlink_to(projects[0], target_is_directory=True)
+        flags = ["--non-interactive", "--format", "json"]
+        expected = [flags + ["projects"], flags + ["editors", "add", str(resolved)],
+                    flags + ["projects", "add", *map(str, projects)]]
+        for attempt in range(2):
+            result = self.run_command([self.bin / "UNITY"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(self.rows(result)), 1)
+            self.assertEqual([json.loads(line) for line in self.cli_calls.read_text().splitlines()], expected)
+            self.env.update(UNITY_CLI_FAILURE="editors add", UNITY_CLI_STATUS="6",
+                            UNITY_CLI_RESPONSE='{"errors":[{"code":"EDITORS_ADD_ALREADY_IN_LIST"}]}',
+                            UNITY_CLI_REGISTERED=json.dumps([str(registered_alias), str(projects[1])]))
+            expected += expected[:2]
+
+    def test_unity_registration_errors_prevent_launch(self):
+        self.unity_payloads()
+        self.write(self.shared / "projects/unity/Test/ProjectSettings/ProjectVersion.txt", "6000.3.29f1")
+        duplicate = {"code": "EDITORS_ADD_ALREADY_IN_LIST"}
+        cases = [("projects", 0, "not JSON"), ("projects", 1, '{"success":false}'),
+                 ("projects", 0, '{"success":true,"data":{"items":[],"partial":true}}'),
+                 ("projects", 0, '{"success":true,"data":{"items":[],"nextPage":1}}'),
+                 ("editors add", 6, "not JSON"), ("editors add", 6, "[]"),
+                 ("editors add", 6, '{"errors":[]}'),
+                 ("editors add", 6, json.dumps({"errors": [duplicate, {"code": "OTHER"}]})),
+                 ("editors add", 1, json.dumps({"errors": [duplicate]})),
+                 ("projects add", 6, '{"errors":[{"code":"COMMAND_FAILED"}]}')]
+        for operation, status, response in cases:
+            with self.subTest(operation=operation, status=status, response=response):
+                self.env.update(UNITY_CLI_FAILURE=operation, UNITY_CLI_STATUS=str(status),
+                                UNITY_CLI_RESPONSE=response)
+                result = self.run_command([self.bin / "UNITY"])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "", "Hub or Editor must not launch after registration failure")
+
+    def test_unity_direct_editor_and_hub_preserve_literal_arguments(self):
+        self.unity_payloads()
+        editor = self.shared / "apps/unity/current/Editor/Unity"
+        self.write(editor, f"#!{sys.executable}\n" + CAPTURE.replace(
+            "'args': sys.argv[1:]", "'executable': sys.argv[0], 'args': sys.argv[1:]"))
+        arguments = ["--projectPath", "project with spaces", "$(echo literal)", "--editor", ""]
+        for prefix in ([], ["--editor"]):
+            result = self.run_command([self.bin / "UNITY", *prefix, *arguments])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            row, = self.rows(result)
+            self.assertEqual(row["args"], arguments)
+            self.assertEqual(row.get("executable"), str(editor) if prefix else None)
+            self.assertEqual(row["env"]["DOTNET_ROOT"], str(self.shared / "apps/dotnet"))
+
+    def test_unity_editor_desktop_entry(self):
+        import shutil
+        entry = ROOT / "share/applications/unity-editor.desktop"
+        fields = dict(line.split("=", 1) for line in entry.read_text().splitlines() if "=" in line)
+        for key, value in {"Type": "Application", "Exec": "/studio/bin/UNITY --editor",
+                           "TryExec": "/studio/bin/UNITY", "Terminal": "false",
+                           "Icon": "/studio/apps/unity/current/Editor/Data/Resources/LargeUnityIcon.png"}.items():
+            self.assertEqual(fields[key], value)
+        if shutil.which("desktop-file-validate"):
+            subprocess.run(["desktop-file-validate", str(entry)], check=True)
 
     def test_unity_first_launch_retry_environment_and_arguments(self):
         self.unity_payloads()
