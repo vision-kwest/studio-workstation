@@ -133,6 +133,19 @@ The optional software layer adds `studio env`, a child Bash shell, and small upp
 
 The post-DCV setup creates the user-owned shared command/project directories, adds the local `studio` symlink and installs Ubuntu's `ripgrep` alongside the existing menu utilities. These precede optional Rez. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` installers, DCV/GPU behavior, reboot continuation and workstation lifecycle remain unchanged. Source verification and offline checks do not establish live desktop acceptance; the implementation PR records that evidence separately.
 
+## Desktop idle defaults (Issue #165)
+
+The owner requested automatic blanking and screen locking disabled on future
+CPU/GPU workstations. The renderer installs a native GSettings vendor override
+before RES desktop installation: session `idle-delay=uint32 0` and screensaver
+`lock-enabled=false`. Package schema triggers compile it on initial installation;
+bootstrap reentry also compiles it when desktop schemas are present. User choices
+remain editable and take precedence. RES 2026.06 commit
+`1f526a241fb293a29fb018f08ccf81c100c05a42` desktop prerequisites, GNOME/DCV order,
+reboot continuation and authentication remain unchanged. The upstream
+`gnome_utils.configure()` animation workaround applies only to AL2023.
+The implementation PR distinguishes native schema checks from fresh-login proof.
+
 ## Ollama startup service (Issue #92)
 
 The owner now requests an Ollama server on every normal workstation boot. The optional software setup enables a native systemd service after verifying Rez, running the existing uppercase wrapper as the desktop user with a localhost listener and the shared model store. systemd retries failures without an EFS readiness dependency or a custom startup manager; no model is downloaded or preloaded. The deliberate `--no-studio-software` opt-out also skips this service. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`, desktop readiness, GPU setup and shared model/context configuration are unchanged. Real boot and GPU acceptance remain separate from offline validation.

@@ -198,6 +198,18 @@ and the systemd user manager. Disconnecting the DCV viewer keeps the session ali
 To restore the prompts, remove only the three files above before the next boot.
 New-account setup does not reapply them on later boots.
 
+### Screen blanking and automatic lock
+
+New CPU/GPU workstations default to no automatic screen blanking or screen lock.
+The renderer installs `99_studio-desktop.gschema.override` under
+`/usr/share/glib-2.0/schemas/` before RES installs the desktop. It sets
+`org.gnome.desktop.session idle-delay` to `uint32 0` and
+`org.gnome.desktop.screensaver lock-enabled` to `false` using native GSettings
+defaults. These work without optional Studio software or EFS availability.
+Users can change them in GNOME Settings; their choices take precedence on later
+boots. Manual locking and DCV login continue to use the normal authentication.
+Updating the repository does not retrofit an existing workstation's user data.
+
 ## Stop, restart and explicit destruction
 
 ```bash
