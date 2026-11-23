@@ -94,8 +94,8 @@ class GpuProfileContracts(unittest.TestCase):
         from scripts import studio_workstation_cli as cli
         expected = {
             "installation-scripts.tar.gz": (
-                "sgj5wZfqMTRUImWDDbxR08emK755aU7A",
-                "6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d"),
+                "IWKWB5PJoRmZPIFar25riiDSm..Wo9c3",
+                "5f3e241af35996b936f357454007decbe193a6e875228c6615e1f7e40cd92b73"),
             "virtual-desktop.tar.gz": (
                 "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
                 "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
@@ -109,7 +109,7 @@ class GpuProfileContracts(unittest.TestCase):
                 self.assertEqual(manifest["archives"][name]["s3_version_id"], version)
                 self.assertEqual(manifest["archives"][name]["sha256"], digest)
             self.assertEqual(cli.GPU_KEYS[name],
-                             ("releases/issue100-res-native-20261115/res-2026.06/" + name
+                             ("releases/issue168-nvidia-dkms-20261123/res-2026.06/" + name
                               if name == "installation-scripts.tar.gz"
                               else "releases/task7-pr61-postreboot-a8ec326/res-2026.06/" + name))
             if name == "virtual-desktop.tar.gz":
@@ -117,6 +117,10 @@ class GpuProfileContracts(unittest.TestCase):
         self.assertEqual(PINNED_GPU_PREFIX, cli.GPU_PREFIX)
         self.assertEqual(PINNED_GPU_APP_PREFIX, cli.GPU_APP_PREFIX)
         self.assertNotEqual(PINNED_GPU_PREFIX, PINNED_GPU_APP_PREFIX)
+        policy = json.loads((ROOT / "infra/workstation-release-read-policy.json").read_text())
+        driver = next(s for s in policy["Statement"] if s["Sid"] == "ReadNvidiaDkmsInstallerVersion")
+        self.assertEqual(driver["Resource"], "arn:aws:s3:::" + cli.DEFAULT_BUCKET + "/" + cli.GPU_KEYS["installation-scripts.tar.gz"])
+        self.assertEqual(driver["Condition"], {"StringEquals": {"s3:VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]}})
 
     def test_pinned_gpu_bootstrap_and_app_archive(self):
         from render_workstation import GPU_ARCHIVES, PINNED_GPU_BUCKET, PINNED_GPU_PREFIX

@@ -70,4 +70,28 @@ CloudFormation then reached `DELETE_COMPLETE`; AWS returned not found for the te
 
 ## Issue #100 — new RES-first GPU installer (November 15, 2026)
 
-The old PR #65 installer above is preserved. The current **draft GPU launch candidate** uses `releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz` in the same Studio S3 bucket, VersionId `sgj5wZfqMTRUImWDDbxR08emK755aU7A`, SHA-256 `6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d` (42,994 bytes; SSE-S3 AES256). CloudShell reproducibly rebuilt and published this new installer without changing the existing RES application archive. The Studio CLI and renderer now pin this installer independently from the app. Workstation IAM has exact versioned-read access, and the upstream RES signed GRID driver download permissions were scoped to `latest/` and the exact driver object. **GPU driver/DCV live acceptance of this new archive remains pending.**
+The old PR #65 installer above is preserved. The **November 15 GPU launch candidate** uses `releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz` in the same Studio S3 bucket, VersionId `sgj5wZfqMTRUImWDDbxR08emK755aU7A`, SHA-256 `6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d` (42,994 bytes; SSE-S3 AES256). CloudShell reproducibly rebuilt and published this new installer without changing the existing RES application archive. The Studio CLI and renderer pinned this installer independently from the app. Workstation IAM has exact versioned-read access, and the upstream RES signed GRID driver download permissions were scoped to `latest/` and the exact driver object. The following section records the subsequent DKMS candidate.
+
+## November 23 NVIDIA DKMS candidate (Issue #168)
+
+The CLI and renderer now pin the installer below, built from commit
+`e8f1ebc6b5d885c4c4a30f54fc323a4d7ef9ca03` against the original RES 2026.06 archive.
+DKMS and the AWS header metapackage precede the full GRID installation; the GPU
+gate verifies automatic registration and covers staged newer AWS kernels.
+
+| Installer provenance | Value |
+|---|---|
+| S3 key | `releases/issue168-nvidia-dkms-20261123/res-2026.06/installation-scripts.tar.gz` |
+| VersionId | `IWKWB5PJoRmZPIFar25riiDSm..Wo9c3` |
+| SHA-256 | `5f3e241af35996b936f357454007decbe193a6e875228c6615e1f7e40cd92b73` |
+| Size / encryption | 43,389 bytes / SSE-S3 AES256 |
+
+The existing Studio bucket received a conditional `IfNoneMatch=*` upload, followed
+by exact-version byte-for-byte readback. The Task 7 application archive is unchanged.
+`StudioWorkstationReleaseRead` gained only the new exact-key/version read statement
+from `infra/workstation-release-read-policy.json`; existing permissions were retained.
+Policy simulation allows that version and denies a wrong version or unrelated key.
+Reproducible builds, shell syntax, and offline failure tests pass. **Fresh GPU install,
+an APT-triggered later-kernel rebuild/reboot, and authenticated DCV login remain live
+acceptance gates.** GPU quota was occupied by the separate Resolve acceptance instance.
+Roll back by restoring the previous CLI/renderer pins; old S3 objects are preserved.

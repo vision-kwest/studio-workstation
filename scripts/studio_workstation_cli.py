@@ -31,10 +31,10 @@ DEFAULT_REZ_VERSION_ID = "LBsqCMx_GF2pullxiHQKl8w9U0Yf08dX"
 DEFAULT_REZ_SHA256 = "de9d5159369fd57e3109ce047a290419d07f5dceba71dd18100c94be1f16cea2"
 GPU_AMI = DEFAULT_AMI  # Canonical 24.04: let RES install NVIDIA after runtime dependencies
 GPU_AMI_OWNER = "099720109477"  # Canonical
-GPU_PREFIX = "releases/issue100-res-native-20261115/res-2026.06"
+GPU_PREFIX = "releases/issue168-nvidia-dkms-20261123/res-2026.06"
 GPU_APP_PREFIX = "releases/task7-pr61-postreboot-a8ec326/res-2026.06"
 GPU_VERSIONS = {
-    "installation-scripts.tar.gz": "sgj5wZfqMTRUImWDDbxR08emK755aU7A",
+    "installation-scripts.tar.gz": "IWKWB5PJoRmZPIFar25riiDSm..Wo9c3",
     "virtual-desktop.tar.gz": "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
 }
 GPU_KEYS = {
