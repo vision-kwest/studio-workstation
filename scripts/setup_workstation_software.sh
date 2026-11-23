@@ -105,7 +105,6 @@ STUDIO_VSCODE_APPARMOR
 chown root:root /etc/apparmor.d/studio-vscode
 chmod 0644 /etc/apparmor.d/studio-vscode
 apparmor_parser -r /etc/apparmor.d/studio-vscode
-# Prepare shared Resolve on NVIDIA desktops after DCV/EFS; retry failures after Rez.
 resolve_status=0
 if command -v nvidia-smi >/dev/null && test -d /studio/apps/davinci-resolve; then
   if ! /studio/apps/davinci-resolve/setup-local.sh --user "$desktop_user"; then
@@ -152,4 +151,25 @@ if test -e /usr/local/bin/studio-rez-env; then
 else
   install -m 0755 "$dir/studio-rez-env" /usr/local/bin/studio-rez-env
 fi
+# Start the shared Ollama server on every boot; models load only on request.
+cat >/etc/systemd/system/studio-ollama.service <<STUDIO_OLLAMA
+[Unit]
+Description=Studio Ollama server
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=$desktop_user
+Environment="HOME=$desktop_home"
+Environment=OLLAMA_HOST=127.0.0.1:11434
+ExecStart=/bin/bash /studio/bin/OLLAMA serve
+Restart=always
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
+STUDIO_OLLAMA
+systemctl daemon-reload
+systemctl enable --now --no-block studio-ollama.service
 exit "$resolve_status"
