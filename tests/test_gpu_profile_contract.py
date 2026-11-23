@@ -94,8 +94,8 @@ class GpuProfileContracts(unittest.TestCase):
         from scripts import studio_workstation_cli as cli
         expected = {
             "installation-scripts.tar.gz": (
-                "IWKWB5PJoRmZPIFar25riiDSm..Wo9c3",
-                "5f3e241af35996b936f357454007decbe193a6e875228c6615e1f7e40cd92b73"),
+                "bs3P_1D8yZI33nM5K0u168XG_bXYc914",
+                "c780e2c78946363e6b8817dbca5cfbcab714798aee055b8160b21b02023a7816"),
             "virtual-desktop.tar.gz": (
                 "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
                 "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
@@ -109,7 +109,7 @@ class GpuProfileContracts(unittest.TestCase):
                 self.assertEqual(manifest["archives"][name]["s3_version_id"], version)
                 self.assertEqual(manifest["archives"][name]["sha256"], digest)
             self.assertEqual(cli.GPU_KEYS[name],
-                             ("releases/issue168-nvidia-dkms-20261123/res-2026.06/" + name
+                             ("releases/issue168-nvidia-dkms-r2-20261123/res-2026.06/" + name
                               if name == "installation-scripts.tar.gz"
                               else "releases/task7-pr61-postreboot-a8ec326/res-2026.06/" + name))
             if name == "virtual-desktop.tar.gz":

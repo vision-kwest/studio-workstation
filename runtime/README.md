@@ -75,16 +75,17 @@ The old PR #65 installer above is preserved. The **November 15 GPU launch candid
 ## November 23 NVIDIA DKMS candidate (Issue #168)
 
 The CLI and renderer now pin the installer below, built from commit
-`e8f1ebc6b5d885c4c4a30f54fc323a4d7ef9ca03` against the original RES 2026.06 archive.
-DKMS and the AWS header metapackage precede the full GRID installation; the GPU
-gate verifies automatic registration and covers staged newer AWS kernels.
+`530adb3eb2cdc7823ef0062f591ca1816352510a` against the original RES 2026.06 archive.
+DKMS and the AWS header metapackage are installed in a separate, checked APT step
+before the full GRID installation; the GPU gate verifies automatic registration
+and covers staged newer AWS kernels.
 
 | Installer provenance | Value |
 |---|---|
-| S3 key | `releases/issue168-nvidia-dkms-20261123/res-2026.06/installation-scripts.tar.gz` |
-| VersionId | `IWKWB5PJoRmZPIFar25riiDSm..Wo9c3` |
-| SHA-256 | `5f3e241af35996b936f357454007decbe193a6e875228c6615e1f7e40cd92b73` |
-| Size / encryption | 43,389 bytes / SSE-S3 AES256 |
+| S3 key | `releases/issue168-nvidia-dkms-r2-20261123/res-2026.06/installation-scripts.tar.gz` |
+| VersionId | `bs3P_1D8yZI33nM5K0u168XG_bXYc914` |
+| SHA-256 | `c780e2c78946363e6b8817dbca5cfbcab714798aee055b8160b21b02023a7816` |
+| Size / encryption | 43,427 bytes / SSE-S3 AES256 |
 
 The existing Studio bucket received a conditional `IfNoneMatch=*` upload, followed
 by exact-version byte-for-byte readback. The Task 7 application archive is unchanged.
@@ -93,5 +94,9 @@ from `infra/workstation-release-read-policy.json`; existing permissions were ret
 Policy simulation allows that version and denies a wrong version or unrelated key.
 Reproducible builds, shell syntax, and offline failure tests pass. **Fresh GPU install,
 an APT-triggered later-kernel rebuild/reboot, and authenticated DCV login remain live
-acceptance gates.** GPU quota was occupied by the separate Resolve acceptance instance.
+acceptance gates.** The first candidate's live gate correctly rejected missing DKMS
+registration: an unavailable legacy `linux-modules-extra-7.0.0-1014-aws` package
+aborted the combined APT transaction. This revision isolates the required DKMS
+packages; the original RES batch and its diagnostics are retained. The first test
+stack was removed. The PR records the second fresh test's result separately.
 Roll back by restoring the previous CLI/renderer pins; old S3 objects are preserved.

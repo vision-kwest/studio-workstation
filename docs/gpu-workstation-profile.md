@@ -43,7 +43,7 @@ Unlike the early single-prefix proposal, PR #65 fetches the two pinned GPU archi
 
 | Archive | Key |
 |---|---|
-| Installer | `releases/issue168-nvidia-dkms-20261123/res-2026.06/installation-scripts.tar.gz` |
+| Installer | `releases/issue168-nvidia-dkms-r2-20261123/res-2026.06/installation-scripts.tar.gz` |
 | Application | `releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz` |
 
 The exact SHA-256 and S3 VersionIds are documented in [runtime provenance](../runtime/README.md); preserve `s3:GetObjectVersion` instance-role permissions for both exact keys.
