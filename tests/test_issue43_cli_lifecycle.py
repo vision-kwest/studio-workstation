@@ -109,6 +109,29 @@ class NamedLifecycleTests(CliFixture):
         self.assertEqual(inventory.context(self.aws,h.REGION,'desktop')['state'],'running')
         self.assertFalse(any(c[1]=='stop-instances' for c in self.aws.calls))
 
+    def test_restart_recovers_efs_after_readiness_and_keeps_desktop_on_failure(self):
+        for profile in ('cpu','gpu'):
+            for fails in (False, True):
+                with self.subTest(profile=profile, fails=fails):
+                    cli.install_efs_client.side_effect=None
+                    name=profile+'-efs-'+str(fails).lower()
+                    selected=self.create(profile,name,'--no-studio-software')
+                    self.invoke('stop',name)
+                    cli.install_efs_client.reset_mock()
+                    cli.wait_gpu_bootstrap.reset_mock()
+                    self.aws.calls=[]
+                    def recover(*args, **kwargs):
+                        cli.wait_gpu_bootstrap.assert_called_once()
+                        if fails:raise RuntimeError('SSM unavailable')
+                    cli.install_efs_client.side_effect=recover
+                    result=json.loads(self.invoke('start',name))
+                    cli.install_efs_client.assert_called_once_with(selected['instance'],h.REGION,only_missing=True)
+                    self.assertEqual(result['state'],'running')
+                    self.assertIn('dcv_url',result)
+                    self.assertEqual('EFS helper recovery failed' in self.errors.getvalue(),fails)
+                    self.assertFalse(any(c[1]=='stop-instances' for c in self.aws.calls))
+                    self.invoke('stop',name)
+
     def test_profiles_and_profile_are_read_only_without_aws(self):
         self.assertEqual(set(json.loads(self.invoke('profiles'))['profiles']),{'cpu','gpu','publisher'})
         self.assertFalse(json.loads(self.invoke('profile','publisher'))['profiles']['publisher']['desktop'])
@@ -312,6 +335,7 @@ class NamedLifecycleTests(CliFixture):
             self.assertIn('Success',self.invoke('check-ready','publish'))
             with self.assertRaises(SystemExit):self.invoke('run','publish','--operation','build')
         self.invoke('stop','publish');self.invoke('start','publish')
+        cli.install_efs_client.assert_not_called()
         self.assertEqual(self.aws.address.get('InstanceId'),None)
         self.invoke('destroy','publish','--delete-stack')
         self.assertEqual(self.aws.volumes,{})

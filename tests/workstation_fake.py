@@ -87,6 +87,7 @@ class AWS:
         self.stacks, self.resources, self.vms, self.volumes, self.groups = {}, {}, {}, {}, {}
         self.roles, self.policies, self.schedules = {}, {}, {}
         self.before = self.after = None
+        self.efs_helper_probe = False
         self.serial = 0
         self.restore_public_ip = True
         self.keep_volume = False
@@ -366,7 +367,10 @@ class AWS:
             if action=='update-assume-role-policy':self.roles[name]['AssumeRolePolicyDocument']=json.loads(val('--policy-document'));return {}
         if service=='route53':return {'ResourceRecordSets':[{'Name':h.HOST+'.','Type':'A','TTL':300,'ResourceRecords':[{'Value':h.EIP_IP}]}]}
         if service=='ssm':
-            if action=='send-command':return {'Command':{'CommandId':str(uuid.UUID(int=99))}}
+            if action=='send-command':
+                self.efs_helper_probe = 'command -v mount.efs' in val('--parameters')
+                return {'Command':{'CommandId':str(uuid.UUID(int=99))}}
             if action=='get-command-invocation':return {'Status':'Success','ResponseCode':0,
-                'StandardOutputContent':'STUDIO_ISSUE43_GPU_TLS_READY\n'+acm.MARKER+'\n','StandardErrorContent':''}
+                'StandardOutputContent':('present\n' if self.efs_helper_probe else
+                    'STUDIO_ISSUE43_GPU_TLS_READY\n'+acm.MARKER+'\n'),'StandardErrorContent':''}
         raise AssertionError((service,action,args))

@@ -2,6 +2,13 @@
 
 Every CPU/GPU create installs official `AmazonEFSUtils` through SSM Distributor after DCV readiness. The existing setup service completes asynchronously; `--no-studio-software` skips Rez and the Ollama startup service. The optional immutable Rez 3.4.0 bundle contains no EFS `.deb`.
 
+CPU/GPU `start` also checks for `mount.efs` after desktop readiness and installs the
+official helper only when a successful SSM probe reports it missing. This recovers
+a create interrupted before helper installation without reinstalling a working
+helper. Failed or inconclusive checks report incomplete software setup and leave
+DCV available. The existing service then completes `/studio` setup asynchronously;
+helper installation alone does not prove the shared drive is ready. See [Issue #86](https://github.com/vision-kwest/studio-workstation/issues/86).
+
 The guest `studio-software-setup.service` waits for DCV readiness and requires `mount.efs`. If the helper is absent, it retries after 30 seconds without blocking DCV. It mounts `fs-054fd0b72429f4569` read/write using `tls,iam`, then exposes `/opt/studio/packages/shared` at `/studio`. New desktop accounts and the shared directory use UID/GID 2000. Only after storage succeeds does optional, checksum-verified Rez installation begin.
 
 The script migrates the exact previous read-only fstab entry, accepts its own existing `/studio` link, and reports unrelated conflicts. It creates only the new shared directory; it does not recursively change old package ownership. The publisher also exposes `/studio`, but ordinary desktop writes do not require a publisher or Rez.

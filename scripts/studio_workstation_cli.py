@@ -249,12 +249,29 @@ def verify_software_bootstrap_source(source):
             "and retry before launching billable EC2")
 
 
-def install_efs_client(instance, region, *, manager=aws, sleep=time.sleep):
+def install_efs_client(instance, region, *, only_missing=False, manager=aws, sleep=time.sleep):
     """Provision official EFS mount helper via AWS SSM Distributor.
 
     The pinned Rez bundle contains no amazon-efs-utils .deb. Installation is
     performed by the Studio CLI, never by unverified guest downloads.
     """
+    if only_missing:
+        progress.stage("Checking for the EFS mount helper via SSM")
+        response = manager(region, "ssm", "send-command", "--instance-ids", instance,
+                           "--document-name", "AWS-RunShellScript", "--parameters", json.dumps({
+                               "commands": ["if command -v mount.efs >/dev/null 2>&1; then echo present; else echo missing; fi"],
+                               "executionTimeout": ["30"]}), "--timeout-seconds", "60")
+        command = response["Command"]["CommandId"]
+        manager(region, "ssm", "wait", "command-executed",
+                "--command-id", command, "--instance-id", instance)
+        result = manager(region, "ssm", "get-command-invocation",
+                         "--command-id", command, "--instance-id", instance)
+        presence = result.get("StandardOutputContent", "").strip()
+        if (result.get("Status") != "Success" or result.get("ResponseCode") != 0 or
+                presence not in ("present", "missing")):
+            raise RuntimeError("EFS helper presence check was inconclusive; SSM command " + command)
+        if presence == "present":
+            return
     progress.stage("Installing official EFS mount helper via SSM")
     command = None
     for attempt in range(24):
@@ -575,6 +592,10 @@ def command(args):
                     progress.stage("Stopping EC2 after desktop readiness failure")
                     aws(args.region, "ec2", "stop-instances", "--instance-ids", iid)
                     raise
+                try:
+                    install_efs_client(iid, args.region, only_missing=True)
+                except (RuntimeError, subprocess.CalledProcessError) as exc:
+                    print("WARNING: desktop is available; Studio software setup incomplete; EFS helper recovery failed: " + str(exc), file=sys.stderr)
         result = describe(args.stack, args.region, with_expiration=args.action == "start")
         if args.action == "start" and profile != "publisher":
             result["dcv_url"] = endpoint["url"]
