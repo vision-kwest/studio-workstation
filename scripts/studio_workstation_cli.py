@@ -249,49 +249,6 @@ def verify_software_bootstrap_source(source):
             "and retry before launching billable EC2")
 
 
-def install_efs_client(instance, region, *, manager=aws, sleep=time.sleep):
-    """Provision official EFS mount helper via AWS SSM Distributor.
-
-    The pinned Rez bundle contains no amazon-efs-utils .deb. Installation is
-    performed by the Studio CLI, never by unverified guest downloads.
-    """
-    progress.stage("Installing official EFS mount helper via SSM")
-    command = None
-    for attempt in range(24):
-        try:
-            response = manager(region, "ssm", "send-command",
-                               "--instance-ids", instance,
-                               "--document-name", "AWS-ConfigureAWSPackage",
-                               "--parameters", json.dumps({
-                                   "action": ["Install"], "name": ["AmazonEFSUtils"],
-                                   "installationType": ["Uninstall and reinstall"]}),
-                               "--timeout-seconds", "180")
-            command = response["Command"]["CommandId"]
-            break
-        except subprocess.CalledProcessError as exc:
-            message = (exc.stderr or "") + str(exc)
-            if not any(x in message for x in ("InvalidInstanceId", "TargetNotConnected")):
-                raise
-            if attempt == 23:
-                raise RuntimeError("SSM EFS helper installation unavailable") from exc
-            sleep(10)
-    for attempt in range(60):
-        try:
-            result = manager(region, "ssm", "get-command-invocation",
-                             "--command-id", command, "--instance-id", instance)
-        except subprocess.CalledProcessError as exc:
-            if "InvocationDoesNotExist" not in ((exc.stderr or "") + str(exc)):
-                raise
-            result = {}
-        if result.get("Status") == "Success":
-            return
-        if result.get("Status") in ("Failed", "TimedOut", "Cancelled"):
-            raise RuntimeError("Official EFS helper installation failed: " +
-                               result.get("Status", "unknown"))
-        sleep(5)
-    raise RuntimeError("Timed out waiting for official EFS helper installation")
-
-
 def interactive_ssm(instance, region, *, attempts=8, sleep=time.sleep,
                     execute=subprocess.run):
     """Retry only transient SSM TargetNotConnected; preserve interactive input."""
@@ -479,6 +436,7 @@ def command(args):
                              (item.split("=", 1) for item in parameters)]
                 aws(args.region, "cloudformation", "create-stack", "--stack-name", args.stack,
                     "--template-body", "file://" + str(template), "--parameters", *cf_params,
+                    "--capabilities", "CAPABILITY_IAM",
                     "--tags", "Key=StudioManaged,Value=true", "Key=StudioProfile,Value=" + args.profile,
                     "--on-failure", "DELETE")
             aws(args.region, "cloudformation", "wait", "stack-create-complete", "--stack-name", args.stack)
@@ -491,11 +449,6 @@ def command(args):
                     progress.stage("Stopping EC2 after desktop readiness failure")
                     aws(args.region, "ec2", "stop-instances", "--instance-ids", selected["instance"])
                     raise
-            if args.profile != "publisher":
-                try:
-                    install_efs_client(instance_id(args.stack, args.region), args.region)
-                except (RuntimeError, subprocess.CalledProcessError) as exc:
-                    print("WARNING: desktop is available; Studio software setup incomplete; EFS helper installation failed: " + str(exc), file=sys.stderr)
             result = describe(args.stack, args.region, with_expiration=True)
             if args.profile != "publisher":
                 result["dcv_url"] = endpoint["url"]

@@ -161,6 +161,50 @@ def main():
     props["Tags"][0]["Value"] = {"Ref": "AWS::StackName"}
     props["Tags"].extend([{"Key": "StudioStackId", "Value": {"Ref": "AWS::StackId"}},
                           {"Key": "StudioProfile", "Value": a.profile}])
+    # The official package lacks validate.sh: an interrupted Installing record
+    # can report Success without the helper. Check the executable before trusting it.
+    package = {"name": "AmazonEFSUtils", "version": "3.4.0-1",
+               "installationType": "Uninstall and reinstall"}
+    template["Resources"]["EfsClientDocument"] = {
+        "Type": "AWS::SSM::Document", "Properties": {"DocumentType": "Command", "Content": {
+            "schemaVersion": "2.2", "description": "Install the official EFS helper after RES is ready",
+            "mainSteps": [
+                {"action": "aws:runShellScript", "name": "resReady", "inputs": {
+                    "runCommand": ["test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock"],
+                    "timeoutSeconds": "30", "onFailure": "exit"}},
+                {"action": "aws:runShellScript", "name": "needsInstallation", "inputs": {
+                    "runCommand": ["! /usr/sbin/mount.efs --version >/dev/null 2>&1"],
+                    "timeoutSeconds": "30", "onFailure": "successAndExit"}},
+                {"action": "aws:runDocument", "name": "install", "inputs": {
+                    "documentType": "SSMDocument", "documentPath": "AWS-ConfigureAWSPackage",
+                    "documentParameters": json.dumps({**package, "action": "Install"}), "onFailure": "exit"}},
+                {"action": "aws:runShellScript", "name": "needsRepair", "inputs": {
+                    "runCommand": ["! /usr/sbin/mount.efs --version >/dev/null 2>&1"],
+                    "timeoutSeconds": "30", "onFailure": "successAndExit"}},
+                {"action": "aws:runDocument", "name": "resetInterruptedInstall", "inputs": {
+                    "documentType": "SSMDocument", "documentPath": "AWS-ConfigureAWSPackage",
+                    "documentParameters": json.dumps({**package, "action": "Uninstall"}), "onFailure": "exit"}},
+                {"action": "aws:runDocument", "name": "reinstall", "inputs": {
+                    "documentType": "SSMDocument", "documentPath": "AWS-ConfigureAWSPackage",
+                    "documentParameters": json.dumps({**package, "action": "Install"}), "onFailure": "exit"}},
+                {"action": "aws:runShellScript", "name": "verifyHelper", "inputs": {
+                    "runCommand": ["/usr/sbin/mount.efs --version"], "timeoutSeconds": "30", "onFailure": "exit"}}]}}}
+    template["Resources"]["EfsClientAssociationRole"] = {
+        "Type": "AWS::IAM::Role", "Properties": {
+            "AssumeRolePolicyDocument": {"Version": "2012-10-17", "Statement": [{
+                "Effect": "Allow", "Principal": {"Service": "ssm.amazonaws.com"},
+                "Action": "sts:AssumeRole"}]},
+            "Policies": [{"PolicyName": "InstallEfsClient", "PolicyDocument": {
+                "Version": "2012-10-17", "Statement": [{"Effect": "Allow",
+                    "Action": "ssm:SendCommand", "Resource": [
+                        {"Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${EfsClientDocument}"},
+                        {"Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Workstation}"}]}]}}]}}
+    template["Resources"]["EfsClientAssociation"] = {
+        "Type": "AWS::SSM::Association", "Properties": {
+            "Name": {"Ref": "EfsClientDocument"},
+            "AssociationDispatchAssumeRole": {"Fn::GetAtt": ["EfsClientAssociationRole", "Arn"]},
+            "Targets": [{"Key": "tag:StudioStackId", "Values": [{"Ref": "AWS::StackId"}]}],
+            "ScheduleExpression": "rate(30 minutes)"}}
     template["Resources"]["Workstation"]["Properties"]["UserData"]={"Fn::Base64":{"Fn::Sub":render(a.bucket,a.prefix,a.user,a.profile,a.rez_version_id,a.rez_sha256)}}
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(template,indent=2)+"\n")

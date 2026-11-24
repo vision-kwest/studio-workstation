@@ -290,7 +290,6 @@ class TestCreateProgress(CliFixture):
                  ("override", override, requested)]
         for profile, (mode, options, plan), quiet in product(("cpu", "gpu"), cases, (False, True)):
             with self.subTest(profile=profile, software=mode, quiet=quiet):
-                cli.install_efs_client.reset_mock()
                 stdout, stderr = io.StringIO(), io.StringIO()
                 argv = ["create", "--profile", profile, "--name", f"{profile}-{mode}-{int(quiet)}",
                         "--client-cidr", "198.51.100.17/32", *options]
@@ -300,7 +299,7 @@ class TestCreateProgress(CliFixture):
                     cli.main(argv)
                 result = json.loads(stdout.getvalue())
                 self.assertEqual((result["profile"], result["state"]), (profile, "running"))
-                cli.install_efs_client.assert_called_once_with(result["instance"], h.REGION)
+                self.assertIn("EfsClientAssociation", self.templates[-1]["Resources"])
                 self.assertNotIn(plan, stdout.getvalue())
                 if quiet:
                     self.assertEqual(stderr.getvalue(), "")

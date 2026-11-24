@@ -260,7 +260,8 @@ CloudFormation events after the existing ownership-checked stop attempt.
 Commands print flushed progress to **stderr**, including the operation, selected
 scope, UTC timestamp, elapsed seconds, active stage and last observed AWS state.
 A heartbeat appears every **10 seconds** while blocked, including inside native
-AWS waiters, bootstrap/reboot retries, EFS helper setup and publisher SSM checks.
+AWS waiters, bootstrap/reboot retries and publisher SSM checks. EFS helper setup
+continues through the stack's State Manager association after the CLI exits.
 State observations reuse existing responses; reporting makes no extra AWS calls.
 Progress reporting does not alter AWS operations or their retry limits.
 

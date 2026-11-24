@@ -113,6 +113,8 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
     expected = {"Workstation": "AWS::EC2::Instance"}
     if PROFILES[profile]["desktop"]:
         expected["WorkstationSG"] = "AWS::EC2::SecurityGroup"
+        expected.update(EfsClientAssociation="AWS::SSM::Association", EfsClientAssociationRole="AWS::IAM::Role",
+                        EfsClientDocument="AWS::SSM::Document")
     disks = [m["Ebs"] for m in instance["Properties"].get("BlockDeviceMappings", []) if "Ebs" in m]
     if (instance["Type"] != "AWS::EC2::Instance" or not disks or
             any(d.get("DeleteOnTermination") is not True for d in disks) or
@@ -125,7 +127,8 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
     expiry = guard.deadline(now(), 10)
     tags = [{"Key": "StudioStack", "Value": stack}, {"Key": "StudioCleanupToken", "Value": token}]
     for resource in body["Resources"].values():
-        resource["Properties"].setdefault("Tags", []).extend(tags)
+        if resource["Type"] in ("AWS::EC2::Instance", "AWS::EC2::SecurityGroup"):
+            resource["Properties"].setdefault("Tags", []).extend(tags)
     schedule = guard._schedule("studio-stop-" + token, expiry, role, "${Workstation}", minutes)
     # CloudFormation has no ActionAfterCompletion property; Scheduler defaults to NONE.
     schedule.pop("ActionAfterCompletion")
@@ -136,6 +139,7 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
                  (p.split("=", 1) for p in parameters)]
     progress.stage("Creating workstation and automatic-stop timer")
     response = aws_call(region, "cloudformation", "create-stack", "--stack-name", stack,
+                        "--capabilities", "CAPABILITY_NAMED_IAM",
                         "--template-body", "file://" + str(template), "--parameters", *cf_params,
                         "--tags", "Key=StudioStack,Value=" + stack, "Key=StudioCleanupToken,Value=" + token,
                         "Key=StudioManaged,Value=true", "Key=StudioProfile,Value=" + profile,
