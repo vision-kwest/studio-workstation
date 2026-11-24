@@ -78,7 +78,7 @@ usable. If endpoint recovery fails, the CLI reports failure.
 
 ## Studio application shell
 
-After the [one-time shared command installation](docs/shared-applications.md#studio-shell-and-application-commands), run `studio env` in a desktop terminal. The child shell exposes `BLENDER`, `CODE`, `COMFY`, `OPENCODE` and `OLLAMA`, with shared application settings and optional installed Rez. Run `exit` to return to the original terminal environment.
+After the [one-time shared command installation](docs/shared-applications.md#studio-shell-and-application-commands), run `studio env` in a desktop terminal. The child shell exposes `BLENDER`, `CODE`, `COMFY`, `OPENCODE`, `OLLAMA` and `RESOLVE`, with shared application settings and optional installed Rez. Run `exit` to return to the original terminal environment.
 
 On an existing workstation without the local command link, use `/studio/bin/studio env` or `python3 studio env` from this repository. Shared applications must already be installed; entering the shell does not start applications, model downloads or services. Administrative lifecycle commands remain `python3 studio workstation ...`.
 

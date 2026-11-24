@@ -33,6 +33,7 @@ on:
       - 'scripts/comfy-desktop/**'
       - 'tests/test_comfy_first_launch.py'
       - 'scripts/studio-shell/**'
+      - 'scripts/resolve/**'
       - 'share/applications/unity-editor.desktop'
       - 'tests/test_studio_environment.py'
       - '.github/workflows/studio-cli.yml'

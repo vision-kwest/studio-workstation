@@ -65,6 +65,8 @@ class StudioEnvironmentTests(unittest.TestCase):
     def relocate(self, text):
         paths = [("/usr/local/bin/studio-rez-env", self.rez),
                  ("/usr/local/bin/studio", self.localbin / "studio"),
+                 ("/opt/resolve", self.opt / "resolve"),
+                 ("/var/lib/davinci-resolve", self.root / "var/lib/davinci-resolve"),
                  ("/opt/studio", self.opt), ("/studio", self.shared)]
         for index, (source, _) in enumerate(paths):
             text = re.sub(r"(?<![\w/@.-])" + re.escape(source) + r"(?![\w.-])",
@@ -152,6 +154,161 @@ class StudioEnvironmentTests(unittest.TestCase):
                 self.assertEqual(self.rows(result)[0]["args"], prefix + arguments)
                 self.assertEqual(native.read_bytes(), original)
         self.assertTrue((self.shared / "apps/vscode/extensions").is_dir())
+
+    def resolve_fixture(self):
+        payload = self.shared / "apps/davinci-resolve/21.2-free"
+        self.payload(payload / "bin/resolve")
+        self.write(payload / ".shared-payload-ready", "ready\n")
+        self.write(payload / "share/default-config.dat", "Default.Sentinel = preserve\n"
+                   "Site.1.FS.Count = 1\nSite.1.FS.1.Type = IOFileSys\nSite.1.FS.1.Root = HOMEDIR\n")
+        self.resolve_prepare = self.write(payload.parent / "launcher/prepare-user.py",
+            self.relocate((ROOT / "scripts/resolve/prepare-user.py").read_text()))
+        (payload.parent / "current").symlink_to(payload)
+        self.opt.mkdir(exist_ok=True)
+        (self.opt / "resolve").symlink_to(payload)
+        local = self.root / "var/lib/davinci-resolve/21.2-free"
+        for name in (".license", "LUT", "easyDCP", "Extras", "Fairlight", "Immersive", "Apple Immersive", "logs"):
+            (local / name).mkdir(parents=True)
+            (payload / name).symlink_to(local / name)
+        data = self.home / ".local/share/DaVinciResolve"
+        for name in ("configs", "Resolve Project Library", "logs"):
+            (data / name).mkdir(parents=True)
+        self.write(self.localbin / "findmnt", '#!/bin/sh\ncase "$*" in *network-storage*) echo nfs4;; *) echo ext4;; esac\n')
+        self.env["PATH"] = str(self.localbin) + ":" + self.env["PATH"]
+        return payload, local, data, self.home / ".cache/davinci-resolve"
+
+    def test_resolve_and_legacy_launch_preserve_arguments_exit_and_user_data(self):
+        payload, local, data, cache = self.resolve_fixture()
+        self.write(payload / "bin/resolve", f"#!{sys.executable}\n" + CAPTURE + "sys.exit(7)\n")
+        originals = [self.write(data / "configs/config.dat", "existing preferences"),
+                     self.write(data / "Resolve Project Library/project.db", "existing project"),
+                     self.write(local / "LUT/custom.cube", "custom LUT")]
+        arguments = ["clip with spaces.mov", "", "$(echo literal)", "single'quote", "line one\nline two"]
+        for name in ("RESOLVE", "studio-resolve"):
+            result = self.run_command([self.bin / name, *arguments])
+            self.assertEqual(result.returncode, 7, result.stderr)
+            self.assertEqual(self.rows(result)[0]["args"], arguments)
+            self.assertEqual(self.rows(result)[0]["cwd"], str(payload))
+            self.assertTrue((cache / "CacheClip").is_dir())
+            self.assertEqual([p.read_text() for p in originals], ["existing preferences", "existing project", "custom LUT"])
+        self.assertEqual(ET.parse(data / "configs/config.user.xml").findtext("AutoSaveDuration"), "10")
+
+    def test_resolve_seeds_native_preferences_and_repairs_only_missing_files(self):
+        payload, local, data, cache = self.resolve_fixture()
+        configs = data / "configs"
+        configs.rmdir()
+        result = self.run_command([self.bin / "RESOLVE", "clip with spaces.mov"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows(result)[0]["args"], ["clip with spaces.mov"])
+        system, user = configs / "config.dat", configs / "config.user.xml"
+        values = dict(line.split(" = ", 1) for line in system.read_text().splitlines() if " = " in line)
+        self.assertEqual(values["Default.Sentinel"], "preserve")
+        self.assertEqual(values["Site.1.FS.Count"], "4")
+        self.assertEqual([values[f"Site.1.FS.{i}.Root"] for i in range(1, 5)],
+                         [str(cache), str(self.home / "Videos"), str(self.shared), "ResolveVirtual"])
+        prefs = ET.parse(user).getroot()
+        self.assertEqual(prefs.tag, "SM_UserPrefs")
+        self.assertEqual({e.tag: e.text for e in prefs}, {
+            "AutoSaveMode": "1", "AutoSaveDuration": "10", "IsProjectLiveSaveEnabled": "true",
+            "IsTimelineBackupsEnabled": "true", "ProjectBackupLocation": str(self.shared / "projects/resolve/backups")})
+        self.assertTrue((self.shared / "projects/resolve/backups").is_dir())
+        for missing, retained in ((system, user), (user, system)):
+            with self.subTest(missing=missing.name):
+                self.write(retained, "existing customized settings\n")
+                missing.unlink()
+                result = self.run_command([self.bin / "RESOLVE"])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(missing.is_file())
+                self.assertEqual(retained.read_text(), "existing customized settings\n")
+        before = {p: p.read_bytes() for p in (system, user)}
+        (payload / "share/default-config.dat").unlink()
+        self.assertEqual(self.run_command([self.bin / "RESOLVE"]).returncode, 0)
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+
+    def test_resolve_conflicting_preference_paths_fail_before_seeding(self):
+        _, _, data, _ = self.resolve_fixture()
+        configs = data / "configs"
+        for name in ("config.dat", "config.user.xml"):
+            for kind in ("directory", "dangling-link"):
+                with self.subTest(name=name, kind=kind):
+                    target = configs / name
+                    target.mkdir() if kind == "directory" else target.symlink_to(self.root / "missing")
+                    result = self.run_command([self.bin / "RESOLVE"])
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertTrue(target.is_dir() if kind == "directory" else target.is_symlink())
+                    self.assertFalse((configs / ("config.user.xml" if name == "config.dat" else "config.dat")).exists())
+                    target.rmdir() if kind == "directory" else target.unlink()
+
+    def test_resolve_running_native_process_blocks_seed_and_concurrent_retries_are_valid(self):
+        import shutil
+        payload, _, data, _ = self.resolve_fixture()
+        binary = payload / "bin/resolve"
+        shutil.copyfile("/bin/sleep", binary)
+        with subprocess.Popen([str(binary), "30"], env=self.env) as running:
+            try:
+                result = self.run_command([sys.executable, self.resolve_prepare])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((data / "configs/config.dat").exists())
+                self.assertFalse((data / "configs/config.user.xml").exists())
+            finally:
+                running.terminate()
+        children = [subprocess.Popen([sys.executable, str(self.resolve_prepare)], env=self.env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
+        for child in children:
+            _, error = child.communicate(timeout=15)
+            self.assertEqual(child.returncode, 0, error)
+        self.assertEqual(ET.parse(data / "configs/config.user.xml").findtext("AutoSaveDuration"), "10")
+        self.assertIn("Site.1.FS.Count = 4", (data / "configs/config.dat").read_text())
+
+    def test_resolve_missing_prerequisites_fail_before_launch_or_cache_creation(self):
+        payload, local, data, cache = self.resolve_fixture()
+        targets = [payload / ".shared-payload-ready", payload / "bin/resolve", self.opt / "resolve", *local.iterdir()]
+        for path in targets:
+            with self.subTest(path=path.name):
+                backup = path.with_name(path.name + ".saved")
+                path.rename(backup)
+                result = self.run_command([self.bin / "RESOLVE"])
+                backup.rename(path)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(cache.exists())
+                if path.parent == local:
+                    self.assertIn("setup-local.sh --user", result.stderr)
+        configs = data / "configs"
+        configs.rmdir()
+        for dangling in (False, True):
+            configs.symlink_to(self.root / "missing-configs") if dangling else configs.write_text("keep this file")
+            result = self.run_command([self.bin / "RESOLVE"])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(cache.exists())
+            self.assertTrue(configs.is_symlink() if dangling else configs.read_text() == "keep this file")
+            configs.unlink()
+
+    def test_resolve_rejects_resolved_network_children_without_modifying_them(self):
+        payload, local, data, cache = self.resolve_fixture()
+        network = self.shared / "network-storage"
+        network.mkdir()
+        sentinel = self.write(network / "keep", "shared data")
+        for path in (local / "Apple Immersive", data / "configs", data / "Resolve Project Library", cache / "CacheClip"):
+            with self.subTest(path=path.name):
+                backup = path.with_name(path.name + ".saved")
+                existed = path.exists()
+                if existed:
+                    path.rename(backup)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.symlink_to(network)
+                result = self.run_command([self.bin / "RESOLVE"])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("nfs4", result.stderr)
+                self.assertIn(str(path), result.stderr)
+                self.assertEqual(path.readlink(), network)
+                self.assertEqual(sentinel.read_text(), "shared data")
+                path.unlink()
+                if existed:
+                    backup.rename(path)
 
     def test_ollama_uses_production_resolver_and_shared_models(self):
         resolved_bin = self.root / "resolved-bin"
