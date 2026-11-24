@@ -64,16 +64,16 @@ jobs:
       - run: python3 -m unittest discover -s tests -p test_pr65_gpu_create.py -v
       - name: Render exact scoped GPU template (offline)
         run: |
-          python3 runtime/render_workstation.py --profile gpu --lifecycle persistent --bucket studio-workstation-releases-401233741942-us-east-1 --prefix releases/issue100-res-native-20261115/res-2026.06 --user workstation --output /tmp/scoped-gpu-template.json
+          python3 runtime/render_workstation.py --profile gpu --lifecycle persistent --bucket studio-workstation-releases-401233741942-us-east-1 --prefix releases/issue168-nvidia-dkms-r2-20261123/res-2026.06 --user workstation --output /tmp/scoped-gpu-template.json
           python3 -m json.tool /tmp/scoped-gpu-template.json >/dev/null
           python3 - <<'PY'
           import json
           t=json.load(open('/tmp/scoped-gpu-template.json'))
           data=t['Resources']['Workstation']['Properties']['UserData']['Fn::Base64']['Fn::Sub']
-          assert 'releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz' in data
+          assert 'releases/issue168-nvidia-dkms-r2-20261123/res-2026.06/installation-scripts.tar.gz' in data
           assert 'releases/task7-pr61-postreboot-a8ec326/res-2026.06/virtual-desktop.tar.gz' in data
-          assert 'sgj5wZfqMTRUImWDDbxR08emK755aU7A' in data
-          assert '6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d' in data
+          assert 'bs3P_1D8yZI33nM5K0u168XG_bXYc914' in data
+          assert 'c780e2c78946363e6b8817dbca5cfbcab714798aee055b8160b21b02023a7816' in data
           PY
       - run: python3 -m unittest discover -s tests -p test_issue84_gpu_bootstrap_wait.py -v
       - run: python3 -m unittest discover -s tests -p test_issue88_hostname_plan.py -v

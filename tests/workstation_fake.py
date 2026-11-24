@@ -192,7 +192,7 @@ class AWS:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)/'workstation.json'
             argv = ['render','--profile',profile,'--bucket','studio-workstation-releases-401233741942-us-east-1',
-                    '--prefix','releases/issue100-res-native-20261115/res-2026.06','--output',str(path)]
+                    '--prefix','releases/issue168-nvidia-dkms-r2-20261123/res-2026.06','--output',str(path)]
             if profile=='gpu':
                 argv += ['--lifecycle','persistent']
             with patch.object(sys,'argv',argv):

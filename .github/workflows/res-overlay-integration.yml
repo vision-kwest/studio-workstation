@@ -4,6 +4,7 @@ on:
     paths:
       - 'runtime/**'
       - 'tests/test_res_overlay_archives.py'
+      - 'tests/test_nvidia_dkms.py'
       - '.github/workflows/res-overlay-integration.yml'
   workflow_dispatch:
 permissions:
@@ -14,6 +15,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Exercise NVIDIA DKMS postconditions without installing drivers
+        run: python3 -m unittest discover -s tests -p test_nvidia_dkms.py -v
       - name: Download original verified RES archives
         run: |
           set -euo pipefail

@@ -13,7 +13,12 @@ class ReleaseRolePolicyTests(unittest.TestCase):
         policy=json.loads(POLICY.read_text())
         self.assertEqual(policy["Version"],"2012-10-17")
         statements=policy["Statement"]
-        self.assertEqual({s["Sid"] for s in statements}, {"ReadPinnedStudioRelease", "ReadExactRezBundleVersion"})
+        self.assertEqual({s["Sid"] for s in statements}, {"ReadPinnedStudioRelease", "ReadExactRezBundleVersion", "ReadNvidiaDkmsInstallerVersion"})
+        driver=next(s for s in statements if s["Sid"]=="ReadNvidiaDkmsInstallerVersion")
+        self.assertEqual(driver["Effect"], "Allow")
+        self.assertEqual(driver["Action"], "s3:GetObjectVersion")
+        self.assertEqual(driver["Resource"], f"arn:aws:s3:::{BUCKET}/releases/issue168-nvidia-dkms-r2-20261123/res-2026.06/installation-scripts.tar.gz")
+        self.assertEqual(driver["Condition"], {"StringEquals": {"s3:VersionId": "bs3P_1D8yZI33nM5K0u168XG_bXYc914"}})
         statement=next(s for s in statements if s["Sid"]=="ReadPinnedStudioRelease")
         bundle=next(s for s in statements if s["Sid"]=="ReadExactRezBundleVersion")
         self.assertEqual(bundle["Effect"], "Allow")

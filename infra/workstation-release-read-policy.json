@@ -13,6 +13,15 @@
       ]
     },
     {
+      "Sid": "ReadNvidiaDkmsInstallerVersion",
+      "Effect": "Allow",
+      "Action": "s3:GetObjectVersion",
+      "Resource": "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/issue168-nvidia-dkms-r2-20261123/res-2026.06/installation-scripts.tar.gz",
+      "Condition": {
+        "StringEquals": { "s3:VersionId": "bs3P_1D8yZI33nM5K0u168XG_bXYc914" }
+      }
+    },
+    {
       "Sid": "ReadExactRezBundleVersion",
       "Effect": "Allow",
       "Action": "s3:GetObjectVersion",

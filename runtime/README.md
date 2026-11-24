@@ -70,4 +70,49 @@ CloudFormation then reached `DELETE_COMPLETE`; AWS returned not found for the te
 
 ## Issue #100 — new RES-first GPU installer (November 15, 2026)
 
-The old PR #65 installer above is preserved. The current **draft GPU launch candidate** uses `releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz` in the same Studio S3 bucket, VersionId `sgj5wZfqMTRUImWDDbxR08emK755aU7A`, SHA-256 `6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d` (42,994 bytes; SSE-S3 AES256). CloudShell reproducibly rebuilt and published this new installer without changing the existing RES application archive. The Studio CLI and renderer now pin this installer independently from the app. Workstation IAM has exact versioned-read access, and the upstream RES signed GRID driver download permissions were scoped to `latest/` and the exact driver object. **GPU driver/DCV live acceptance of this new archive remains pending.**
+The old PR #65 installer above is preserved. The **November 15 GPU launch candidate** uses `releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz` in the same Studio S3 bucket, VersionId `sgj5wZfqMTRUImWDDbxR08emK755aU7A`, SHA-256 `6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d` (42,994 bytes; SSE-S3 AES256). CloudShell reproducibly rebuilt and published this new installer without changing the existing RES application archive. The Studio CLI and renderer pinned this installer independently from the app. Workstation IAM has exact versioned-read access, and the upstream RES signed GRID driver download permissions were scoped to `latest/` and the exact driver object. The following section records the subsequent DKMS candidate.
+
+## November 23 NVIDIA DKMS candidate (Issue #168)
+
+The CLI and renderer now pin the installer below, built from commit
+`530adb3eb2cdc7823ef0062f591ca1816352510a` against the original RES 2026.06 archive.
+DKMS and the AWS header metapackage are installed in a separate, checked APT step
+before the full GRID installation; the GPU gate verifies automatic registration
+and covers staged newer AWS kernels.
+
+| Installer provenance | Value |
+|---|---|
+| S3 key | `releases/issue168-nvidia-dkms-r2-20261123/res-2026.06/installation-scripts.tar.gz` |
+| VersionId | `bs3P_1D8yZI33nM5K0u168XG_bXYc914` |
+| SHA-256 | `c780e2c78946363e6b8817dbca5cfbcab714798aee055b8160b21b02023a7816` |
+| Size / encryption | 43,427 bytes / SSE-S3 AES256 |
+
+The existing Studio bucket received a conditional `IfNoneMatch=*` upload, followed
+by exact-version byte-for-byte readback. The Task 7 application archive is unchanged.
+`StudioWorkstationReleaseRead` gained only the new exact-key/version read statement
+from `infra/workstation-release-read-policy.json`; existing permissions were retained.
+Policy simulation allows that version and denies a wrong version or unrelated key.
+Reproducible builds, shell syntax, and offline failure tests pass. Fresh installation
+on a Canonical Ubuntu 24.04 `g4dn.xlarge` passed the exact artifact checksum,
+NVIDIA 595.91.07 registration, T4 accelerated OpenGL, Xorg, GDM, and native DCV
+console checks. Installing the header metapackage also staged kernel
+`7.0.0-1018-aws`; the readiness gate built its NVIDIA module and the original RES
+reboot sequence booted it successfully. Both 1014 and 1018 were registered as
+installed, `AUTOINSTALL="yes"` was present, APT timers were enabled, and no
+packages were held. SSM baseline: `b53b1a66-53a6-454c-818b-33d61b4c97cc`.
+
+The unchanged CLI desktop-readiness command passed
+(`30f52f3f-47c8-4b36-87b0-3abda2e23972`), as did its HTTPS probes executed from
+the test guest. These checks do not establish authenticated browser login.
+The independent APT-triggered 1014-to-1017 replay was prepared but **not run**
+after tool execution was canceled. Staged-kernel coverage and a future APT
+update are distinct acceptance cases; the PR remains draft with the latter
+and authenticated DCV login pending. EFS/shared-software integration was
+condition-disabled for test isolation; the shared hostname was not assigned.
+
+The first candidate's live gate correctly rejected missing DKMS registration:
+an unavailable legacy `linux-modules-extra-7.0.0-1014-aws` package aborted the
+combined APT transaction. This revision isolates the required DKMS packages;
+the original RES batch and its diagnostics are retained. Test cleanup and full
+evidence are recorded in [PR #169](https://github.com/vision-kwest/studio-workstation/pull/169).
+Roll back by restoring the previous CLI/renderer pins; old S3 objects are preserved.

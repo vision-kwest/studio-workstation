@@ -149,3 +149,23 @@ The implementation PR distinguishes native schema checks from fresh-login proof.
 ## Ollama startup service (Issue #92)
 
 The owner now requests an Ollama server on every normal workstation boot. The optional software setup enables a native systemd service after verifying Rez, running the existing uppercase wrapper as the desktop user with a localhost listener and the shared model store. systemd retries failures without an EFS readiness dependency or a custom startup manager; no model is downloaded or preloaded. The deliberate `--no-studio-software` opt-out also skips this service. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`, desktop readiness, GPU setup and shared model/context configuration are unchanged. Real boot and GPU acceptance remain separate from offline validation.
+
+## NVIDIA kernel updates (Issue #168)
+
+RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` installs Ubuntu's
+`dkms` in DCV USB setup, after the NVIDIA installer has already run. The overlay
+installs DKMS and the AWS header metapackage in a separate, checked APT step within
+the existing GPU prerequisites, then requests `--dkms` on the full GRID installation.
+The first live test showed that the legacy batch can fail because the older AMI's
+`linux-modules-extra-7.0.0-1014-aws` package is unavailable, preventing every package
+in that transaction from installing. The dedicated step exits on its own failure;
+the original RES package selection and diagnostics remain intact.
+The standalone GPU post-install check requires the installed
+driver's DKMS registration, `AUTOINSTALL="yes"`, and matching NVIDIA modules for
+the running and staged newer AWS kernels before RES can mark setup ready.
+Native DKMS performs builds; there is no additional driver manager or boot service.
+The pinned NVIDIA payload/checksum, module flavor, RES reboot sequence, CPU path,
+DCV setup, and APT security-update policy are preserved. Existing workstations
+require the separately verified repair; a new CLI release does not retrofit them.
+Offline contracts and fresh GPU/kernel-transition acceptance are reported separately
+in the implementation PR and [runtime provenance](../runtime/README.md).
