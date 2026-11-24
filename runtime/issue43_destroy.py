@@ -92,6 +92,8 @@ def destroy(aws, run, stack, region, *, sleep=time.sleep):
     allowed = {"Workstation": "AWS::EC2::Instance", "WorkstationSG": "AWS::EC2::SecurityGroup"}
     if guard.has_expiration(selected):
         allowed["AutoStopSchedule"] = "AWS::Scheduler::Schedule"
+        from runtime.readiness_lifetime import RESOURCES
+        allowed.update(RESOURCES)
     for r in selected["resources"]:
         if allowed.get(r.get("LogicalResourceId")) != r.get("ResourceType"):
             raise ValueError("Unexpected resource in workstation stack")

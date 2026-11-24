@@ -14,6 +14,8 @@ on:
       - 'runtime/workstation_inventory.py'
       - 'runtime/pr65_gpu_create.py'
       - 'runtime/pr65_one_shot_guard.py'
+      - 'runtime/readiness_lifetime*.py'
+      - 'tests/test_readiness_lifetime.py'
       - 'runtime/publisher.py'
       - 'tests/test_publisher.py'
       - 'tests/workstation_fake.py'
@@ -62,6 +64,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -p test_gpu_profile_contract.py -v
       - run: python3 -m unittest discover -s tests -p test_pr65_one_shot_guard.py -v
       - run: python3 -m unittest discover -s tests -p test_pr65_gpu_create.py -v
+      - run: python3 -m unittest discover -s tests -p test_readiness_lifetime.py -v
       - name: Render exact scoped GPU template (offline)
         run: |
           python3 runtime/render_workstation.py --profile gpu --lifecycle persistent --bucket studio-workstation-releases-401233741942-us-east-1 --prefix releases/issue168-nvidia-dkms-r2-20261123/res-2026.06 --user workstation --output /tmp/scoped-gpu-template.json

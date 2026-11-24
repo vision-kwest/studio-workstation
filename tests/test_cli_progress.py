@@ -264,6 +264,7 @@ def test_progress_never_changes_lifecycle_aws_calls_or_guards(profile):
              patch.object(dcv_endpoint, "_probe"), \
              patch.object(cli, "verified_dcv_hostname", return_value="https://" + h.HOST + ":8443"), \
              patch.object(h, "check_gpu_tls"), \
+             patch.object(guard.uuid, "uuid4", return_value="11111111-1111-1111-1111-111111111111"), \
              patch.object(guard, "_utc", side_effect=lambda value=None: real_utc(NOW if value is None else value)), \
              contextlib.redirect_stderr(stderr):
             for action in ("stop", "start", "destroy"):

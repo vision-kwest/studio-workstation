@@ -216,12 +216,12 @@ class NamedLifecycleTests(CliFixture):
                 self.invoke('create','--profile',profile,'--dry-run')
         assign.assert_not_called()
 
-    def test_failed_readiness_stops_only_the_selected_desktop(self):
+    def test_local_readiness_failure_preserves_server_owned_setup(self):
         a=self.create('cpu','edit')
         cli.wait_gpu_bootstrap.side_effect=RuntimeError('not ready')
         with self.assertRaises(SystemExit):self.create('gpu','art')
         b=inventory.context(self.aws,h.REGION,'art')
-        self.assertEqual(b['state'],'stopped')
+        self.assertEqual(b['state'],'running')
         self.assertEqual(self.aws.vms[a['instance']]['State']['Name'],'running')
         self.assertEqual(len(self.aws.schedules),1)
 
@@ -497,7 +497,8 @@ class AutoStopLifecycleTests(CliFixture):
                          (selected['stack_id'], selected['instance'], 'running'))
         status = guard.status(self.aws, fresh)
         self.assertEqual(status['duration_minutes'], 720)
-        self.assertEqual(dt.datetime.fromisoformat(status['stop_at']), self.now + dt.timedelta(minutes=720))
+        self.assertEqual(dt.datetime.fromisoformat(status['stop_at']), self.now + dt.timedelta(minutes=60))
+        self.assertEqual(status['phase'], 'setup')
         update = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('scheduler', 'update-schedule'))
         start = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('ec2', 'start-instances'))
         self.assertLess(update, start)
@@ -507,7 +508,7 @@ class AutoStopLifecycleTests(CliFixture):
         self.assertIsNone(self.aws.address.get('InstanceId'))
         self.now += dt.timedelta(days=1)
         self.invoke('start', 'art')
-        self.assertEqual(dt.datetime.fromisoformat(guard.status(self.aws, fresh)['stop_at']), self.now + dt.timedelta(minutes=720))
+        self.assertEqual(dt.datetime.fromisoformat(guard.status(self.aws, fresh)['stop_at']), self.now + dt.timedelta(minutes=60))
 
     def test_failed_timer_rearm_never_starts_compute_or_deletes_work(self):
         selected = self.create('gpu', 'art')
@@ -573,7 +574,7 @@ class ProfileAutoStopTests(CliFixture):
                 self.assertEqual(json.loads(spec['Target']['Input']), {'InstanceIds': [selected['instance']]})
                 with patch.object(guard, '_utc', side_effect=lambda value=None: self.now if value is None else value):
                     extended = json.loads(self.invoke('extend-expiration', name, '--additional-minutes', '60'))
-                self.assertEqual(dt.datetime.fromisoformat(extended['proposed_stop_utc']), NOW + dt.timedelta(hours=5))
+                self.assertEqual(dt.datetime.fromisoformat(extended['proposed_stop_utc']), NOW + dt.timedelta(hours=5 if profile == 'publisher' else 2))
                 disk = selected['vm']['BlockDeviceMappings'][0]['Ebs']['VolumeId']
                 self.aws.volumes[disk]['saved_file_sha256'] = 'saved-work'
                 volumes = copy.deepcopy(self.aws.volumes)
@@ -591,7 +592,7 @@ class ProfileAutoStopTests(CliFixture):
                     self.assertEqual((started['state'], started['instance']), ('running', selected['instance']))
                     self.assertEqual(started['expiration']['duration_minutes'], minutes)
                     self.assertEqual(dt.datetime.fromisoformat(started['expiration']['stop_at']),
-                                     self.now + dt.timedelta(minutes=minutes))
+                                     self.now + dt.timedelta(minutes=minutes if profile == 'publisher' else 60))
                     update = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('scheduler', 'update-schedule'))
                     start = next(i for i, c in enumerate(self.aws.calls) if c[:2] == ('ec2', 'start-instances'))
                     self.assertLess(update, start)
