@@ -132,7 +132,8 @@ class NamedLifecycleTests(CliFixture):
     def test_removed_flags_missing_or_conflicting_targets_are_rejected(self):
         for argv in [('create','--volume-cleanup-delay','45m'),('create','--cleanup-token','anything'),
                      ('create','--allow-public-dcv'),('stop',),('stop','a','--stack','b'),
-                     ('hostname','release','a'),('hostname-return',),('destroy','a')]:
+                     ('hostname','release','a'),('hostname-return',),('destroy',),
+                     ('destroy','a','--stack','b')]:
             with self.subTest(argv=argv),self.assertRaises(SystemExit):self.invoke(*argv)
         self.assertEqual(self.aws.writes,[])
 
@@ -276,7 +277,8 @@ class NamedLifecycleTests(CliFixture):
             self.assertIn('CloudFormation=DELETE_COMPLETE, EC2=missing', message)
             self.assertIn('Waiter failed: DELETE_COMPLETE', message)
             self.assertEqual('Workstation: ' + reason in message, not denied)
-            self.assertIn(f'python3 studio workstation destroy {name} --delete-stack', message)
+            self.assertIn(f'python3 studio workstation destroy {name}', message)
+            self.assertNotIn('--delete-stack', message)
             self.assertNotIn('preserved workstation', message)
             self.assertNotIn('private-user-data', message)
             self.assertFalse(self.aws.vms)
@@ -313,7 +315,7 @@ class NamedLifecycleTests(CliFixture):
             with self.assertRaises(SystemExit):self.invoke('run','publish','--operation','build')
         self.invoke('stop','publish');self.invoke('start','publish')
         self.assertEqual(self.aws.address.get('InstanceId'),None)
-        self.invoke('destroy','publish','--delete-stack')
+        self.invoke('destroy','publish','--delete-stack')  # Legacy commands remain accepted.
         self.assertEqual(self.aws.volumes,{})
         self.assertIn('sg-0123456789abcdef0',self.aws.groups)
 
@@ -604,7 +606,7 @@ class ProfileAutoStopTests(CliFixture):
                     self.assertEqual((orphan['state'], orphan['profile']), ('safety-stack-only', profile))
                 finally:
                     self.aws.stacks[selected['stack_id']] = workload
-                self.invoke('destroy', name, '--delete-stack')
+                self.invoke('destroy', name)
                 self.assertNotIn(timer, self.aws.schedules)
                 self.assertNotIn(disk, self.aws.volumes)
                 self.assertNotIn(spec['Target']['RoleArn'].rsplit('/', 1)[-1], self.aws.roles)

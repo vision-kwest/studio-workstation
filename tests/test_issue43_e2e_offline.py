@@ -19,7 +19,7 @@ class OfflineLifecycleJourney(CliFixture):
         self.invoke('hostname','assign','ai')
         self.invoke('hostname','release')
         for selected in records:
-            self.invoke('destroy',selected['stack'],'--delete-stack')
+            self.invoke('destroy',selected['stack'])
             self.assertEqual(self.aws.stacks[selected['stack_id']]['StackStatus'],'DELETE_COMPLETE')
         self.assertFalse(self.aws.volumes)
         self.assertFalse(self.aws.schedules)

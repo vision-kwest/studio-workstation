@@ -90,7 +90,7 @@ python3 studio workstation stop art
 python3 studio workstation start art --expires-in 1d
 python3 studio workstation connect art
 python3 studio workstation extend-expiration art --additional-minutes 480
-python3 studio workstation destroy art --delete-stack
+python3 studio workstation destroy art
 ```
 
 CLI stop/destroy releases only the selected owner's hostname. With the shared
@@ -108,7 +108,7 @@ default is the duration selected at the most recent create/start; `--expires-in`
 overrides it. An extension changes the current deadline without a four-hour cap.
 Saved EBS files survive stopping; RAM and instance-store data do not.
 
-Explicit `destroy --delete-stack` deletes the workstation and local disks.
+Explicit `destroy NAME` permanently deletes the workstation and local disks.
 Shared EFS, EIP, DNS, ACM certificate and pre-existing profiles/client security
 groups remain independent. Stopped workstations still incur storage and applicable
 public IPv4 charges. The native timer can only stop its scoped instance; destructive

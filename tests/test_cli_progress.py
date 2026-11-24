@@ -269,8 +269,6 @@ def test_progress_never_changes_lifecycle_aws_calls_or_guards(profile):
             for action in ("stop", "start", "destroy"):
                 stdout = io.StringIO()
                 argv = [action, "art"] + (["--quiet"] if quiet else [])
-                if action == "destroy":
-                    argv += ["--delete-stack"]
                 with contextlib.redirect_stdout(stdout):
                     cli.main(argv)
                 results.append(json.loads(stdout.getvalue()))

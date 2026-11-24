@@ -17,7 +17,7 @@ python3 studio workstation result publish --command-id COMMAND_UUID
 python3 studio workstation run publish --operation promote-test --package usd --version 26.05
 python3 studio workstation run publish --operation promote-prod --package usd --version 26.05
 python3 studio workstation stop publish
-python3 studio workstation destroy publish --delete-stack
+python3 studio workstation destroy publish
 ```
 
 Replace the recipe placeholders with a reviewed pinned recipe. Build only writes

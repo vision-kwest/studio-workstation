@@ -38,7 +38,7 @@ The GPU AMI `ami-027c98f85b155c2ac` passed Image Builder 0.1.11/1, but its **Ima
   instance. Ordinary expiration cannot delete the stack or terminate the instance.
 - New CPU/GPU desktops expose DCV TCP 8443 and SSH TCP 22 publicly by default. `--client-cidr` restricts DCV only. SSH requires the desktop owner's public key, with password/root login disabled and TCP forwarding enabled. Setup copies `/studio/config/ssh/authorized_keys` into local `~/.ssh/authorized_keys.studio` after EFS is ready; private keys stay on the client. Existing local copies survive EFS outages and refresh during setup/reboot. Publisher retains its separate security group and SSM access.
 - Manual stop and expiration keep the stack and saved EBS files. Start rearms
-  a verified timer and may change the public IP. Explicit `destroy --delete-stack`
+  a verified timer and may change the public IP. Explicit `destroy NAME`
   deletes the local resources and owned timer, with absence checks.
 
 See [Studio CLI](studio-cli.md), [lifecycle](workstation-lifecycle-visual.md), [GPU profile](gpu-workstation-profile.md), and [index](INDEX.md).
