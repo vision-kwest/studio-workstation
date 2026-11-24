@@ -2,7 +2,7 @@
 """Named AWS CLI/CloudFormation lifecycle for CPU, GPU and publisher workstations.
 
 No external Python dependencies. Uses existing render_workstation.py and AWS CLI.
-Commands run when explicitly invoked; use --dry-run to preview create, and --delete-stack for teardown.
+Commands run when explicitly invoked; use --dry-run to preview create, and destroy NAME for teardown.
 """
 import argparse
 import datetime as dt
@@ -375,8 +375,6 @@ def command(args):
         print(json.dumps(extension.extend(aws, args.stack, args.region, args.additional_minutes), indent=2))
         return
     if args.action == "destroy":
-        if not args.delete_stack:
-            raise ValueError("Refusing destruction: add --delete-stack")
         from runtime import issue43_destroy
         print(json.dumps(issue43_destroy.destroy(aws, run, args.stack, args.region), indent=2))
         return
@@ -629,7 +627,8 @@ def main(argv=None):
                            help="Require this trusted hostname; normally the endpoint is selected automatically")
             s.add_argument("--ssm", action="store_true")
         if action == "destroy":
-            s.add_argument("--delete-stack", action="store_true")
+            s.description = "Permanently delete the selected workstation and its local EBS data."
+            s.add_argument("--delete-stack", action="store_true", help=argparse.SUPPRESS)
         if action == "run":
             s.add_argument("--operation", choices=["check", "build", "promote-test", "promote-prod"], required=True)
             s.add_argument("--recipe-repo")

@@ -216,7 +216,7 @@ Updating the repository does not retrofit an existing workstation's user data.
 python3 studio workstation stop art
 python3 studio workstation start art --expires-in 1d
 python3 studio workstation check-ready art
-python3 studio workstation destroy art --delete-stack
+python3 studio workstation destroy art
 ```
 
 Manual stop and expiration preserve the same EC2 instance, CloudFormation
@@ -224,17 +224,19 @@ stack and attached local EBS. Timed workstation start verifies and rearms a fres
 before starting compute; `--expires-in` can select a new duration. Saved EBS files
 survive stopping, while unsaved RAM and instance-store data do not.
 
-Explicit destroy deletes the workstation through CloudFormation. Local EBS uses
+Explicit `destroy NAME` deletes the workstation through CloudFormation. Local EBS uses
 `DeleteOnTermination=true`: it is removed on termination, not on stop. There is no
 separate disk retention interval, disk-cleanup timer or normal-path DeleteVolume
 call. Shared EFS, EIP allocation, DNS, ACM certificate and existing profiles/SGs
 are independent of an individual workstation.
 
-`--delete-stack` explicitly authorizes irreversible local-data deletion. Teardown
-waits for native CloudFormation and checks resource absence. A surviving resource
+Invoking `destroy NAME` explicitly authorizes irreversible local-data deletion;
+no additional flag or prompt is required. The optional `--delete-stack` flag
+remains accepted for compatibility and does not change behavior. Teardown waits
+for native CloudFormation and checks resource absence. A surviving resource
 is an error, not success and not an instruction to force-delete or silently retain.
 Retry destroy with the same immutable ARN after a partial failure. Inventory shows
-interrupted safety-only stacks; `destroy NAME --delete-stack` reconciles them
+interrupted safety-only stacks; `destroy NAME` reconciles them
 only after exact-scope absence checks. Legacy untagged stacks are diagnostic inventory,
 not automatically adopted or deleted by the new lifecycle.
 
@@ -243,7 +245,7 @@ not automatically adopted or deleted by the new lifecycle.
 When initial CloudFormation creation fails, the CLI reports the resource's AWS
 failure reason and observed stack state. Native rollback can delete the incomplete
 workstation while leaving its separate expiration-role stack. After confirming
-`DELETE_COMPLETE` and no remaining workstation, use `destroy NAME --delete-stack`
+`DELETE_COMPLETE` and no remaining workstation, use `destroy NAME`
 to remove those safeguards before reusing the name. This explicit cleanup checks
 resource ownership and absence; it does not run automatically on a create error.
 
@@ -430,7 +432,7 @@ python3 studio workstation result publish --command-id COMMAND_UUID
 python3 studio workstation run publish --operation promote-test --package usd --version 26.05
 python3 studio workstation run publish --operation promote-prod --package usd --version 26.05
 python3 studio workstation stop publish
-python3 studio workstation destroy publish --delete-stack
+python3 studio workstation destroy publish
 ```
 
 The existing publisher SG is an input, not a newly created/deleted resource.

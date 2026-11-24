@@ -20,10 +20,13 @@ class StudioCliTests(unittest.TestCase):
 
     @mock.patch.object(cli, "run")
     @mock.patch.object(cli, "aws")
-    @mock.patch.object(cli, "describe", return_value=STATE)
-    def test_destroy_requires_explicit_delete_flag(self, describe, aws, run):
-        with self.assertRaises(SystemExit):
-            self.invoke(["destroy", "--stack", STACK])
+    def test_destroy_requires_an_unambiguous_explicit_target(self, aws, run):
+        for args in ([], ["--delete-stack"], [STACK, "--stack", "other"],
+                     ["--stack", STACK, "--name", "other"]):
+            with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    self.invoke(["destroy", *args])
+                self.assertEqual(error.exception.code, 2)
         run.assert_not_called()
         aws.assert_not_called()
 

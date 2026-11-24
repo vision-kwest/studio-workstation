@@ -12,7 +12,7 @@ flowchart TD
   Running -->|"Save work; CLI stop"| Stopped
   Stopped --> Start["CLI start: rearm configured timer"]
   Start --> Running
-  Running --> Destroy["Explicit destroy --delete-stack"]
+  Running --> Destroy["Explicit destroy NAME"]
   Stopped --> Destroy
   Destroy --> Removed["Verify stack and local resources removed"]
 ```
@@ -23,7 +23,7 @@ flowchart TD
 - **Stop and expiration** preserve saved files on EBS and the CloudFormation stack. All profiles support `--expires-in`; CPU and publisher opt in at create, while GPU defaults to 150 minutes. Compute charges end when EC2 stops; retained storage and applicable public IPv4 charges continue. RAM and instance-store data are not preserved.
 - **Start** verifies a fresh configured stop deadline before starting the same instance/disk. It reuses the last create/start duration unless `--expires-in` supplies another positive `m`, `h` or `d` duration. There is no four-hour cap. Public IPv4 can change, so verify DCV readiness again.
 - **Connect** prints the current DCV URL. DCV authenticates the local `workstation` account (set a strong password interactively via SSM). No inbound SSH is required.
-- **Destroy** uses `destroy NAME --delete-stack`. CloudFormation deletes the workstation, its local EBS and owned stop schedule; the CLI checks resource absence before reporting completion.
+- **Destroy** uses `destroy NAME`. CloudFormation permanently deletes the workstation, its local EBS and owned stop schedule; the CLI checks resource absence before reporting completion.
 - **Existing legacy timers** are not converted by a CLI update. Review [existing workstation behavior](studio-cli.md#existing-workstations) before treating an old destructive timer as automatic stop.
 - **Destructive test cleanup** is separately scoped to disposable live-test resources. It does not change ordinary workstation expiry.
 

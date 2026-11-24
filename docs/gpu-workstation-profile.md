@@ -4,7 +4,7 @@
 
 New named GPU workstations use one CloudFormation-owned stop schedule. Timeout
 stops EC2 and preserves the stack and saved files on its encrypted gp3 root disk.
-Explicit `destroy --delete-stack` removes the workstation and local disks.
+Explicit `destroy NAME` permanently removes the workstation and local disks.
 `DeleteOnTermination=true` does not delete a disk when its instance stops.
 
 ```bash

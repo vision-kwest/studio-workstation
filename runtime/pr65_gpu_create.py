@@ -170,7 +170,7 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
                 aws_call(region, "ec2", "stop-instances", "--instance-ids", selected["instance"])
                 outcome += "; stop requested"
             if selected["stack_status"] == "DELETE_COMPLETE" and selected["state"] in ("missing", "terminated"):
-                outcome += f"; clean up remaining safeguards before retrying: python3 studio workstation destroy {stack} --delete-stack"
+                outcome += f"; clean up remaining safeguards before retrying: python3 studio workstation destroy {stack}"
         except Exception as stop_error:
             outcome = "stopping is unverified: " + str(stop_error)
         detail = (getattr(exc, "stderr", None) or str(exc)).strip()
