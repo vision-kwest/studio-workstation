@@ -90,6 +90,9 @@ def destroy(aws, run, stack, region, *, sleep=time.sleep):
     selected = context(aws, region, stack)
     stack = selected["stack"]
     allowed = {"Workstation": "AWS::EC2::Instance", "WorkstationSG": "AWS::EC2::SecurityGroup"}
+    if selected["profile"] in ("cpu", "gpu"):
+        allowed.update(EfsClientAssociation="AWS::SSM::Association", EfsClientAssociationRole="AWS::IAM::Role",
+                       EfsClientDocument="AWS::SSM::Document")
     if guard.has_expiration(selected):
         allowed["AutoStopSchedule"] = "AWS::Scheduler::Schedule"
     for r in selected["resources"]:

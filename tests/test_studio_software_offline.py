@@ -272,7 +272,7 @@ systemctl() { printf '%s\\n' "$*"; }
     def test_ssh_configuration_retries_and_reloads_only_after_validation(self):
         config = self.root / "sshd.conf"
         code = self.source.split("# RES attempts to disable SSH;", 1)[1]
-        code = code[code.index("desktop_user="):].split("# The Studio CLI installs", 1)[0]
+        code = code[code.index("desktop_user="):].split("# State Manager installs", 1)[0]
         code = code.replace("/etc/ssh/sshd_config.d/00-studio.conf", str(config))
         code = code.replace("/usr/sbin/sshd", "sshd")
         stubs = '''getent() { printf 'artist:x:2000:2000::%s:/bin/bash\\n' "$TEST_HOME"; }

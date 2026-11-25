@@ -24,10 +24,10 @@ STUDIO_SSH
 systemctl enable --now ssh.service
 /usr/sbin/sshd -t
 systemctl reload ssh.service
-# The Studio CLI installs the official EFS client via AWS SSM Distributor.
+# State Manager installs the official EFS client via AWS SSM Distributor.
 # The immutable Rez bundle intentionally does not contain a .deb package.
 # This service retries until the independently managed helper is available.
-command -v mount.efs >/dev/null || { echo "Waiting for Studio CLI EFS helper installation"; exit 1; }
+command -v mount.efs >/dev/null || { echo "Waiting for State Manager EFS helper installation"; exit 1; }
 mountpoint=/opt/studio/packages
 fstab=/etc/fstab
 entry="fs-054fd0b72429f4569:/ $mountpoint efs _netdev,nofail,x-systemd.automount,rw,tls,iam 0 0"

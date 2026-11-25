@@ -57,7 +57,9 @@ class GpuProfileContracts(unittest.TestCase):
                    "--prefix", "releases/test/res-2026.06", "--output", str(out)]):
                 render_main()
             template = json.loads(out.read_text())
-            self.assertEqual(set(template["Resources"]), {"Workstation", "WorkstationSG"})
+            self.assertEqual(set(template["Resources"]), {
+                "Workstation", "WorkstationSG", "EfsClientDocument",
+                "EfsClientAssociationRole", "EfsClientAssociation"})
             props = template["Resources"]["Workstation"]["Properties"]
             self.assertTrue(props["PropagateTagsToVolumeOnCreation"])
             self.assertTrue(all(m["Ebs"]["DeleteOnTermination"] for m in props["BlockDeviceMappings"]))

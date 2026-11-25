@@ -85,6 +85,7 @@ class AWS:
     def __init__(self):
         self.calls = []
         self.stacks, self.resources, self.vms, self.volumes, self.groups = {}, {}, {}, {}, {}
+        self.documents, self.associations = {}, {}
         self.roles, self.policies, self.schedules = {}, {}, {}
         self.before = self.after = None
         self.serial = 0
@@ -141,7 +142,7 @@ class AWS:
         for key, resource in body['Resources'].items():
             kind = resource['Type']
             if kind == 'AWS::IAM::Role':
-                physical = f'{name}-ExpirationRole-{n}'
+                physical = resource['Properties'].get('RoleName', f'{name}-{key}-{n}')
                 role_arn = f'arn:aws:iam::{h.ACCOUNT}:role/{physical}'
                 values[key + '.Arn'] = role_arn
                 props = resolve(resource['Properties'], values)
@@ -176,6 +177,13 @@ class AWS:
                 props.setdefault('ActionAfterCompletion', 'NONE')
                 self.schedules[physical] = props
                 values[key + '.Arn'] = f'arn:aws:scheduler:{h.REGION}:{h.ACCOUNT}:schedule/{props["GroupName"]}/{physical}'
+            elif kind == 'AWS::SSM::Document':
+                props = resolve(resource['Properties'], values)
+                physical = props.get('Name', f'{name}-{key}-{n}')
+                self.documents[physical] = props
+            elif kind == 'AWS::SSM::Association':
+                physical = str(uuid.UUID(int=n * 100 + len(self.associations)))
+                self.associations[physical] = resolve(resource['Properties'], values)
             else:
                 raise AssertionError(kind)
             values[key] = physical
@@ -294,6 +302,8 @@ class AWS:
                     if r['ResourceType']=='AWS::EC2::SecurityGroup':self.groups.pop(physical,None)
                     if r['ResourceType']=='AWS::IAM::Role':self.roles.pop(physical,None);self.policies.pop(physical,None)
                     if r['ResourceType']=='AWS::Scheduler::Schedule':self.schedules.pop(physical,None)
+                    if r['ResourceType']=='AWS::SSM::Document':self.documents.pop(physical,None)
+                    if r['ResourceType']=='AWS::SSM::Association':self.associations.pop(physical,None)
                     r['ResourceStatus']='DELETE_COMPLETE'
                 s['StackStatus']='DELETE_COMPLETE'
                 return {}
