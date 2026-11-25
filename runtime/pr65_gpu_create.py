@@ -158,6 +158,9 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
     stack_id = response.get("StackId", "")
     if not stack_id.startswith("arn:aws:cloudformation:us-east-1:401233741942:stack/" + stack + "/"):
         raise RuntimeError("Unrecognized stack identity; inspect CloudFormation provisioning")
+    if desktop:
+        progress.stage("AWS accepted workstation creation. SAFE TO DISCONNECT OR CLOSE LAPTOP.")
+        progress.stage("Provisioning continues in AWS; creation can still fail. Continuing to monitor progress.")
     from runtime.workstation_inventory import context
     try:
         aws_call(region, "cloudformation", "wait", "stack-create-complete", "--stack-name", stack_id)

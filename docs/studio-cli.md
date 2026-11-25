@@ -265,6 +265,22 @@ continues through the stack's State Manager association after the CLI exits.
 State observations reuse existing responses; reporting makes no extra AWS calls.
 Progress reporting does not alter AWS operations or their retry limits.
 
+During timed CPU/GPU creation (including the GPU default), wait for this explicit
+progress message before disconnecting or closing your laptop:
+
+```text
+AWS accepted workstation creation. SAFE TO DISCONNECT OR CLOSE LAPTOP.
+Provisioning continues in AWS; creation can still fail. Continuing to monitor progress.
+```
+
+It appears only after AWS accepts the workstation stack and its returned identity
+is verified. The earlier `Creating expiration safeguards` and `Creating workstation
+and automatic-stop timer` stages do not confirm that handoff. Acceptance does not
+mean the desktop is ready; AWS can still fail creation and roll it back. Optional
+shared-hostname assignment requires the CLI to remain connected. The notice is
+suppressed by `--quiet`/`--no-progress`; untimed CPU and publisher creation do not
+emit it. Monitoring continues normally if you leave the command running.
+
 For example, a stop can show the following (illustrative elapsed times):
 
 ```text
