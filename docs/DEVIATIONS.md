@@ -180,3 +180,19 @@ DCV setup, and APT security-update policy are preserved. Existing workstations
 require the separately verified repair; a new CLI release does not retrofit them.
 Offline contracts and fresh GPU/kernel-transition acceptance are reported separately
 in the implementation PR and [runtime provenance](../runtime/README.md).
+
+## Readiness-based workstation lifetime (Issue #68)
+
+The original CLI starts the selected lifetime after CloudFormation completes,
+before RES and Studio setup. New timed CPU/GPU stacks retain the native stop
+schedule but initially allow 60 minutes for setup. A stack-owned SSM Automation
+document, scoped execution/dispatch role and initial association move that same
+deadline to readiness plus the selected duration. Start submits the durable
+Automation before starting EC2. Existing RES 2026.06 commit
+`1f526a241fb293a29fb018f08ccf81c100c05a42`, GPU installation and guest setup service
+are reused unchanged; the observer verifies their actual completion and writable
+shared-storage access. Native SSM waits, Run Command and bounded loop actions
+handle reboots, with generation/deadline guards on the short schedule update.
+No Lambda, database, guest Scheduler permissions or replacement installer is added.
+Existing stacks retain explicitly labelled legacy timing; no automatic migration
+is performed. Source/offline validation and live readiness acceptance are separate.

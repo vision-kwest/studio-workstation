@@ -49,26 +49,41 @@ class CreationTests(unittest.TestCase):
         self.assertFalse(aws.vms)
         self.assertFalse(aws.schedules)
 
-    def test_timer_setup_failure_reports_stop_outcome_and_preserves_local_work(self):
-        for failed_action, stop_fails in (('get-schedule', False), ('update-schedule', False), ('get-schedule', True)):
+    def test_local_timer_observation_failure_preserves_server_owned_setup(self):
+        for failure in (RuntimeError('injected timer failure'), KeyboardInterrupt()):
             aws = AWS()
             def fail(service, action, args):
-                if (service, action) == ('scheduler', failed_action):
-                    raise RuntimeError('injected timer failure')
-                if (service, action) == ('ec2', 'stop-instances') and stop_fails:
-                    raise RuntimeError('injected stop failure')
+                if (service, action) == ('scheduler', 'get-schedule'):
+                    raise failure
             aws.before = fail
-            cause = 'Auto-stop update failed; original schedule is unchanged' if failed_action == 'update-schedule' else 'injected timer failure'
-            with self.subTest(action=failed_action, stop_fails=stop_fails), self.assertRaisesRegex(RuntimeError, cause) as raised:
+            with self.subTest(failure=type(failure)), self.assertRaisesRegex(RuntimeError, 'AWS provisioning'):
                 aws.desktop()
-            self.assertEqual('stopping is unverified: injected stop failure' in str(raised.exception), stop_fails)
-            self.assertEqual('; stop requested' in str(raised.exception), not stop_fails)
             self.assertTrue(aws.vms and aws.volumes and aws.schedules)
-            self.assertTrue(all(vm['State']['Name'] == ('running' if stop_fails else 'stopped') for vm in aws.vms.values()))
-            stop = next(i for i, c in enumerate(aws.calls) if c[:2] == ('ec2', 'stop-instances'))
-            events = next(i for i, c in enumerate(aws.calls) if c[:2] == ('cloudformation', 'describe-stack-events'))
-            self.assertLess(stop, events)
-            self.assertFalse(any(c[1] in ('delete-stack', 'terminate-instances', 'delete-volume') for c in aws.calls))
+            self.assertTrue(aws.documents and aws.associations)
+            self.assertTrue(all(vm['State']['Name'] == 'running' for vm in aws.vms.values()))
+            self.assertFalse(any(c[1] in ('stop-instances', 'delete-stack', 'terminate-instances', 'delete-volume') for c in aws.calls))
+
+    def test_confirmed_unsafe_timer_stops_only_the_new_owned_instance(self):
+        for failure in ('disabled', 'target', 'malformed-input', 'missing'):
+            with self.subTest(failure=failure):
+                aws = AWS()
+                other = aws.desktop('other')
+                def corrupt(service, action, args):
+                    if (service, action) == ('scheduler', 'get-schedule'):
+                        name = args[args.index('--name') + 1]
+                        if name == 'studio-stop-' + other['token']:return
+                        if failure == 'disabled':aws.schedules[name]['State'] = 'DISABLED'
+                        if failure == 'target':aws.schedules[name]['Target']['Input'] = json.dumps({'InstanceIds': [other['instance']]})
+                        if failure == 'malformed-input':aws.schedules[name]['Target']['Input'] = '{'
+                        if failure == 'missing':aws.schedules.pop(name, None)
+                aws.before = corrupt
+                with self.assertRaisesRegex(RuntimeError, 'stop requested'):aws.desktop()
+                owned = next(i for i in aws.vms if i != other['instance'])
+                self.assertEqual(aws.vms[owned]['State']['Name'], 'stopped')
+                self.assertEqual(aws.vms[other['instance']]['State']['Name'], 'running')
+                self.assertEqual([c[3] for c in aws.calls if c[1] == 'stop-instances'], [owned])
+                self.assertEqual(len(aws.volumes), 2)
+                self.assertFalse(any(c[1] in ('delete-stack', 'terminate-instances', 'delete-volume') for c in aws.calls))
 
     def test_scope_permissions_only_allow_stopping_exact_owned_instances(self):
         template=json.loads((ROOT/'infra/workstation-expiration-role.json').read_text())
@@ -136,4 +151,5 @@ class CreationTests(unittest.TestCase):
         status = guard.status(aws, selected, now=clock[0])
         self.assertGreater(dt.datetime.fromisoformat(initial[0][3:-1]).replace(tzinfo=dt.timezone.utc), clock[0])
         self.assertEqual(status['duration_minutes'], 1)
-        self.assertEqual(dt.datetime.fromisoformat(status['stop_at']), clock[0] + dt.timedelta(minutes=1))
+        self.assertEqual(status['phase'], 'setup')
+        self.assertEqual(dt.datetime.fromisoformat(status['stop_at']), clock[0] + dt.timedelta(minutes=56))

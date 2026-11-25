@@ -116,7 +116,7 @@ def describe(stack, region, *, with_expiration=False):
     result = {k: v for k, v in selected.items() if k not in ("vm", "resources", "token")}
     if with_expiration and guard.has_expiration(selected) and selected["state"] in ("running", "stopped"):
         expiry = guard.status(aws, selected)
-        result["expiration"] = {k: expiry[k] for k in ("stop_at", "duration_minutes", "remaining_seconds", "status", "warning") if k in expiry}
+        result["expiration"] = {k: expiry[k] for k in ("stop_at", "duration_minutes", "remaining_seconds", "status", "phase", "warning") if k in expiry}
     return result
 
 def verified_dcv_hostname(hostname, public_ip):
@@ -444,6 +444,9 @@ def command(args):
                 try:
                     endpoint = ready_desktop(args.stack, args.region, gpu=gpu)
                 except Exception:
+                    from runtime.readiness_lifetime import managed
+                    if managed(context(aws, args.region, args.stack)):
+                        raise RuntimeError("Local readiness observation ended; AWS setup and its stop deadline continue")
                     # Failed desktop creation must not strand a billable, unreachable VM.
                     selected = context(aws, args.region, args.stack)
                     progress.stage("Stopping EC2 after desktop readiness failure")
@@ -523,6 +526,9 @@ def command(args):
                 try:
                     endpoint = ready_desktop(args.stack, args.region, gpu=profile == "gpu")
                 except Exception:
+                    from runtime.readiness_lifetime import managed
+                    if managed(selected):
+                        raise RuntimeError("Local readiness observation ended; AWS setup and its stop deadline continue")
                     progress.stage("Stopping EC2 after desktop readiness failure")
                     aws(args.region, "ec2", "stop-instances", "--instance-ids", iid)
                     raise

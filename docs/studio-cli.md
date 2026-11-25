@@ -330,17 +330,41 @@ termination rights. CloudFormation provisions the timer with the workstation;
 the timer remains after firing so it can be rearmed. No Lambda, database,
 second termination timer or cleanup daemon is required.
 
-The requested duration starts after CloudFormation creates the infrastructure
-and includes desktop bootstrap time. During creation, the same schedule has a
-temporary ten-minute stop deadline; the CLI replaces and verifies that deadline
-once the stack is ready. An interrupted CLI therefore leaves a bounded stop
-timer in place. Initial CloudFormation creation has a five-minute timeout and
-normal failed-create rollback, which can remove incomplete new resources.
+For newly created timed CPU/GPU desktops, the selected duration starts when AWS
+verifies workstation readiness. The same stop schedule initially allows 60 minutes
+for setup. A CloudFormation-owned SSM Automation checks RES/DCV, GPU acceleration
+where applicable, successful completion of the native Studio setup service, the
+writable `/studio` mount, desktop-user access and the shared menu link. It then
+sets the deadline to readiness time plus the selected duration. Browser login is
+not required. A 35-minute selection with 30 minutes of setup therefore stops
+about 65 minutes after launch; compute is billed during setup too.
 
-For every timed profile, `start` updates and independently verifies a fresh deadline before starting
-EC2. Without an override, it reuses the duration selected at the most recent
-create/start. A failed timer verification prevents the start. An expired timer
-and a stopped instance are normal states; local saved work remains available.
+The initial State Manager association starts the Automation in AWS; it does not
+need the local CLI to remain connected. A failed or incomplete setup retains the
+60-minute stop deadline and keeps available DCV accessible. Status reports
+`phase: setup` while that deadline applies and `phase: ready` after the handoff.
+Duplicate checks, associations and RES reboots cannot restart the selected clock.
+Initial CloudFormation creation retains its five-minute timeout and normal
+failed-create rollback, which can remove incomplete new resources.
+
+Readiness polling occurs inside bounded, ten-minute Run Command invocations;
+it does not charge an Automation step for each 15-second guest check. A successful
+path with two interrupted probes uses 19 Automation steps. The 12-attempt limit
+bounds the failed path at 74 steps; each short Python action has a 30-second limit.
+These counts cover the authored runbook, excluding the initial association's parent
+dispatch overhead and any additional executions triggered by association edits or retries.
+Native waits and five-minute retry delays keep transient offline/registration failures
+from exhausting attempts early. Readiness observation can take up to five extra minutes
+after a reboot, delivery failure or completed probe; it must finish before the setup deadline.
+The independent 60-minute setup stop remains the compute-cost boundary.
+
+For every timed profile, `start` updates and independently verifies a fresh deadline
+before starting EC2. New timed desktops also submit their durable readiness
+Automation before starting compute. Without an override, start reuses the duration
+selected at the most recent create/start. A failed timer or Automation submission
+prevents the start. An expired timer and a stopped instance are normal states;
+local saved work remains available. Publisher duration still begins after
+infrastructure creation and before a later start.
 
 ```bash
 python3 studio workstation status art
@@ -352,6 +376,12 @@ of minutes and verifies the result. It does not change the duration remembered
 for later starts. There is no 180-minute addition cap, 80–240-minute result window
 or final-15-minute blackout.
 
+Extending during setup first cancels and verifies completion of any pending
+readiness Automation, then rereads and extends the actual deadline. Status shows
+`phase: manual`: that explicitly selected deadline includes remaining setup time.
+Cancellation cannot retract an update already dispatched to Scheduler; readback
+occurs after cancellation so the extension applies to the resulting deadline.
+
 A very late update can race with an invocation already dispatched by AWS.
 Schedule readback cannot retract an in-flight stop. If the workstation is already
 stopping, let it finish and start it again with a fresh timer; its EBS files remain.
@@ -359,6 +389,11 @@ Automatic stopping ends compute use, but retained EBS and applicable public IPv4
 charges continue. Stop never needs healthy optional hostname infrastructure.
 
 ### Existing workstations
+
+Existing timed desktops are not migrated automatically. Their status reports
+`phase: legacy` with a warning that startup time is included. Recreate one from
+the updated source to obtain the server-side readiness lifetime; updating a local
+checkout does not add CloudFormation resources to an existing stack.
 
 An existing untimed CPU or publisher remains untimed. `start --expires-in` cannot
 add a timer to it; create a new workstation with `--expires-in` to opt in.

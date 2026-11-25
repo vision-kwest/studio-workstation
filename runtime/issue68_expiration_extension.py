@@ -3,6 +3,7 @@ import copy
 import datetime as dt
 
 from runtime import pr65_one_shot_guard as guard
+from runtime import readiness_lifetime
 from runtime.workstation_inventory import context
 
 
@@ -12,6 +13,9 @@ def extend(aws, stack, region, additional_minutes, *, now=None):
     if selected["state"] not in ("running", "stopped"):
         raise ValueError("Workstation is already stopping or unavailable; wait for it to stop, then start it")
     current = guard.status(aws, selected, now=now)
+    if current.get("phase") == "setup":
+        readiness_lifetime.cancel_pending(aws, selected)
+        current = guard.status(aws, selected, now=now)  # A dispatched update may finish before cancellation.
     if current["status"] == "legacy":
         raise ValueError(current["warning"])
     if current["status"] == "disabled":
@@ -21,6 +25,8 @@ def extend(aws, stack, region, additional_minutes, *, now=None):
     if when <= guard._utc(now):
         raise ValueError("Extended stop deadline must be in the future; start the stopped workstation with a fresh timer")
     proposed = copy.deepcopy(current["schedule"])
+    if current.get("phase") == "setup":
+        proposed["Description"] = proposed["Description"].replace("Studio setup ", "Studio manual ", 1)
     proposed["ScheduleExpression"] = "at(" + when.strftime("%Y-%m-%dT%H:%M:%S") + ")"
     recovered = guard._update(aws, current["schedule"], proposed, now=now)
     # A verified update cannot retract a stop request already dispatched by AWS.
@@ -35,6 +41,8 @@ def extend(aws, stack, region, additional_minutes, *, now=None):
     result = {"stack": stack, "instance_id": selected["instance"], "previous_stop_utc": previous.isoformat(),
               "proposed_stop_utc": when.isoformat(), "additional_minutes": additional_minutes,
               "extended": True, "recovered_after_error": recovered, "state": observed["state"]}
+    if current.get("phase") == "setup" and observed["state"] == "running":
+        result["warning"] = "Readiness handoff cancelled; this manual stop deadline includes remaining setup time"
     if observed["state"] in ("stopping", "stopped"):
         result["warning"] = ("The deadline was updated, but the workstation is " + observed["state"] +
                              "; an already-dispatched stop cannot be canceled. Start again once stopped; saved EBS work is preserved.")

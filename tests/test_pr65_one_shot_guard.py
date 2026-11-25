@@ -20,7 +20,7 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(spec['Target']['Arn'], 'arn:aws:scheduler:::aws-sdk:ec2:stopInstances')
         self.assertEqual(json.loads(spec['Target']['Input']), {'InstanceIds': [self.selected['instance']]})
         self.assertEqual(spec['ActionAfterCompletion'], 'NONE')
-        self.assertEqual(dt.datetime.fromisoformat(self.proposal['stop_at']), NOW + dt.timedelta(minutes=150))
+        self.assertEqual(dt.datetime.fromisoformat(self.proposal['stop_at']), NOW + dt.timedelta(minutes=60))
         disk = copy.deepcopy(self.aws.volumes)
         self.aws.fire_schedule(spec['Name'])
         self.assertEqual(self.aws.vms[self.selected['instance']]['State']['Name'], 'stopped')
@@ -92,8 +92,9 @@ class GuardTests(unittest.TestCase):
         status = guard.status(self.aws, self.selected, now=later)
         self.assertEqual(status['status'], 'scheduled')
         self.assertEqual(status['duration_minutes'], 720)
-        self.assertEqual(dt.datetime.fromisoformat(status['stop_at']), later + dt.timedelta(minutes=720))
-        self.assertEqual([c[1] for c in self.aws.writes], ['update-schedule'])
+        self.assertEqual(dt.datetime.fromisoformat(status['stop_at']), later + dt.timedelta(minutes=60))
+        self.assertEqual(status['phase'], 'setup')
+        self.assertEqual([c[1] for c in self.aws.writes], ['update-schedule', 'start-automation-execution'])
         guard.rearm(self.aws, self.selected, now=later + dt.timedelta(days=1))
         self.assertEqual(guard.status(self.aws, self.selected, now=later)['duration_minutes'], 720)
 
@@ -149,12 +150,12 @@ class GuardTests(unittest.TestCase):
     def test_rearm_readback_that_outlasts_short_timer_cannot_authorize_start(self):
         self.aws.vms[self.selected['instance']]['State']['Name'] = 'stopped'
         selected = inventory.context(self.aws, h.REGION, self.selected['stack'])
-        clock, reads = [NOW], []
+        clock, updated = [NOW], []
         def slow_readback(service, action, args, result):
-            if (service, action) == ('scheduler', 'get-schedule'):
-                reads.append(True)
-                if len(reads) == 3:
-                    clock[0] = NOW + dt.timedelta(minutes=2)
+            if (service, action) == ('scheduler', 'update-schedule'):
+                updated.append(True)
+            if (service, action) == ('scheduler', 'get-schedule') and updated:
+                clock[0] = NOW + dt.timedelta(minutes=61)
         self.aws.after = slow_readback
         self.aws.calls.clear()
         with patch.object(guard, '_utc', side_effect=lambda value=None: clock[0] if value is None else value):

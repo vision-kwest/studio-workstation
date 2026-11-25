@@ -4,9 +4,11 @@ import hashlib
 import re
 from pathlib import Path
 import json
+import subprocess
 
 from runtime import pr65_one_shot_guard as guard
 from runtime import cli_progress as progress
+from runtime import readiness_lifetime
 
 POLICY = "StudioWorkstationExpiry"
 
@@ -20,8 +22,13 @@ class Scheduler:
                              "--cli-input-json", json.dumps(spec))
 
     def get_schedule(self, **keys):
-        return self.aws_call(self.region, "scheduler", "get-schedule",
-                             "--name", keys["Name"], "--group-name", keys["GroupName"])
+        try:
+            return self.aws_call(self.region, "scheduler", "get-schedule",
+                                 "--name", keys["Name"], "--group-name", keys["GroupName"])
+        except subprocess.CalledProcessError as exc:
+            if "(ResourceNotFoundException)" in (exc.stderr or ""):
+                raise guard.InvalidSafeguard("Auto-stop schedule is absent") from exc
+            raise
 
 
 def preflight(aws_call, region, stack, token, *, role_arn):
@@ -30,7 +37,7 @@ def preflight(aws_call, region, stack, token, *, role_arn):
         raise ValueError("Unexpected expiration region/account")
     group = aws_call(region, "scheduler", "get-schedule-group", "--name", guard.GROUP)
     if group.get("State") != "ACTIVE":
-        raise ValueError("Expiration Scheduler group is not ACTIVE")
+        raise guard.InvalidSafeguard("Expiration Scheduler group is not ACTIVE")
     name = role_arn.rsplit("/", 1)[-1]
     role = aws_call(region, "iam", "get-role", "--role-name", name)["Role"]
     trust = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow",
@@ -38,7 +45,7 @@ def preflight(aws_call, region, stack, token, *, role_arn):
              "Condition": {"StringEquals": {"aws:SourceAccount": "401233741942"},
                            "ArnEquals": {"aws:SourceArn": "arn:aws:scheduler:us-east-1:401233741942:schedule-group/" + guard.GROUP}}}]}
     if role.get("Arn") != role_arn or role.get("AssumeRolePolicyDocument") != trust:
-        raise ValueError("Expiration role identity/trust mismatch")
+        raise guard.InvalidSafeguard("Expiration role identity/trust mismatch")
     doc = aws_call(region, "iam", "get-role-policy", "--role-name", name,
                    "--policy-name", POLICY)["PolicyDocument"]
     doc = json.loads(doc) if isinstance(doc, str) else doc
@@ -47,12 +54,12 @@ def preflight(aws_call, region, stack, token, *, role_arn):
     expected = [{"Effect": "Allow", "Action": "ec2:StopInstances",
                  "Resource": "arn:aws:ec2:us-east-1:401233741942:instance/*", "Condition": scope}]
     if doc != {"Version": "2012-10-17", "Statement": expected}:
-        raise ValueError("Expiration role permissions differ from exact workstation scope")
+        raise guard.InvalidSafeguard("Expiration role permissions differ from exact workstation scope")
     inline = aws_call(region, "iam", "list-role-policies", "--role-name", name)
     attached = aws_call(region, "iam", "list-attached-role-policies", "--role-name", name)
     if (inline.get("PolicyNames") != [POLICY] or attached.get("AttachedPolicies") or
             inline.get("IsTruncated") or attached.get("IsTruncated")):
-        raise ValueError("Unexpected additional expiration policies")
+        raise guard.InvalidSafeguard("Unexpected additional expiration policies")
 
 
 
@@ -78,7 +85,7 @@ def safety(aws, region, stack, *, create=False, arn=None, cleanup=False, profile
         aws(region, "cloudformation", "wait", "stack-create-complete", "--stack-name", name)
     record = stack_record(aws, region, arn or name)
     if record is None:
-        raise ValueError("Expiration safety stack is absent")
+        raise guard.InvalidSafeguard("Expiration safety stack is absent")
     outputs = {v["OutputKey"]: v["OutputValue"] for v in record.get("Outputs", [])}
     tags = guard._tags(record)
     token = record["StackId"].rsplit("/", 1)[-1]
@@ -88,14 +95,14 @@ def safety(aws, region, stack, *, create=False, arn=None, cleanup=False, profile
             tags.get("StudioManaged") != "expiry" or tags.get("StudioWorkstation") != stack or
             params.get("WorkstationStack") != stack or
             (outputs and (outputs.get("WorkstationStack") != stack or outputs.get("CleanupToken") != token))):
-        raise ValueError("Native safety-stack identity mismatch")
+        raise guard.InvalidSafeguard("Native safety-stack identity mismatch")
     resources = aws(region, "cloudformation", "list-stack-resources", "--stack-name", record["StackId"])["StackResourceSummaries"]
     if len(resources) > 1 or any((r.get("LogicalResourceId"), r.get("ResourceType")) != ("ExpirationRole", "AWS::IAM::Role") for r in resources):
-        raise ValueError("Unexpected resource in safety stack")
+        raise guard.InvalidSafeguard("Unexpected resource in safety stack")
     physical = resources[0].get("PhysicalResourceId") if resources else None
     role = "arn:aws:iam::401233741942:role/" + physical if physical else None
     if (outputs and role != outputs.get("ExpirationRoleArn")) or (not cleanup and not role):
-        raise ValueError("Safety role is not owned by this CloudFormation stack")
+        raise guard.InvalidSafeguard("Safety role is not owned by this CloudFormation stack")
     if not cleanup:
         preflight(aws, region, stack, token, role_arn=role)
     return {"arn": record["StackId"], "token": token, "role": role, "state": record["StackStatus"]}
@@ -122,18 +129,22 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
         raise ValueError("Expected a workstation with native EBS cleanup on explicit destroy")
     identity = safety(aws_call, region, stack, create=True, profile=profile)
     token, role = identity["token"], identity["role"]
-    # A bounded provisioning stop survives a disconnected CLI. The selected runtime
-    # starts after infrastructure exists, so even a one-minute timer can be armed.
-    expiry = guard.deadline(now(), 10)
+    # Desktop lifetime is handed off by AWS after readiness, independently of this CLI.
+    desktop = PROFILES[profile]["desktop"]
+    expiry = guard.deadline(now(), readiness_lifetime.SETUP_MINUTES if desktop else 10)
     tags = [{"Key": "StudioStack", "Value": stack}, {"Key": "StudioCleanupToken", "Value": token}]
     for resource in body["Resources"].values():
         if resource["Type"] in ("AWS::EC2::Instance", "AWS::EC2::SecurityGroup"):
             resource["Properties"].setdefault("Tags", []).extend(tags)
     schedule = guard._schedule("studio-stop-" + token, expiry, role, "${Workstation}", minutes)
+    if desktop:
+        schedule["Description"] = f"Studio setup {token}; auto-stop after {minutes} minutes"
     # CloudFormation has no ActionAfterCompletion property; Scheduler defaults to NONE.
     schedule.pop("ActionAfterCompletion")
     schedule["Target"]["Input"] = {"Fn::Sub": schedule["Target"]["Input"]}
     body["Resources"]["AutoStopSchedule"] = {"Type": "AWS::Scheduler::Schedule", "Properties": schedule}
+    if desktop:
+        body["Resources"].update(readiness_lifetime.resources(token, role, schedule, profile))
     Path(template).write_text(json.dumps(body))
     cf_params = ["ParameterKey=" + k + ",ParameterValue=" + v for k, v in
                  (p.split("=", 1) for p in parameters)]
@@ -153,30 +164,34 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
         selected = context(aws_call, region, stack_id)
         actual = guard.status(aws_call, selected, now=now())
         if actual["status"] != "scheduled":
-            raise RuntimeError("Workstation provisioning stop timer is not active in the future")
-        desired = guard.plan(selected["vm"], stack, token, now(), minutes=minutes,
-                             role=role, stack_id=stack_id)
-        guard._update(aws_call, actual["schedule"], desired["schedule"], now=now())
+            raise guard.InvalidSafeguard("Workstation provisioning stop timer is not active in the future")
+        if not desktop:
+            desired = guard.plan(selected["vm"], stack, token, now(), minutes=minutes,
+                                 role=role, stack_id=stack_id)
+            guard._update(aws_call, actual["schedule"], desired["schedule"], now=now())
         actual = guard.status(aws_call, selected, now=now())
         if actual["status"] != "scheduled":
-            raise RuntimeError("Selected stop deadline elapsed during creation; workstation will stay stopped")
+            raise guard.InvalidSafeguard("Selected stop deadline elapsed during creation; workstation will stay stopped")
         return {"stack_id": stack_id, "safety_stack": identity["arn"],
                 "stop_at": actual["stop_at"], "duration_minutes": minutes,
                 "cloudformation_status": selected["stack_status"]}
     except BaseException as exc:
-        # An interrupted CLI cannot cancel CFN provisioning. Stop only an exact owned VM
-        # if verification fails; failed initial provisioning uses ordinary CFN rollback.
+        # Read uncertainty cannot cancel server-owned setup. A proven unsafe timer must
+        # still stop only the exact owned VM; failed CFN creation retains native rollback.
+        must_stop = not desktop or isinstance(exc, guard.InvalidSafeguard)
         try:
             selected = context(aws_call, region, stack_id)
             outcome = f"last observed CloudFormation={selected['stack_status']}, EC2={selected['state']}"
-            if selected["state"] == "running":
+            if not must_stop:
+                outcome += "; AWS provisioning and its bounded setup stop continue"
+            elif selected["state"] in ("pending", "running"):
                 guard.verify_ownership(selected["vm"], stack, token, stack_id)
                 aws_call(region, "ec2", "stop-instances", "--instance-ids", selected["instance"])
                 outcome += "; stop requested"
             if selected["stack_status"] == "DELETE_COMPLETE" and selected["state"] in ("missing", "terminated"):
                 outcome += f"; clean up remaining safeguards before retrying: python3 studio workstation destroy {stack}"
         except Exception as stop_error:
-            outcome = "stopping is unverified: " + str(stop_error)
+            outcome = ("stopping is unverified: " if must_stop else "AWS setup continues; local observation is unverified: ") + str(stop_error)
         detail = (getattr(exc, "stderr", None) or str(exc)).strip()
         # Read-only diagnostics must never prevent the ownership check or stop attempt.
         try:

@@ -89,6 +89,7 @@ class AWS:
         self.roles, self.policies, self.schedules = {}, {}, {}
         self.before = self.after = None
         self.serial = 0
+        self.automations = {}
         self.restore_public_ip = True
         self.keep_volume = False
         self.address = {'AllocationId': h.EIP_ID, 'PublicIp': h.EIP_IP,
@@ -376,6 +377,17 @@ class AWS:
             if action=='update-assume-role-policy':self.roles[name]['AssumeRolePolicyDocument']=json.loads(val('--policy-document'));return {}
         if service=='route53':return {'ResourceRecordSets':[{'Name':h.HOST+'.','Type':'A','TTL':300,'ResourceRecords':[{'Value':h.EIP_IP}]}]}
         if service=='ssm':
+            if action=='start-automation-execution':
+                execution = val('--client-token')
+                self.automations.setdefault(execution, {'AutomationExecutionId': execution,
+                    'DocumentName': val('--document-name'), 'Parameters': json.loads(val('--parameters')),
+                    'AutomationExecutionStatus': 'InProgress'})
+                return {'AutomationExecutionId': execution}
+            if action=='describe-automation-executions':return {'AutomationExecutionMetadataList':list(self.automations.values())}
+            if action=='stop-automation-execution':
+                self.automations[val('--automation-execution-id')]['AutomationExecutionStatus']='Cancelled'
+                return {}
+            if action=='get-automation-execution':return {'AutomationExecution':self.automations[val('--automation-execution-id')]}
             if action=='send-command':return {'Command':{'CommandId':str(uuid.UUID(int=99))}}
             if action=='get-command-invocation':return {'Status':'Success','ResponseCode':0,
                 'StandardOutputContent':'STUDIO_ISSUE43_GPU_TLS_READY\n'+acm.MARKER+'\n','StandardErrorContent':''}

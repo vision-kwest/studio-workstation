@@ -15,6 +15,10 @@ class ExtensionTests(unittest.TestCase):
         self.a = self.aws.desktop()
         self.b = self.aws.desktop('gpu-b')
         self.name = 'studio-stop-' + self.a['token']
+        # These existing extension contracts concern ready, running workstations.
+        for spec in self.aws.schedules.values():
+            spec['Description'] = spec['Description'].replace('Studio setup ', 'Studio ready ')
+            spec['ScheduleExpression'] = 'at(' + (NOW + dt.timedelta(minutes=150)).strftime('%Y-%m-%dT%H:%M:%S') + ')'
 
     def extend(self, minutes=30, now=NOW):
         return extension.extend(self.aws, self.a['stack'], h.REGION, minutes, now=now)
