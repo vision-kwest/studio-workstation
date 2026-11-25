@@ -184,6 +184,21 @@ class ReadinessLifetimeTests(unittest.TestCase):
             self.assertTrue(granted['Resource'].endswith('/' + self.name))
         self.assertFalse(any('StopInstances' in str(s['Action']) or 'Terminate' in str(s['Action']) for s in statements))
 
+    def test_schedule_permissions_use_exact_group_arn_and_preserve_creation_order(self):
+        for profile in ('cpu', 'gpu'):
+            with self.subTest(profile=profile):
+                resources = lifetime.resources(self.selected['token'], self.payload['StopRole'], self.schedule, profile)
+                role = resources['ReadinessLifetimeRole']
+                statements = role['Properties']['Policies'][0]['PolicyDocument']['Statement']
+                expected = f'arn:aws:scheduler:us-east-1:401233741942:schedule/studio-task7-pr61/{self.name}'
+                for action in ('scheduler:GetSchedule', 'scheduler:UpdateSchedule'):
+                    granted = next(s for s in statements if action in s['Action'])
+                    self.assertEqual(granted['Resource'], expected)
+                self.assertEqual(role['DependsOn'], 'AutoStopSchedule')
+                association = resources['ReadinessLifetimeAssociation']['Properties']
+                self.assertEqual(association['AssociationDispatchAssumeRole'],
+                                 {'Fn::GetAtt': ['ReadinessLifetimeRole', 'Arn']})
+
     def test_old_stacks_keep_explicitly_labelled_legacy_semantics(self):
         self.aws.resources[self.selected['stack_id']] = [r for r in self.selected['resources'] if r['LogicalResourceId'] not in lifetime.RESOURCES]
         self.schedule['Description'] = 'Studio auto-stop after 35 minutes'

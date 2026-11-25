@@ -196,3 +196,10 @@ handle reboots, with generation/deadline guards on the short schedule update.
 No Lambda, database, guest Scheduler permissions or replacement installer is added.
 Existing stacks retain explicitly labelled legacy timing; no automatic migration
 is performed. Source/offline validation and live readiness acceptance are separate.
+
+The readiness role uses the exact schedule ARN assembled from its group and name.
+CloudFormation's schedule `GetAtt` omits the custom group during lookup
+([AWS issue #1726](https://github.com/aws-cloudformation/cloudformation-coverage-roadmap/issues/1726)),
+which caused `art4` creation to roll back. An explicit dependency on
+`AutoStopSchedule` preserves creation order before the readiness role and association.
+The IAM scope, timer behavior and RES provisioning are unchanged by this correction.

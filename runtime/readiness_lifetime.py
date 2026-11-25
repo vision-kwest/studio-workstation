@@ -99,7 +99,8 @@ def resources(token, stop_role, setup, profile):
             "arn:aws:ssm:us-east-1::document/AWS-RunShellScript",
             {"Fn::Sub": "arn:aws:ec2:us-east-1:401233741942:instance/${Workstation}"}]},
         {"Effect": "Allow", "Action": ["scheduler:GetSchedule", "scheduler:UpdateSchedule"],
-         "Resource": {"Fn::GetAtt": ["AutoStopSchedule", "Arn"]}},
+         # Scheduler GetAtt omits GroupName (aws-cloudformation/cloudformation-coverage-roadmap#1726).
+         "Resource": f"arn:aws:scheduler:us-east-1:401233741942:schedule/{setup['GroupName']}/{setup['Name']}"},
         {"Effect": "Allow", "Action": "iam:PassRole", "Resource": stop_role,
          "Condition": {"StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}}},
         {"Effect": "Allow", "Action": "ssm:StartAutomationExecution", "Resource": definition},
@@ -108,7 +109,7 @@ def resources(token, stop_role, setup, profile):
     return {
         "ReadinessLifetimeDocument": {"Type": "AWS::SSM::Document", "Properties": {
             "Name": name, "DocumentType": "Automation", "DocumentFormat": "JSON", "Content": document}},
-        "ReadinessLifetimeRole": {"Type": "AWS::IAM::Role", "Properties": {
+        "ReadinessLifetimeRole": {"Type": "AWS::IAM::Role", "DependsOn": "AutoStopSchedule", "Properties": {
             "RoleName": name, "AssumeRolePolicyDocument": {"Version": "2012-10-17", "Statement": [{
                 "Effect": "Allow", "Principal": {"Service": "ssm.amazonaws.com"}, "Action": "sts:AssumeRole"}]},
             "Policies": [{"PolicyName": "ReadinessLifetime", "PolicyDocument": {"Version": "2012-10-17", "Statement": statements}}]}},
