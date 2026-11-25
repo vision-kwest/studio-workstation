@@ -307,8 +307,49 @@ class TestCreateProgress(CliFixture):
                 else:
                     self.assertIn(plan, stderr.getvalue())
                     self.assertIn("command finished", stderr.getvalue())
+                    self.assertEqual("SAFE TO DISCONNECT OR CLOSE LAPTOP." in stderr.getvalue(), profile == "gpu")
                 for pin in (cli.DEFAULT_REZ_VERSION_ID, cli.DEFAULT_REZ_SHA256, override[1], override[3]):
                     self.assertNotIn(pin, stdout.getvalue() + stderr.getvalue())
+
+    def test_disconnect_notice_requires_verified_desktop_stack_acknowledgement(self):
+        notice = "SAFE TO DISCONNECT OR CLOSE LAPTOP."
+        for profile, failure in product(("cpu", "gpu", "publisher"), (None, "rejected", "invalid-id")):
+            with self.subTest(profile=profile, failure=failure):
+                name = f"handoff-{profile}-{failure or 'ok'}"
+                stdout, stderr, waits = io.StringIO(), io.StringIO(), []
+                def before(service, action, args):
+                    if service != "cloudformation" or action not in ("create-stack", "wait"):
+                        return
+                    target = args[args.index("--stack-name") + 1]
+                    if action == "create-stack":
+                        self.assertNotIn(notice, stderr.getvalue())  # Includes the separate safety stack.
+                        if target == name and failure == "rejected":
+                            raise RuntimeError("Workstation submission rejected")
+                    elif name in target.split("/"):
+                        waits.append(notice in stderr.getvalue())
+                def after(service, action, args, result):
+                    if (service, action) == ("cloudformation", "create-stack") and args[args.index("--stack-name") + 1] == name:
+                        self.assertNotIn(notice, stderr.getvalue())  # AWS has not returned to the caller yet.
+                        if failure == "invalid-id":
+                            result["StackId"] = "foreign-stack"
+                self.aws.before, self.aws.after = before, after
+                argv = ["create", "--profile", profile, "--name", name, "--expires-in", "35m",
+                        "--client-cidr", "198.51.100.17/32"]
+                if profile == "publisher":
+                    argv += ["--security-group-id", "sg-0123456789abcdef0"]
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    if failure:
+                        with self.assertRaises(SystemExit):
+                            cli.main(argv)
+                    else:
+                        cli.main(argv)
+                self.assertNotIn(notice, stdout.getvalue())
+                if failure:
+                    self.assertNotIn(notice, stderr.getvalue())
+                    self.assertFalse(waits)
+                else:
+                    self.assertTrue(waits)
+                    self.assertEqual(set(waits), {profile != "publisher"})
 
 
 def test_publisher_build_remains_submission_without_waiting(capsys):
