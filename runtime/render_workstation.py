@@ -11,11 +11,11 @@ REGION=chr(36)+"{AWS::Region}"
 # GPU bootstrap is published separately; the independently verified app
 # archive stays at the original Task 7 release key. Do not infer that both
 # archives live beneath the same S3 prefix.
-PINNED_GPU_PREFIX="releases/issue168-nvidia-dkms-r2-20261123/res-2026.06"
+PINNED_GPU_PREFIX="releases/issue100-grid20-2-20261125/res-2026.06"
 PINNED_GPU_APP_PREFIX="releases/task7-pr61-postreboot-a8ec326/res-2026.06"
 PINNED_GPU_BUCKET="studio-workstation-releases-401233741942-us-east-1"
 GPU_ARCHIVES={
-    "installation-scripts.tar.gz": ("bs3P_1D8yZI33nM5K0u168XG_bXYc914", "c780e2c78946363e6b8817dbca5cfbcab714798aee055b8160b21b02023a7816"),
+    "installation-scripts.tar.gz": ("UOSLzFa3RWVQbieYpGcM6bApVVJJ9vXo", "5093ac78d4ab1335c40373576b42b84f1d10eccabdbd5bf1657843d2a093d810"),
     "virtual-desktop.tar.gz": ("nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53", "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
 }
 def render(bucket,prefix,user,profile="cpu",rez_version_id=None,rez_sha256=None):

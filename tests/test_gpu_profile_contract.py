@@ -96,8 +96,8 @@ class GpuProfileContracts(unittest.TestCase):
         from scripts import studio_workstation_cli as cli
         expected = {
             "installation-scripts.tar.gz": (
-                "bs3P_1D8yZI33nM5K0u168XG_bXYc914",
-                "c780e2c78946363e6b8817dbca5cfbcab714798aee055b8160b21b02023a7816"),
+                "UOSLzFa3RWVQbieYpGcM6bApVVJJ9vXo",
+                "5093ac78d4ab1335c40373576b42b84f1d10eccabdbd5bf1657843d2a093d810"),
             "virtual-desktop.tar.gz": (
                 "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
                 "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
@@ -111,7 +111,7 @@ class GpuProfileContracts(unittest.TestCase):
                 self.assertEqual(manifest["archives"][name]["s3_version_id"], version)
                 self.assertEqual(manifest["archives"][name]["sha256"], digest)
             self.assertEqual(cli.GPU_KEYS[name],
-                             ("releases/issue168-nvidia-dkms-r2-20261123/res-2026.06/" + name
+                             ("releases/issue100-grid20-2-20261125/res-2026.06/" + name
                               if name == "installation-scripts.tar.gz"
                               else "releases/task7-pr61-postreboot-a8ec326/res-2026.06/" + name))
             if name == "virtual-desktop.tar.gz":
@@ -120,7 +120,7 @@ class GpuProfileContracts(unittest.TestCase):
         self.assertEqual(PINNED_GPU_APP_PREFIX, cli.GPU_APP_PREFIX)
         self.assertNotEqual(PINNED_GPU_PREFIX, PINNED_GPU_APP_PREFIX)
         policy = json.loads((ROOT / "infra/workstation-release-read-policy.json").read_text())
-        driver = next(s for s in policy["Statement"] if s["Sid"] == "ReadNvidiaDkmsInstallerVersion")
+        driver = next(s for s in policy["Statement"] if s["Sid"] == "ReadGrid202InstallerVersion")
         self.assertEqual(driver["Resource"], "arn:aws:s3:::" + cli.DEFAULT_BUCKET + "/" + cli.GPU_KEYS["installation-scripts.tar.gz"])
         self.assertEqual(driver["Condition"], {"StringEquals": {"s3:VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]}})
 

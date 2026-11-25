@@ -84,6 +84,14 @@ def patch_post_reboot_dpms(raw):
     return raw.replace(old, old + b"\n" + fix)
 
 
+def patch_gpu_source(raw):
+    """Keep the tested GRID payload independent of AWS's mutable latest prefix."""
+    old = b's3_bucket_path: "s3://ec2-linux-nvidia-drivers/latest/"'
+    if raw.count(old) != 1:
+        raise ValueError("Pinned RES NVIDIA source configuration changed")
+    return raw.replace(old, old.replace(b"/latest/", b"/grid-20.2/"))
+
+
 def patch_gpu_driver_checksum(raw):
     """Retain RES's original signed S3 command; verify its exact GRID payload."""
     old = b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive $NVIDIA_S3_BUCKET_PATH .'
@@ -189,7 +197,9 @@ def main():
             post_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==post[0])).read()
             drivers="scripts/dcv/linux/gpu_drivers.sh"
             gpu_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==drivers)).read()
+            config=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")=="package_config.yml")).read()
         output=rewrite(raw,mapping,replacements={
+            "package_config.yml":patch_gpu_source(config),
             matches[0]:patch_gpu_prerequisites(patch_dcv_dpms(original)),
             post[0]:patch_post_reboot_dpms(post_raw),
             drivers:patch_gpu_driver_checksum(gpu_raw),

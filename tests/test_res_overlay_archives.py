@@ -13,6 +13,7 @@ ROOT=Path(__file__).resolve().parents[1]
 BUILDER=ROOT/"runtime/build_res_overlay.py"
 EXPECTED={
     "installation-scripts.tar.gz":{
+        "package_config.yml",
         "scripts/virtual-desktop-host/linux/install.sh",
         "scripts/common/linux/install_app.sh",
         "scripts/dcv/linux/debian/dcv_server.sh",
@@ -45,6 +46,10 @@ def run(directory):
             assert required <= modified.keys()
             if filename=="installation-scripts.tar.gz":
                 assert original.keys()==modified.keys()
+                assert modified["package_config.yml"]==original["package_config.yml"].replace(
+                    b's3://ec2-linux-nvidia-drivers/latest/',
+                    b's3://ec2-linux-nvidia-drivers/grid-20.2/')
+                assert modified["package_config.yml"]!=original["package_config.yml"]
                 for name in required:
                     if name.endswith(".sh"):
                         subprocess.run(["bash", "-n"], input=modified[name], check=True)

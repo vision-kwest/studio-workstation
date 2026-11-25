@@ -77,3 +77,10 @@ NVIDIA installer's native registration and checks registration/kernel coverage i
 existing `install_post_reboot.sh` GPU gate. RES orchestration and update policy
 are retained. See [the deviation](DEVIATIONS.md#nvidia-kernel-updates-issue-168)
 and the implementation PR for offline versus live evidence.
+
+## November 25, 2026: GRID download source (Issue #100)
+
+The same upstream GRID path reads `package_config.yml`, downloads `latest/`, and
+skips installation if `which nvidia-smi` succeeds. Our fixed driver checksum now
+uses `grid-20.2/`; only that NVIDIA config value changes in the installer archive.
+Signed download, DKMS, DCV and reboot behavior are retained; [provenance and deployment gates](../runtime/README.md#versioned-grid-source--november-25-2026).

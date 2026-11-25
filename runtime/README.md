@@ -74,7 +74,7 @@ The old PR #65 installer above is preserved. The **November 15 GPU launch candid
 
 ## November 23 NVIDIA DKMS candidate (Issue #168)
 
-The CLI and renderer now pin the installer below, built from commit
+The November 23 CLI and renderer pinned the installer below, built from commit
 `530adb3eb2cdc7823ef0062f591ca1816352510a` against the original RES 2026.06 archive.
 DKMS and the AWS header metapackage are installed in a separate, checked APT step
 before the full GRID installation; the GPU gate verifies automatic registration
@@ -116,3 +116,32 @@ combined APT transaction. This revision isolates the required DKMS packages;
 the original RES batch and its diagnostics are retained. Test cleanup and full
 evidence are recorded in [PR #169](https://github.com/vision-kwest/studio-workstation/pull/169).
 Roll back by restoring the previous CLI/renderer pins; old S3 objects are preserved.
+
+## Versioned GRID source — November 25, 2026
+
+The current CLI/renderer candidate uses this installer, rebuilt from the verified
+RES 2026.06 originals by `runtime/build_res_overlay.py`:
+
+| Installer provenance | Value |
+|---|---|
+| S3 key | `releases/issue100-grid20-2-20261125/res-2026.06/installation-scripts.tar.gz` |
+| VersionId | `UOSLzFa3RWVQbieYpGcM6bApVVJJ9vXo` |
+| SHA-256 | `5093ac78d4ab1335c40373576b42b84f1d10eccabdbd5bf1657843d2a093d810` |
+| Size / encryption | 43,435 bytes / SSE-S3 AES256 |
+
+Conditional `IfNoneMatch=*` publication and exact-version byte-for-byte readback
+passed. Against the November 23 artifact, only `package_config.yml` differs:
+the NVIDIA source is `s3://ec2-linux-nvidia-drivers/grid-20.2/`. Its single file,
+`NVIDIA-Linux-x86_64-595.91.07-grid-aws.run` (429,294,370 bytes), was read and
+verified against the unchanged SHA-256 `cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156`.
+DKMS/install scripts and the separately pinned Task 7 app archive are unchanged.
+
+**Deployment gate:** repository changes do not update the shared EC2 role.
+Before launching from this revision, apply `infra/res202606-nvidia-grid-read.policy.json`
+as `StudioRes202606NvidiaGridRead` and `infra/workstation-release-read-policy.json`
+as `StudioWorkstationReleaseRead` on `StudioWorkstationSSMRole`, preserving other
+policies. Verify effective-role listing/read of the driver and exact-version reads
+of both archives. The old installer version grant and all prior objects are retained.
+Only the candidate archive was published; shared IAM and existing guests were not
+changed. Offline checks do not establish a fresh GPU installation or DCV login.
+Restoring old release pins alone does not repair their now-stale `latest/` source.

@@ -2,15 +2,15 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ListOnlyResNvidiaGridLatest",
+      "Sid": "ListOnlyResNvidiaGrid202",
       "Effect": "Allow",
       "Action": "s3:ListBucket",
       "Resource": "arn:aws:s3:::ec2-linux-nvidia-drivers",
       "Condition": {
         "StringLike": {
           "s3:prefix": [
-            "latest/",
-            "latest/*"
+            "grid-20.2/",
+            "grid-20.2/*"
           ]
         }
       }
@@ -19,7 +19,7 @@
       "Sid": "ReadOnlyResNvidiaGrid5959107",
       "Effect": "Allow",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::ec2-linux-nvidia-drivers/latest/NVIDIA-Linux-x86_64-595.91.07-grid-aws.run"
+      "Resource": "arn:aws:s3:::ec2-linux-nvidia-drivers/grid-20.2/NVIDIA-Linux-x86_64-595.91.07-grid-aws.run"
     }
   ]
 }

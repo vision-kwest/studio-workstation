@@ -29,6 +29,12 @@ dkms() {
 
 
 class NvidiaDkmsTests(unittest.TestCase):
+    def test_grid_source_pin_rejects_missing_or_ambiguous_upstream_value(self):
+        original = b's3_bucket_path: "s3://ec2-linux-nvidia-drivers/latest/"'
+        for raw in (b"changed upstream", original + b"\n" + original):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                overlay.patch_gpu_source(raw)
+
     def gate(self, *, status="installed", autoinstall="yes", module="595.91.07", fail="", gpu="NVIDIA"):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
