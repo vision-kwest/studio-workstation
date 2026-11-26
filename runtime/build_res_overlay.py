@@ -51,15 +51,20 @@ def patch_post_reboot_dpms(raw):
     fix = b"""      if [[ "${STUDIO_STANDALONE}" == "true" ]]; then
         if [[ "${GPU_FAMILY}" == "NVIDIA" ]]; then
           nvidia_dkms_ready() {
-            local status
-            status=$(dkms status -m nvidia -v 595.91.07 -k "$1") || return 1
-            [[ "$status" == "nvidia/595.91.07, $1, "*": installed" ]] &&
-              [[ "$(modinfo -k "$1" -F version nvidia)" == 595.91.07 ]]
+            local status module_version
+            status=$(dkms status -m nvidia -v "$nvidia_version" -k "$1") || return 1
+            module_version=$(modinfo -k "$1" -F version nvidia) || return 1
+            [[ "$status" == "nvidia/$nvidia_version, $1, "*": installed" ]] &&
+              [[ "$module_version" == "$nvidia_version" ]]
           }
           running_kernel=$(uname -r)
-          command -v nvidia-smi >/dev/null && nvidia_dkms_ready "$running_kernel" &&
-            grep -Eq '^[[:space:]]*AUTOINSTALL=("yes"|yes)[[:space:]]*$' /usr/src/nvidia-595.91.07/dkms.conf || {
-            echo "RES NVIDIA DKMS registration or AUTOINSTALL missing for active kernel" >&2
+          # Inspect the installed module; RES has not performed its second reboot yet.
+          command -v nvidia-smi >/dev/null &&
+            nvidia_version=$(modinfo -k "$running_kernel" -F version nvidia) &&
+            [[ "$nvidia_version" =~ ^[0-9]+([.][0-9]+)+$ ]] &&
+            nvidia_dkms_ready "$running_kernel" &&
+            grep -Eq '^[[:space:]]*AUTOINSTALL=("yes"|yes)[[:space:]]*$' "/usr/src/nvidia-${nvidia_version}/dkms.conf" || {
+            echo "RES NVIDIA module version, DKMS registration or AUTOINSTALL missing for active kernel" >&2
             exit 1
           }
           # APT may have staged a newer kernel before NVIDIA was registered.
@@ -68,7 +73,7 @@ def patch_post_reboot_dpms(raw):
             kernel="${image#/boot/vmlinuz-}"
             dpkg --compare-versions "$kernel" gt "$running_kernel" || continue
             DEBIAN_FRONTEND=noninteractive apt install -y "linux-headers-$kernel" &&
-              dkms install -m nvidia -v 595.91.07 -k "$kernel" &&
+              dkms install -m nvidia -v "$nvidia_version" -k "$kernel" &&
               nvidia_dkms_ready "$kernel" || {
               echo "RES NVIDIA DKMS missing for installed kernel $kernel" >&2
               exit 1
@@ -84,25 +89,12 @@ def patch_post_reboot_dpms(raw):
     return raw.replace(old, old + b"\n" + fix)
 
 
-def patch_gpu_source(raw):
-    """Keep the tested GRID payload independent of AWS's mutable latest prefix."""
-    old = b's3_bucket_path: "s3://ec2-linux-nvidia-drivers/latest/"'
-    if raw.count(old) != 1:
-        raise ValueError("Pinned RES NVIDIA source configuration changed")
-    return raw.replace(old, old.replace(b"/latest/", b"/grid-20.2/"))
-
-
-def patch_gpu_driver_checksum(raw):
-    """Retain RES's original signed S3 command; verify its exact GRID payload."""
-    old = b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive $NVIDIA_S3_BUCKET_PATH .'
-    check = (b"\n  echo 'cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156  "
-             b"NVIDIA-Linux-x86_64-595.91.07-grid-aws.run' | sha256sum -c - || return $?")
-    if raw.count(old) != 1:
-        raise ValueError("Pinned RES GPU download source anchor changed")
+def patch_gpu_driver_dkms(raw):
+    """Register the RES-selected GRID driver with native DKMS."""
     installer = b'/bin/sh NVIDIA-Linux-x86_64*.run --no-precompiled-interface --run-nvidia-xconfig --accept-license --silent'
     if raw.count(installer) != 1:
         raise ValueError("Pinned RES GRID installer source anchor changed")
-    return raw.replace(old, old + check).replace(installer, installer + b' --dkms')
+    return raw.replace(installer, installer + b' --dkms')
 
 def patch_xserver_dcv_access(raw):
     """Grant only the local DCV service user, only in standalone mode."""
@@ -197,12 +189,10 @@ def main():
             post_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==post[0])).read()
             drivers="scripts/dcv/linux/gpu_drivers.sh"
             gpu_raw=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")==drivers)).read()
-            config=tf.extractfile(next(m for m in tf if m.name.removeprefix("./")=="package_config.yml")).read()
         output=rewrite(raw,mapping,replacements={
-            "package_config.yml":patch_gpu_source(config),
             matches[0]:patch_gpu_prerequisites(patch_dcv_dpms(original)),
             post[0]:patch_post_reboot_dpms(post_raw),
-            drivers:patch_gpu_driver_checksum(gpu_raw),
+            drivers:patch_gpu_driver_dkms(gpu_raw),
         })
     else:
         with tarfile.open(fileobj=io.BytesIO(raw),mode="r:gz") as tf:

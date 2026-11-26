@@ -96,8 +96,8 @@ class GpuProfileContracts(unittest.TestCase):
         from scripts import studio_workstation_cli as cli
         expected = {
             "installation-scripts.tar.gz": (
-                "UOSLzFa3RWVQbieYpGcM6bApVVJJ9vXo",
-                "5093ac78d4ab1335c40373576b42b84f1d10eccabdbd5bf1657843d2a093d810"),
+                "AsJLU_Yt7gAiAV5i_z27HbETTJ7pg2cq",
+                "a468151e178ded6f5c5386e6e41676613c318db63bec995e7b82fb4f627a8752"),
             "virtual-desktop.tar.gz": (
                 "nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53",
                 "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
@@ -111,7 +111,7 @@ class GpuProfileContracts(unittest.TestCase):
                 self.assertEqual(manifest["archives"][name]["s3_version_id"], version)
                 self.assertEqual(manifest["archives"][name]["sha256"], digest)
             self.assertEqual(cli.GPU_KEYS[name],
-                             ("releases/issue100-grid20-2-20261125/res-2026.06/" + name
+                             ("releases/issue100-res-package-policy-20261125/res-2026.06/" + name
                               if name == "installation-scripts.tar.gz"
                               else "releases/task7-pr61-postreboot-a8ec326/res-2026.06/" + name))
             if name == "virtual-desktop.tar.gz":
@@ -120,7 +120,7 @@ class GpuProfileContracts(unittest.TestCase):
         self.assertEqual(PINNED_GPU_APP_PREFIX, cli.GPU_APP_PREFIX)
         self.assertNotEqual(PINNED_GPU_PREFIX, PINNED_GPU_APP_PREFIX)
         policy = json.loads((ROOT / "infra/workstation-release-read-policy.json").read_text())
-        driver = next(s for s in policy["Statement"] if s["Sid"] == "ReadGrid202InstallerVersion")
+        driver = next(s for s in policy["Statement"] if s["Sid"] == "ReadResPolicyInstallerVersion")
         self.assertEqual(driver["Resource"], "arn:aws:s3:::" + cli.DEFAULT_BUCKET + "/" + cli.GPU_KEYS["installation-scripts.tar.gz"])
         self.assertEqual(driver["Condition"], {"StringEquals": {"s3:VersionId": cli.GPU_VERSIONS["installation-scripts.tar.gz"]}})
 

@@ -9,17 +9,26 @@ from runtime import build_res_overlay as overlay
 
 DCV = b'      /bin/bash "${SCRIPT_DIR}/../../dcv/linux/dcv_server.sh" -o $BASE_OS -g $GPU_FAMILY -s "${SCRIPT_DIR}/.."'
 CURRENT, NEXT = "7.0.0-1014-aws", "7.0.0-1017-aws"
+VERSIONS = ("595.91.07", "620.70.06")
 NATIVE = r'''
-uname() { echo 7.0.0-1014-aws; }
-nvidia-smi() { :; }
-modinfo() { echo "${MODULE_VERSION:-595.91.07}"; }
+uname() { echo "$CURRENT_KERNEL"; }
+nvidia-smi() { return 99; }  # The new module need not be loaded before RES reboots.
+modinfo() {
+  if [[ "$2" == "$CURRENT_KERNEL" ]]; then
+    printf '%s\n' "$MODULE_VERSION"
+    [[ "$FAIL" != modinfo ]]
+  else
+    printf '%s\n' "$NEXT_MODULE_VERSION"
+    [[ "$FAIL" != modinfo-next ]]
+  fi
+}
 apt() { echo "apt $*" >> "$TEST_ROOT/calls"; [[ "$FAIL" != apt ]]; }
 dkms() {
   echo "dkms $*" >> "$TEST_ROOT/calls"
-  [[ "$2 $3 $4 $5 $6" == '-m nvidia -v 595.91.07 -k' ]] || return 2
+  [[ "$2 $3 $4 $5 $6" == "-m nvidia -v $DRIVER_VERSION -k" ]] || return 2
   if [[ "$1" == install ]]; then
     [[ "$FAIL" != dkms ]] || return 1
-    [[ "$FAIL" == unregistered ]] || echo "nvidia/595.91.07, $7, x86_64: installed" > "$TEST_ROOT/status.$7"
+    [[ "$FAIL" == unregistered ]] || echo "nvidia/$DRIVER_VERSION, $7, x86_64: installed" > "$TEST_ROOT/status.$7"
     return 0
   fi
   cat "$TEST_ROOT/status.$7" || return 1
@@ -29,23 +38,18 @@ dkms() {
 
 
 class NvidiaDkmsTests(unittest.TestCase):
-    def test_grid_source_pin_rejects_missing_or_ambiguous_upstream_value(self):
-        original = b's3_bucket_path: "s3://ec2-linux-nvidia-drivers/latest/"'
-        for raw in (b"changed upstream", original + b"\n" + original):
-            with self.subTest(raw=raw), self.assertRaises(ValueError):
-                overlay.patch_gpu_source(raw)
-
-    def gate(self, *, status="installed", autoinstall="yes", module="595.91.07", fail="", gpu="NVIDIA"):
+    def gate(self, *, version=VERSIONS[0], status="installed", autoinstall="yes",
+             module=None, next_module=None, fail="", gpu="NVIDIA"):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "boot").mkdir()
             for kernel in ("7.0.0-1010-aws", CURRENT, NEXT):
                 (root / "boot" / ("vmlinuz-" + kernel)).touch()
-            conf = root / "src/nvidia-595.91.07/dkms.conf"
+            conf = root / f"src/nvidia-{version}/dkms.conf"
             conf.parent.mkdir(parents=True)
             conf.write_text('AUTOINSTALL="' + autoinstall + '"\n')
             (root / ("status." + CURRENT)).write_text(
-                f"nvidia/595.91.07, {CURRENT}, x86_64: {status}\n" if status else "")
+                f"nvidia/{version}, {CURRENT}, x86_64: {status}\n" if status else "")
             script = overlay.patch_post_reboot_dpms(DCV).replace(DCV, b":").decode()
             for original, replacement in (("/boot/", str(root / "boot") + "/"),
                                           ("/usr/src/", str(root / "src") + "/"),
@@ -53,13 +57,19 @@ class NvidiaDkmsTests(unittest.TestCase):
                 script = script.replace(original, replacement)
             result = subprocess.run(["bash", "-c", NATIVE + script], text=True, capture_output=True,
                                     env={**os.environ, "TEST_ROOT": directory, "STUDIO_STANDALONE": "true",
-                                         "GPU_FAMILY": gpu, "MODULE_VERSION": module, "FAIL": fail})
+                                         "CURRENT_KERNEL": CURRENT, "GPU_FAMILY": gpu,
+                                         "DRIVER_VERSION": version,
+                                         "MODULE_VERSION": version if module is None else module,
+                                         "NEXT_MODULE_VERSION": version if next_module is None else next_module,
+                                         "FAIL": fail})
             calls = (root / "calls").read_text() if (root / "calls").exists() else ""
             return result, calls, (root / "xorg/99-disable-dpms.conf").exists()
 
     def test_current_registration_is_required_before_building_next_kernel(self):
         for failure in ({"status": ""}, {"status": "added"}, {"status": "built"},
-                        {"autoinstall": "no"}, {"module": "other"}, {"fail": "status"}):
+                        {"autoinstall": "no"}, {"module": ""}, {"module": "other"},
+                        {"module": "../620.70.06"}, {"module": "595.91.07\n620.70.06"},
+                        {"module": VERSIONS[1]}, {"fail": "modinfo"}, {"fail": "status"}):
             with self.subTest(failure=failure):
                 result, calls, completed = self.gate(**failure)
                 self.assertNotEqual(result.returncode, 0)
@@ -68,25 +78,30 @@ class NvidiaDkmsTests(unittest.TestCase):
                 self.assertFalse(completed)
 
     def test_installed_next_kernel_needs_headers_build_and_verified_registration(self):
-        result, calls, completed = self.gate()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"apt install -y linux-headers-{NEXT}", calls)
-        self.assertIn(f"dkms install -m nvidia -v 595.91.07 -k {NEXT}", calls)
-        self.assertIn(f"dkms status -m nvidia -v 595.91.07 -k {NEXT}", calls)
-        self.assertNotIn("1010", calls)
-        self.assertTrue(completed)
-        for failure in ("apt", "dkms", "unregistered"):
+        for version in VERSIONS:
+            with self.subTest(version=version):
+                result, calls, completed = self.gate(version=version)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"apt install -y linux-headers-{NEXT}", calls)
+                self.assertIn(f"dkms install -m nvidia -v {version} -k {NEXT}", calls)
+                self.assertIn(f"dkms status -m nvidia -v {version} -k {NEXT}", calls)
+                self.assertNotIn("1010", calls)
+                self.assertTrue(completed)
+        for failure in ({"fail": "apt"}, {"fail": "dkms"}, {"fail": "unregistered"},
+                        {"fail": "modinfo-next"}, {"next_module": VERSIONS[0]}):
             with self.subTest(failure=failure):
-                result, _, completed = self.gate(fail=failure)
+                result, _, completed = self.gate(version=VERSIONS[1], **failure)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("missing for installed kernel " + NEXT, result.stderr)
                 self.assertFalse(completed)
 
-    def test_cpu_skips_gpu_gate(self):
-        result, calls, completed = self.gate(gpu="NONE", status="")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, "")
-        self.assertTrue(completed)
+    def test_cpu_and_amd_skip_nvidia_gate(self):
+        for gpu in ("NONE", "AMD"):
+            with self.subTest(gpu=gpu):
+                result, calls, completed = self.gate(gpu=gpu, status="", fail="modinfo")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(calls, "")
+                self.assertTrue(completed)
 
     def test_prerequisites_are_independent_of_failing_legacy_batch(self):
         # Match RES's unset-IFS tail and unchecked caller, explicitly without set -e.

@@ -113,15 +113,19 @@ The register is a planning artifact. No AWS resource or provisioning script is c
 
 Against upstream `aws/res` **2026.06** commit `1f526a241fb293a29fb018f08ccf81c100c05a42`: retain `scripts/dcv/linux/gpu_drivers.sh`, `virtual-desktop-host/linux/install.sh` and `install_post_reboot.sh` stage order. Replace only the Studio CLI’s custom baked GPU AMI selection with the existing verified Canonical 24.04 parent AMI. Retain upstream RES's signed `aws s3 cp --quiet --recursive` command unchanged. The missing role dependency was restored through IAM inline policy `StudioRes202606NvidiaGridRead`: `s3:ListBucket` for the distribution's `latest/` prefix and `s3:GetObject` for the exact 595.91.07 file; unrelated prefixes/objects are denied. One minimal archive adaptation adds SHA-256 verification (`cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156`) immediately after the upstream download, returning nonzero on missing/bad content. A standalone NVIDIA post-reboot check requires the driver executable and `nvidia` module for the active kernel before RES writes its ready marker. The 2026-11-15 guest test confirmed signed S3 List/HEAD was denied and unsigned read succeeded; the old archive failed in `gpu_drivers.sh` at 01:35:37 UTC. **Published candidate, not live accepted:** installation script at `releases/issue100-res-native-20261115/res-2026.06/installation-scripts.tar.gz`, VersionId `sgj5wZfqMTRUImWDDbxR08emK755aU7A`, SHA-256 `6d3187049ecee202167cc462492431e3cb9a2a22d78300a8189db3fa2924ee7d` (42,994 bytes), produced reproducibly from pinned RES sources by the existing CloudShell release tool. The old PR #65 installer and application archives remain unchanged.
 
-## Issue #100 follow-up — versioned GRID source (November 25, 2026)
+## Issue #100 follow-up — RES package-selection policy (November 25, 2026)
 
-RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` downloads GRID
-from `package_config.yml`'s mutable `latest/` prefix. Our fixed 595.91.07 checksum
-failed on `art5` when that prefix advanced to 620.70.06. Change only the NVIDIA
-source scalar to `grid-20.2/`, and scope IAM listing/object reads to that release.
-Retain the signed recursive copy, checksum, DKMS, package order and reboot flow.
-A new immutable installer must be pinned separately from the unchanged app archive;
-see [release provenance and deployment gates](../runtime/README.md#versioned-grid-source--november-25-2026).
+The owner superseded the proposed GRID version pin with the package-selection
+policy of RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`.
+Retain upstream configuration and requirements byte-for-byte, including NVIDIA
+`latest/`, the DCV bundle and Python pins. Remove the added driver checksum and
+derive DKMS checks/builds from the installed module version; retain early DKMS.
+The post-ready State Manager association reuses RES's packaged Debian EFS build
+functions instead of a fixed Distributor release. It retains functional checks,
+cloud-owned retries and DCV isolation, bypasses the upstream watchdog-only
+shortcut and reinstalls the just-built package if the helper remains broken.
+Separate Rez selections remain intact.
+See [release provenance and deployment gates](../runtime/README.md#res-package-selection-policy--november-25-2026).
 
 ## Comfy helper argument validation (Issue #142)
 
@@ -162,10 +166,10 @@ The owner now requests an Ollama server on every normal workstation boot. The op
 
 ## Autonomous EFS helper provisioning (Issue #86)
 
-The CPU/GPU stack owns a native State Manager association and Command document
-for the pinned official `AmazonEFSUtils` package, replacing the local CLI command.
-Native steps preserve an existing helper and recover the official package's
-interrupted-install false success before the existing guest service mounts storage.
+The CPU/GPU stack owns a native State Manager association and Command document,
+replacing the local CLI command. Its current installer reuses the packaged RES
+EFS build functions as described above. It preserves a healthy helper and repairs
+interrupted installation before the existing guest service mounts storage.
 The dispatch role permits only the exact workstation and this fixed document.
 RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`, driver/DCV stages,
 EFS permissions and shared-data handling remain unchanged. Source evidence and

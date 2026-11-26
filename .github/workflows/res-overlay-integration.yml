@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'runtime/**'
+      - 'infra/res202606-nvidia-grid-read.policy.json'
       - 'tests/test_res_overlay_archives.py'
       - 'tests/test_nvidia_dkms.py'
       - '.github/workflows/res-overlay-integration.yml'

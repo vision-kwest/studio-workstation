@@ -117,31 +117,41 @@ the original RES batch and its diagnostics are retained. Test cleanup and full
 evidence are recorded in [PR #169](https://github.com/vision-kwest/studio-workstation/pull/169).
 Roll back by restoring the previous CLI/renderer pins; old S3 objects are preserved.
 
-## Versioned GRID source — November 25, 2026
+## RES package-selection policy — November 25, 2026
 
-The current CLI/renderer candidate uses this installer, rebuilt from the verified
-RES 2026.06 originals by `runtime/build_res_overlay.py`:
+The owner superseded the proposed GRID release pin with RES 2026.06's complete
+package-selection policy. `package_config.yml`, requirements and package metadata
+remain byte-for-byte upstream. NVIDIA follows the signed `latest/` download with
+`--dkms`; readiness checks use the installed module version. The fixed filename
+checksum is removed. DCV, Ubuntu and RES Python selections are unchanged.
+
+The existing post-ready State Manager association reuses the packaged native
+Debian EFS build functions, including their unpinned Git source and Rust stable
+selection. A fresh build directory, functional checks and conditional reinstall
+of the just-built package retain interrupted-install recovery. This replaces the
+fixed Distributor version while preserving AWS-owned retries and DCV isolation.
+Rez remains a separate Studio application choice; code archives remain immutable.
 
 | Installer provenance | Value |
 |---|---|
-| S3 key | `releases/issue100-grid20-2-20261125/res-2026.06/installation-scripts.tar.gz` |
-| VersionId | `UOSLzFa3RWVQbieYpGcM6bApVVJJ9vXo` |
-| SHA-256 | `5093ac78d4ab1335c40373576b42b84f1d10eccabdbd5bf1657843d2a093d810` |
-| Size / encryption | 43,435 bytes / SSE-S3 AES256 |
+| S3 key | `releases/issue100-res-package-policy-20261125/res-2026.06/installation-scripts.tar.gz` |
+| VersionId | `AsJLU_Yt7gAiAV5i_z27HbETTJ7pg2cq` |
+| SHA-256 | `a468151e178ded6f5c5386e6e41676613c318db63bec995e7b82fb4f627a8752` |
+| Size / encryption | 43,429 bytes / SSE-S3 AES256 |
 
-Conditional `IfNoneMatch=*` publication and exact-version byte-for-byte readback
-passed. Against the November 23 artifact, only `package_config.yml` differs:
-the NVIDIA source is `s3://ec2-linux-nvidia-drivers/grid-20.2/`. Its single file,
-`NVIDIA-Linux-x86_64-595.91.07-grid-aws.run` (429,294,370 bytes), was read and
-verified against the unchanged SHA-256 `cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156`.
-DKMS/install scripts and the separately pinned Task 7 app archive are unchanged.
+The verified RES originals rebuilt reproducibly. Conditional `IfNoneMatch=*`
+publication and exact-version byte-for-byte readback passed. The separately pinned
+Task 7 application archive is unchanged. Archive contracts require unchanged
+package configuration, requirements and native EFS source, and only `--dkms`
+changes the upstream GPU driver script.
 
 **Deployment gate:** repository changes do not update the shared EC2 role.
 Before launching from this revision, apply `infra/res202606-nvidia-grid-read.policy.json`
 as `StudioRes202606NvidiaGridRead` and `infra/workstation-release-read-policy.json`
 as `StudioWorkstationReleaseRead` on `StudioWorkstationSSMRole`, preserving other
-policies. Verify effective-role listing/read of the driver and exact-version reads
-of both archives. The old installer version grant and all prior objects are retained.
+policies. Verify effective-role listing/read of `latest/` and exact-version reads
+of both archives. The prior installer version grant and all objects are retained.
 Only the candidate archive was published; shared IAM and existing guests were not
-changed. Offline checks do not establish a fresh GPU installation or DCV login.
-Restoring old release pins alone does not repair their now-stale `latest/` source.
+changed. Fresh native EFS builds, GPU installation and authenticated DCV login
+remain live acceptance gates. Restoring old release pins alone does not repair
+their now-stale fixed-driver assumptions about `latest/`.

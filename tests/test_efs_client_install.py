@@ -1,5 +1,5 @@
 """Native EFS provisioning remains owned by the stack after the client exits."""
-import json
+import os
 from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
@@ -12,7 +12,7 @@ from workstation_fake import h
 
 
 class EfsClientInstallTests(CliFixture):
-    def test_all_desktops_include_pinned_independent_association(self):
+    def test_all_desktops_include_res_independent_association(self):
         for profile in ("cpu", "gpu"):
             for software in (True, False):
                 with self.subTest(profile=profile, software=software):
@@ -23,12 +23,10 @@ class EfsClientInstallTests(CliFixture):
                     document = resources["EfsClientDocument"]["PhysicalResourceId"]
                     self.assertEqual(association["Name"], document)
                     steps = self.aws.documents[document]["Content"]["mainSteps"]
-                    for step, action in zip((s for s in steps if s["action"] == "aws:runDocument"),
-                                            ("Install", "Uninstall", "Install")):
-                        self.assertEqual(step["inputs"]["documentPath"], "AWS-ConfigureAWSPackage")
-                        self.assertEqual(json.loads(step["inputs"]["documentParameters"]), {
-                            "action": action, "name": "AmazonEFSUtils", "version": "3.4.0-1",
-                            "installationType": "Uninstall and reinstall"})
+                    self.assertEqual([s["name"] for s in steps],
+                                     ["resReady", "needsInstallation", "install", "verifyHelper"])
+                    self.assertTrue(all(s["action"] == "aws:runShellScript" for s in steps))
+                    self.assertEqual(steps[2]["inputs"]["timeoutSeconds"], "1200")
                     self.assertEqual(association["Targets"], [{"Key": "tag:StudioStackId",
                                                               "Values": [selected["stack_id"]]}])
                     self.assertEqual(association["ScheduleExpression"], "rate(30 minutes)")
@@ -48,54 +46,111 @@ class EfsClientInstallTests(CliFixture):
         self.assertFalse(any(c[:2] == ("ssm", "send-command") and "AWS-ConfigureAWSPackage" in c
                              for c in self.aws.calls))
 
-    def test_native_steps_handle_healthy_missing_and_interrupted_package_install(self):
+    def test_generated_shell_builds_res_packages_and_repairs_only_when_needed(self):
         selected = self.create("cpu", "flow")
         document = next(r["PhysicalResourceId"] for r in selected["resources"]
                         if r["LogicalResourceId"] == "EfsClientDocument")
         steps = self.aws.documents[document]["Content"]["mainSteps"]
         with TemporaryDirectory() as directory:
-            ready, helper = Path(directory) / "ready", Path(directory) / "mount.efs"
-            def execute(outcomes):
-                calls = []
+            root = Path(directory)
+            ready, helper, log = root / "ready", root / "mount.efs", root / "calls"
+            native = root / "scripts/common/linux/debian/nfs_utils.sh"
+            native.parent.mkdir(parents=True)
+            (root / "scripts/virtual-desktop-host").mkdir()
+            binaries, builds = root / "bin", root / "builds"
+            binaries.mkdir()
+            builds.mkdir()
+            native.write_text(r"""
+get_stunnel_package_name() { echo studio-test-stunnel; }
+install_stunnel_impl() { printf 'stunnel\n' >> "$EFS_TEST_LOG"; }
+native_build() {
+    local _old_path=$PATH
+    # RES installs this RETURN trap in the inner build function; the outer
+    # return runs it again after _old_path has gone out of scope.
+    trap 'PATH="$_old_path"' RETURN
+    test "$BASE_OS" = ubuntu2404
+    test "$NEEDRESTART_SUSPEND" = 1
+    printf 'build\t%s\t%s\n' "$EFS_TEST_VERSION" "$PWD" >> "$EFS_TEST_LOG"
+    test ! -e efs-utils
+    mkdir -p efs-utils/build
+    printf '%s\n' "$EFS_TEST_VERSION" > "efs-utils/build/amazon-efs-utils-$EFS_TEST_VERSION.deb"
+    if test "$EFS_TEST_OUTCOME" = fail; then return 42; fi
+    if test "$EFS_TEST_OUTCOME" = install; then
+        printf '#!/bin/sh\necho mount.efs-%s\n' "$EFS_TEST_VERSION" > "$EFS_TEST_HELPER"
+        chmod +x "$EFS_TEST_HELPER"
+    fi
+}
+install_efs_mount_helper_impl() { native_build; }
+""")
+            apt = binaries / "apt"
+            apt.write_text(r"""#!/bin/sh
+set -e
+printf 'reinstall\t%s\n' "$*" >> "$EFS_TEST_LOG"
+test "$#" = 4 && test "$1" = install && test "$2" = -y && test "$3" = --reinstall
+case "$4" in "$TMPDIR"/*/efs-utils/build/amazon-efs-utils*deb) ;; *) exit 91 ;; esac
+version=$(cat "$4")
+test "$version" = "$EFS_TEST_VERSION"
+test "$EFS_TEST_OUTCOME" != apt-fail
+if test "$EFS_TEST_OUTCOME" = repair; then
+    printf '#!/bin/sh\necho mount.efs-%s\n' "$version" > "$EFS_TEST_HELPER"
+    chmod +x "$EFS_TEST_HELPER"
+fi
+""")
+            apt.chmod(0o755)
+            # Watchdog presence must not hide a missing or broken mount helper.
+            watchdog = binaries / "amazon-efs-mount-watchdog"
+            watchdog.write_text("#!/bin/sh\nexit 0\n")
+            watchdog.chmod(0o755)
+            workspaces = []
+
+            def execute(outcome="install", version="8.2.7"):
+                log.unlink(missing_ok=True)
+                environment = {**os.environ, "PATH": f"{binaries}:{os.environ['PATH']}",
+                               "TMPDIR": str(builds), "EFS_TEST_LOG": str(log),
+                               "EFS_TEST_HELPER": str(helper), "EFS_TEST_VERSION": version,
+                               "EFS_TEST_OUTCOME": outcome}
+                status = "Success"
                 for step in steps:
                     inputs = step["inputs"]
-                    if step["action"] == "aws:runShellScript":
-                        command = "\n".join(inputs["runCommand"]).replace(
-                            "/root/bootstrap/semaphore/linux_vdi_config_host_ready.lock", str(ready))
-                        command = command.replace("/usr/sbin/mount.efs", str(helper))
-                        ok = subprocess.run(["bash", "-c", command], capture_output=True).returncode == 0
-                    else:
-                        calls.append(json.loads(inputs["documentParameters"])["action"])
-                        status, installed = next(outcomes)
-                        if status == "Interrupted":
-                            return status, calls
-                        if installed:
-                            helper.write_text("#!/bin/sh\necho mount.efs3.4.0\n")
-                            helper.chmod(0o755)
-                        ok = status == "Success"
-                    if not ok:
+                    command = "\n".join(inputs["runCommand"]).replace(
+                        "/root/bootstrap/semaphore/linux_vdi_config_host_ready.lock", str(ready))
+                    command = command.replace("/root/bootstrap/latest", str(root)).replace(
+                        "/usr/sbin/mount.efs", str(helper))
+                    result = subprocess.run(["/bin/sh", "-c", command], env=environment,
+                                            capture_output=True, text=True, timeout=10)
+                    if result.returncode:
                         control = inputs.get("onFailure")
                         self.assertIn(control, ("exit", "successAndExit"))
-                        return ("Success" if control == "successAndExit" else "Failed"), calls
-                return "Success", calls
-            self.assertEqual(execute(iter(())), ("Failed", []))  # RES has not finished.
+                        status = "Success" if control == "successAndExit" else "Failed"
+                        break
+                calls = log.read_text().splitlines() if log.exists() else []
+                for call in calls:
+                    if call.startswith("build\t"):
+                        _, selected_version, workspace = call.split("\t")
+                        self.assertEqual(selected_version, version)
+                        self.assertNotIn(workspace, workspaces)
+                        workspaces.append(workspace)
+                        self.assertFalse(Path(workspace).exists(), "Build workspace must be cleaned")
+                return status, [call.split("\t")[0] for call in calls]
+
+            self.assertEqual(execute(), ("Failed", []))  # RES has not finished.
             ready.touch()
-            self.assertEqual(execute(iter([("Interrupted", False)])), ("Interrupted", ["Install"]))
-            # Model the verified Distributor bug: resumed Install reports Success
-            # while the helper is still absent; the native repair must run now.
-            self.assertEqual(execute(iter([("Success", False), ("Success", False), ("Success", True)])),
-                             ("Success", ["Install", "Uninstall", "Install"]))
-            self.assertEqual(execute(iter(())), ("Success", []))  # Healthy helper is preserved.
-            helper.write_text("#!/bin/sh\nexit 42\n")
-            self.assertEqual(execute(iter([("Success", False), ("Success", False), ("Success", True)])),
-                             ("Success", ["Install", "Uninstall", "Install"]))
-            helper.unlink()
-            self.assertEqual(execute(iter([("Failed", False)])), ("Failed", ["Install"]))
-            self.assertEqual(execute(iter([("TimedOut", False)])), ("Failed", ["Install"]))
-            self.assertEqual(execute(iter([("Success", True)])), ("Success", ["Install"]))
-            helper.unlink()
-            self.assertEqual(execute(iter([("Success", False)] * 3)),
-                             ("Failed", ["Install", "Uninstall", "Install"]))  # Final verification fails closed.
+            for version in ("8.2.7", "9.1.0"):
+                with self.subTest(version=version):
+                    self.assertEqual(execute("fail", version), ("Failed", ["stunnel", "build"]))
+                    self.assertEqual(execute("install", version), ("Success", ["stunnel", "build"]))
+                    self.assertIn(version, helper.read_text())
+                    self.assertEqual(execute("fail", "99.0"), ("Success", []))  # No healthy upgrade.
+                    helper.write_text("#!/bin/sh\nexit 42\n")
+                    self.assertEqual(execute("repair", version),
+                                     ("Success", ["stunnel", "build", "reinstall"]))
+                    self.assertIn(version, helper.read_text())
+                    helper.unlink()
+                    self.assertEqual(execute("apt-fail", version),
+                                     ("Failed", ["stunnel", "build", "reinstall"]))
+                    self.assertEqual(execute("no-helper", version),
+                                     ("Failed", ["stunnel", "build", "reinstall"]))
+            self.assertEqual(list(builds.iterdir()), [])
 
     def test_client_exit_during_readiness_leaves_native_setup_and_desktop_running(self):
         for profile in ("cpu", "gpu"):

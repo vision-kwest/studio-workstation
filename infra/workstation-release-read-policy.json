@@ -22,12 +22,12 @@
       }
     },
     {
-      "Sid": "ReadGrid202InstallerVersion",
+      "Sid": "ReadResPolicyInstallerVersion",
       "Effect": "Allow",
       "Action": "s3:GetObjectVersion",
-      "Resource": "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/issue100-grid20-2-20261125/res-2026.06/installation-scripts.tar.gz",
+      "Resource": "arn:aws:s3:::studio-workstation-releases-401233741942-us-east-1/releases/issue100-res-package-policy-20261125/res-2026.06/installation-scripts.tar.gz",
       "Condition": {
-        "StringEquals": { "s3:VersionId": "UOSLzFa3RWVQbieYpGcM6bApVVJJ9vXo" }
+        "StringEquals": { "s3:VersionId": "AsJLU_Yt7gAiAV5i_z27HbETTJ7pg2cq" }
       }
     },
     {
