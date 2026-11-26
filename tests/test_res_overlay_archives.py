@@ -3,6 +3,7 @@
 import ast
 import hashlib
 import io
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -68,8 +69,17 @@ def run(directory):
                 signed=b'$AWS --region ${DRIVER_BUCKET_REGION} s3 cp --quiet --recursive $NVIDIA_S3_BUCKET_PATH .'
                 assert upstream.count(signed)==driver.count(signed)==1
                 assert b"--no-sign-request" not in driver
-                assert b"sha256sum -c -" in driver
-                assert b"cae8d82b8407c6371805485b148aa667550abf1775ea7999be69da81cf593156" in driver
+                installer=b'/bin/sh NVIDIA-Linux-x86_64*.run --no-precompiled-interface --run-nvidia-xconfig --accept-license --silent'
+                assert driver==upstream.replace(installer, installer+b' --dkms')
+                source=next(line.split('"')[1] for line in original["package_config.yml"].decode().splitlines()
+                            if 's3://ec2-linux-nvidia-drivers/' in line)
+                policy=json.loads((ROOT/"infra/res202606-nvidia-grid-read.policy.json").read_text())
+                listing,reading=policy["Statement"]
+                bucket,prefix=source.removeprefix("s3://").split("/",1)
+                assert listing["Resource"]=="arn:aws:s3:::"+bucket
+                assert listing["Condition"]=={"StringLike":{"s3:prefix":[prefix,prefix+"*"]}}
+                assert reading["Resource"]=="arn:aws:s3:::"+bucket+"/"+prefix+"*"
+                assert [s["Action"] for s in policy["Statement"]]==["s3:ListBucket","s3:GetObject"]
             else:
                 assert original.keys()==modified.keys()
                 for name in original:

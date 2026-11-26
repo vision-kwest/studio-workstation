@@ -11,11 +11,11 @@ REGION=chr(36)+"{AWS::Region}"
 # GPU bootstrap is published separately; the independently verified app
 # archive stays at the original Task 7 release key. Do not infer that both
 # archives live beneath the same S3 prefix.
-PINNED_GPU_PREFIX="releases/issue168-nvidia-dkms-r2-20261123/res-2026.06"
+PINNED_GPU_PREFIX="releases/issue100-res-package-policy-20261125/res-2026.06"
 PINNED_GPU_APP_PREFIX="releases/task7-pr61-postreboot-a8ec326/res-2026.06"
 PINNED_GPU_BUCKET="studio-workstation-releases-401233741942-us-east-1"
 GPU_ARCHIVES={
-    "installation-scripts.tar.gz": ("bs3P_1D8yZI33nM5K0u168XG_bXYc914", "c780e2c78946363e6b8817dbca5cfbcab714798aee055b8160b21b02023a7816"),
+    "installation-scripts.tar.gz": ("AsJLU_Yt7gAiAV5i_z27HbETTJ7pg2cq", "a468151e178ded6f5c5386e6e41676613c318db63bec995e7b82fb4f627a8752"),
     "virtual-desktop.tar.gz": ("nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53", "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
 }
 def render(bucket,prefix,user,profile="cpu",rez_version_id=None,rez_sha256=None):
@@ -161,13 +161,11 @@ def main():
     props["Tags"][0]["Value"] = {"Ref": "AWS::StackName"}
     props["Tags"].extend([{"Key": "StudioStackId", "Value": {"Ref": "AWS::StackId"}},
                           {"Key": "StudioProfile", "Value": a.profile}])
-    # The official package lacks validate.sh: an interrupted Installing record
-    # can report Success without the helper. Check the executable before trusting it.
-    package = {"name": "AmazonEFSUtils", "version": "3.4.0-1",
-               "installationType": "Uninstall and reinstall"}
+    # Reuse RES's package selection without its watchdog-only presence shortcut.
+    # State Manager retains post-DCV retries independently of the local CLI.
     template["Resources"]["EfsClientDocument"] = {
         "Type": "AWS::SSM::Document", "Properties": {"DocumentType": "Command", "Content": {
-            "schemaVersion": "2.2", "description": "Install the official EFS helper after RES is ready",
+            "schemaVersion": "2.2", "description": "Install the EFS helper using RES after DCV is ready",
             "mainSteps": [
                 {"action": "aws:runShellScript", "name": "resReady", "inputs": {
                     "runCommand": ["test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock"],
@@ -175,18 +173,24 @@ def main():
                 {"action": "aws:runShellScript", "name": "needsInstallation", "inputs": {
                     "runCommand": ["! /usr/sbin/mount.efs --version >/dev/null 2>&1"],
                     "timeoutSeconds": "30", "onFailure": "successAndExit"}},
-                {"action": "aws:runDocument", "name": "install", "inputs": {
-                    "documentType": "SSMDocument", "documentPath": "AWS-ConfigureAWSPackage",
-                    "documentParameters": json.dumps({**package, "action": "Install"}), "onFailure": "exit"}},
-                {"action": "aws:runShellScript", "name": "needsRepair", "inputs": {
-                    "runCommand": ["! /usr/sbin/mount.efs --version >/dev/null 2>&1"],
-                    "timeoutSeconds": "30", "onFailure": "successAndExit"}},
-                {"action": "aws:runDocument", "name": "resetInterruptedInstall", "inputs": {
-                    "documentType": "SSMDocument", "documentPath": "AWS-ConfigureAWSPackage",
-                    "documentParameters": json.dumps({**package, "action": "Uninstall"}), "onFailure": "exit"}},
-                {"action": "aws:runDocument", "name": "reinstall", "inputs": {
-                    "documentType": "SSMDocument", "documentPath": "AWS-ConfigureAWSPackage",
-                    "documentParameters": json.dumps({**package, "action": "Install"}), "onFailure": "exit"}},
+                {"action": "aws:runShellScript", "name": "install", "inputs": {
+                    "runCommand": [
+                        "/bin/bash -se <<'STUDIO_RES_EFS'",
+                        "BASE_OS=ubuntu2404",
+                        "SCRIPT_DIR=/root/bootstrap/latest/scripts/virtual-desktop-host",
+                        'source "$SCRIPT_DIR/../common/linux/debian/nfs_utils.sh"',
+                        "efs_build_dir=$(mktemp -d)",
+                        "trap '/bin/rm -rf -- \"$efs_build_dir\"' EXIT",
+                        'cd "$efs_build_dir"',
+                        "export NEEDRESTART_SUSPEND=1",
+                        'command -v "$(get_stunnel_package_name)" >/dev/null || install_stunnel_impl',
+                        "efs_original_path=$PATH",
+                        "install_efs_mount_helper_impl",
+                        'export PATH="$efs_original_path"',
+                        '/usr/sbin/mount.efs --version >/dev/null 2>&1 || '
+                        'DEBIAN_FRONTEND=noninteractive apt install -y --reinstall "$efs_build_dir"/efs-utils/build/amazon-efs-utils*deb',
+                        "STUDIO_RES_EFS"],
+                    "timeoutSeconds": "1200", "onFailure": "exit"}},
                 {"action": "aws:runShellScript", "name": "verifyHelper", "inputs": {
                     "runCommand": ["/usr/sbin/mount.efs --version"], "timeoutSeconds": "30", "onFailure": "exit"}}]}}}
     template["Resources"]["EfsClientAssociationRole"] = {

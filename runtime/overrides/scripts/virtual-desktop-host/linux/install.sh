@@ -104,7 +104,7 @@ if [[ ! -f ${INSTALL_FINISHED_LOCK} ]]; then
     if [[ "${STUDIO_STANDALONE}" != "true" ]]; then
       /bin/bash "${SCRIPT_DIR}/../../common/linux/nfs_utils.sh" -o $BASE_OS -s "${SCRIPT_DIR}/.."
     else
-      echo "Standalone: skipping unused NFS/EFS mount helper"
+      echo "Standalone: State Manager installs the RES EFS helper after desktop readiness"
     fi
     # End: Install NFS Utils and dependency items
 

@@ -24,7 +24,7 @@ STUDIO_SSH
 systemctl enable --now ssh.service
 /usr/sbin/sshd -t
 systemctl reload ssh.service
-# State Manager installs the official EFS client via AWS SSM Distributor.
+# State Manager installs the EFS client through the packaged RES helpers.
 # The immutable Rez bundle intentionally does not contain a .deb package.
 # This service retries until the independently managed helper is available.
 command -v mount.efs >/dev/null || { echo "Waiting for State Manager EFS helper installation"; exit 1; }

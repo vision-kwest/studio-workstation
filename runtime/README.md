@@ -74,7 +74,7 @@ The old PR #65 installer above is preserved. The **November 15 GPU launch candid
 
 ## November 23 NVIDIA DKMS candidate (Issue #168)
 
-The CLI and renderer now pin the installer below, built from commit
+The November 23 CLI and renderer pinned the installer below, built from commit
 `530adb3eb2cdc7823ef0062f591ca1816352510a` against the original RES 2026.06 archive.
 DKMS and the AWS header metapackage are installed in a separate, checked APT step
 before the full GRID installation; the GPU gate verifies automatic registration
@@ -116,3 +116,42 @@ combined APT transaction. This revision isolates the required DKMS packages;
 the original RES batch and its diagnostics are retained. Test cleanup and full
 evidence are recorded in [PR #169](https://github.com/vision-kwest/studio-workstation/pull/169).
 Roll back by restoring the previous CLI/renderer pins; old S3 objects are preserved.
+
+## RES package-selection policy — November 25, 2026
+
+The owner superseded the proposed GRID release pin with RES 2026.06's complete
+package-selection policy. `package_config.yml`, requirements and package metadata
+remain byte-for-byte upstream. NVIDIA follows the signed `latest/` download with
+`--dkms`; readiness checks use the installed module version. The fixed filename
+checksum is removed. DCV, Ubuntu and RES Python selections are unchanged.
+
+The existing post-ready State Manager association reuses the packaged native
+Debian EFS build functions, including their unpinned Git source and Rust stable
+selection. A fresh build directory, functional checks and conditional reinstall
+of the just-built package retain interrupted-install recovery. This replaces the
+fixed Distributor version while preserving AWS-owned retries and DCV isolation.
+Rez remains a separate Studio application choice; code archives remain immutable.
+
+| Installer provenance | Value |
+|---|---|
+| S3 key | `releases/issue100-res-package-policy-20261125/res-2026.06/installation-scripts.tar.gz` |
+| VersionId | `AsJLU_Yt7gAiAV5i_z27HbETTJ7pg2cq` |
+| SHA-256 | `a468151e178ded6f5c5386e6e41676613c318db63bec995e7b82fb4f627a8752` |
+| Size / encryption | 43,429 bytes / SSE-S3 AES256 |
+
+The verified RES originals rebuilt reproducibly. Conditional `IfNoneMatch=*`
+publication and exact-version byte-for-byte readback passed. The separately pinned
+Task 7 application archive is unchanged. Archive contracts require unchanged
+package configuration, requirements and native EFS source, and only `--dkms`
+changes the upstream GPU driver script.
+
+**Deployment gate:** repository changes do not update the shared EC2 role.
+Before launching from this revision, apply `infra/res202606-nvidia-grid-read.policy.json`
+as `StudioRes202606NvidiaGridRead` and `infra/workstation-release-read-policy.json`
+as `StudioWorkstationReleaseRead` on `StudioWorkstationSSMRole`, preserving other
+policies. Verify effective-role listing/read of `latest/` and exact-version reads
+of both archives. The prior installer version grant and all objects are retained.
+Only the candidate archive was published; shared IAM and existing guests were not
+changed. Fresh native EFS builds, GPU installation and authenticated DCV login
+remain live acceptance gates. Restoring old release pins alone does not repair
+their now-stale fixed-driver assumptions about `latest/`.

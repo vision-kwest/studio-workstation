@@ -9,7 +9,7 @@ class EfsSkipTests(unittest.TestCase):
     def test_standalone_guard_preserves_managed_res_path(self):
         text = SCRIPT.read_text()
         self.assertEqual(text.count('/bin/bash "${SCRIPT_DIR}/../../common/linux/nfs_utils.sh"'), 1)
-        pattern = r'if \[\[ "\$\{STUDIO_STANDALONE\}" != "true" \]\]; then\s+(/bin/bash "\$\{SCRIPT_DIR\}/../../common/linux/nfs_utils.sh"[^\n]+)\s+else\s+echo "Standalone: skipping unused NFS/EFS mount helper"\s+fi'
+        pattern = r'if \[\[ "\$\{STUDIO_STANDALONE\}" != "true" \]\]; then\s+(/bin/bash "\$\{SCRIPT_DIR\}/../../common/linux/nfs_utils.sh"[^\n]+)\s+else\s+echo "Standalone: State Manager installs the RES EFS helper after desktop readiness"\s+fi'
         self.assertRegex(text, pattern)
         self.assertIn('/bin/bash "${SCRIPT_DIR}/../../common/linux/sssd.sh"', text)
         self.assertIn('/bin/bash "${SCRIPT_DIR}/../../common/linux/s3_mountpoint.sh"', text)

@@ -77,3 +77,13 @@ NVIDIA installer's native registration and checks registration/kernel coverage i
 existing `install_post_reboot.sh` GPU gate. RES orchestration and update policy
 are retained. See [the deviation](DEVIATIONS.md#nvidia-kernel-updates-issue-168)
 and the implementation PR for offline versus live evidence.
+
+## November 25, 2026: package-selection policy (Issue #100)
+
+Preserve the same upstream `package_config.yml`, requirements and package metadata.
+GRID follows `latest/`; DKMS validates the installed module version without a fixed
+driver checksum. DCV bundle selection, Ubuntu packages and RES Python pins remain
+upstream choices. The existing post-ready association uses the packaged Debian
+EFS build functions and their unpinned source selection, with a scoped retry
+workspace and functional helper checks. Rez remains a separate Studio layer.
+See [provenance and deployment gates](../runtime/README.md#res-package-selection-policy--november-25-2026).

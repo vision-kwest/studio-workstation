@@ -16,10 +16,10 @@
       }
     },
     {
-      "Sid": "ReadOnlyResNvidiaGrid5959107",
+      "Sid": "ReadOnlyResNvidiaGridLatest",
       "Effect": "Allow",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::ec2-linux-nvidia-drivers/latest/NVIDIA-Linux-x86_64-595.91.07-grid-aws.run"
+      "Resource": "arn:aws:s3:::ec2-linux-nvidia-drivers/latest/*"
     }
   ]
 }
