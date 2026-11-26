@@ -190,6 +190,10 @@ class ReadinessLifetimeTests(unittest.TestCase):
                 resources = lifetime.resources(self.selected['token'], self.payload['StopRole'], self.schedule, profile)
                 role = resources['ReadinessLifetimeRole']
                 statements = role['Properties']['Policies'][0]['PolicyDocument']['Statement']
+                start = next(s for s in statements if s['Action'] == 'ssm:StartAutomationExecution')
+                self.assertEqual(start['Resource'], [
+                    f'arn:aws:ssm:us-east-1:401233741942:document/studio-ready-{self.selected["token"]}',
+                    'arn:aws:ssm:us-east-1:401233741942:automation-execution/*'])
                 expected = f'arn:aws:scheduler:us-east-1:401233741942:schedule/studio-task7-pr61/{self.name}'
                 for action in ('scheduler:GetSchedule', 'scheduler:UpdateSchedule'):
                     granted = next(s for s in statements if action in s['Action'])

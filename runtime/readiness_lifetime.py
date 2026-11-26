@@ -54,7 +54,7 @@ def resources(token, stop_role, setup, profile):
     """No guest privileges or custom worker: CFN owns the document, role and trigger."""
     name = "studio-ready-" + token
     role = "arn:aws:iam::401233741942:role/" + name
-    definition = "arn:aws:ssm:us-east-1:401233741942:automation-definition/" + name + ":*"
+    document_arn = "arn:aws:ssm:us-east-1:401233741942:document/" + name
     payload = {"InstanceId": "{{ InstanceId }}", "ScheduleName": "studio-stop-" + token,
                "StopRole": stop_role, "StackId": {"Ref": "AWS::StackId"}, "CleanupToken": token,
                "SetupDescription": "{{ SetupDescription }}", "SetupDeadline": "{{ SetupDeadline }}"}
@@ -103,7 +103,8 @@ def resources(token, stop_role, setup, profile):
          "Resource": f"arn:aws:scheduler:us-east-1:401233741942:schedule/{setup['GroupName']}/{setup['Name']}"},
         {"Effect": "Allow", "Action": "iam:PassRole", "Resource": stop_role,
          "Condition": {"StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}}},
-        {"Effect": "Allow", "Action": "ssm:StartAutomationExecution", "Resource": definition},
+        {"Effect": "Allow", "Action": "ssm:StartAutomationExecution", "Resource": [document_arn,
+         "arn:aws:ssm:us-east-1:401233741942:automation-execution/*"]},
         {"Effect": "Allow", "Action": "iam:PassRole", "Resource": role,
          "Condition": {"StringEquals": {"iam:PassedToService": "ssm.amazonaws.com"}}}]
     return {
