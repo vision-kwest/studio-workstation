@@ -20,6 +20,8 @@ on:
       - 'tests/test_publisher.py'
       - 'tests/workstation_fake.py'
       - 'tests/test_issue84_gpu_bootstrap_wait.py'
+      - 'tests/test_native_bootstrap_wait.py'
+      - 'infra/res202606-nvidia-grid-read.policy.json'
       - 'tests/test_issue88_hostname_plan.py'
       - 'runtime/dcv_endpoint.py'
       - 'tests/test_dcv_endpoint.py'
@@ -79,6 +81,7 @@ jobs:
           assert 'a468151e178ded6f5c5386e6e41676613c318db63bec995e7b82fb4f627a8752' in data
           PY
       - run: python3 -m unittest discover -s tests -p test_issue84_gpu_bootstrap_wait.py -v
+      - run: python3 -m unittest discover -s tests -p test_native_bootstrap_wait.py -v
       - run: python3 -m unittest discover -s tests -p test_issue88_hostname_plan.py -v
       - run: python3 -m py_compile scripts/studio_workstation_cli.py runtime/render_workstation.py
       - run: python3 -m pytest -q tests/test_publisher.py

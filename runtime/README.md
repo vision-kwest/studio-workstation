@@ -145,13 +145,20 @@ Task 7 application archive is unchanged. Archive contracts require unchanged
 package configuration, requirements and native EFS source, and only `--dkms`
 changes the upstream GPU driver script.
 
-**Deployment gate:** repository changes do not update the shared EC2 role.
-Before launching from this revision, apply `infra/res202606-nvidia-grid-read.policy.json`
-as `StudioRes202606NvidiaGridRead` and `infra/workstation-release-read-policy.json`
-as `StudioWorkstationReleaseRead` on `StudioWorkstationSSMRole`, preserving other
-policies. Verify effective-role listing/read of `latest/` and exact-version reads
-of both archives. The prior installer version grant and all objects are retained.
-Only the candidate archive was published; shared IAM and existing guests were not
-changed. Fresh native EFS builds, GPU installation and authenticated DCV login
-remain live acceptance gates. Restoring old release pins alone does not repair
-their now-stale fixed-driver assumptions about `latest/`.
+**Creation dependency:** each new CPU/GPU stack owns a uniquely named inline
+`BootstrapReadPolicy` on `StudioWorkstationSSMRole`, with EC2 depending on it.
+One archive-selection helper supplies both user data and the exact object/version
+grants; GPU stacks also include the upstream NVIDIA `latest/` read policy. New
+releases therefore need no separate per-release shared-role edit. Existing shared
+grants and release objects remain available for older stacks. Initial versioned
+downloads retry up to 13 times, with 10 seconds between attempts, to allow IAM
+propagation; checksum verification still precedes the pre-install marker.
+
+The `art6` failure exposed the missing instance-role grant: caller preflight passed,
+but cloud-init could not download the new installer. The two previously reviewed
+shared policies were applied during diagnosis; bootstrap was not resumed, and the
+owner requested a creation fix instead. This correction changes generated user
+data and stack dependencies, without republishing either archive. Fresh native
+EFS builds, GPU installation and authenticated DCV login remain live acceptance
+gates. Restoring old release pins alone does not repair their now-stale fixed-driver
+assumptions about `latest/`.

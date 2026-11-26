@@ -45,6 +45,9 @@ def resolve(value, values):
     if set(value) == {'Fn::Split'}:
         separator, text = resolve(value['Fn::Split'], values)
         return text.split(separator)
+    if set(value) == {'Fn::Join'}:
+        separator, items = resolve(value['Fn::Join'], values)
+        return separator.join(items)
     if set(value) == {'Fn::Select'}:
         index, items = resolve(value['Fn::Select'], values)
         return items[index]
@@ -140,9 +143,15 @@ class AWS:
         stack = {'StackName': name, 'StackId': arn, 'StackStatus': 'CREATE_COMPLETE',
                  'Tags': tags(stack_tags), 'Parameters': [{'ParameterKey': k, 'ParameterValue': str(v)} for k,v in params.items()]}
         self.stacks[arn], self.resources[arn] = stack, []
-        for key, resource in body['Resources'].items():
+        # Apply the explicit bootstrap dependency before constructing EC2.
+        ordered = sorted(body['Resources'].items(), key=lambda item: item[1]['Type'] != 'AWS::IAM::RolePolicy')
+        for key, resource in ordered:
             kind = resource['Type']
-            if kind == 'AWS::IAM::Role':
+            if kind == 'AWS::IAM::RolePolicy':
+                props = resolve(resource['Properties'], values)
+                physical = props['PolicyName']
+                self.policies[props['RoleName']][physical] = props['PolicyDocument']
+            elif kind == 'AWS::IAM::Role':
                 physical = resource['Properties'].get('RoleName', f'{name}-{key}-{n}')
                 role_arn = f'arn:aws:iam::{h.ACCOUNT}:role/{physical}'
                 values[key + '.Arn'] = role_arn
@@ -155,6 +164,7 @@ class AWS:
                 self.groups[physical] = {'GroupId': physical, 'VpcId': 'vpc-01bbe5d01838f70b2',
                                         'Tags': tags({**stack_tags, **tagdict(props.get('Tags', [])), 'aws:cloudformation:stack-id': arn})}
             elif kind == 'AWS::EC2::Instance':
+                assert all(dependency in values for dependency in resource.get('DependsOn', []))
                 physical = 'i-' + f'{n:017x}'
                 props = resolve(resource['Properties'], values)
                 instance_tags = {**stack_tags, **tagdict(props['Tags']), 'aws:cloudformation:stack-id': arn,
@@ -297,11 +307,12 @@ class AWS:
                 return self.native_create(val('--stack-name'),json.loads(Path(val('--template-body')[7:]).read_text()),parameters,t)
             if action=='delete-stack':
                 s=self.lookup(val('--stack-name'))
-                for r in self.resources[s['StackId']]:
+                for r in reversed(self.resources[s['StackId']]):
                     physical=r['PhysicalResourceId']
                     if r['ResourceType']=='AWS::EC2::Instance':self.terminate(physical)
                     if r['ResourceType']=='AWS::EC2::SecurityGroup':self.groups.pop(physical,None)
                     if r['ResourceType']=='AWS::IAM::Role':self.roles.pop(physical,None);self.policies.pop(physical,None)
+                    if r['ResourceType']=='AWS::IAM::RolePolicy':self.policies[acm.BASE_ROLE].pop(physical)
                     if r['ResourceType']=='AWS::Scheduler::Schedule':self.schedules.pop(physical,None)
                     if r['ResourceType']=='AWS::SSM::Document':self.documents.pop(physical,None)
                     if r['ResourceType']=='AWS::SSM::Association':self.associations.pop(physical,None)
@@ -366,6 +377,10 @@ class AWS:
             if action=='delete-schedule':self.schedules.pop(val('--name'));return {}
             if action=='list-schedules':return {'Schedules':[{'Name':n} for n in self.schedules]}
         if service=='iam':
+            if action=='get-instance-profile':
+                name=val('--instance-profile-name')
+                return {'InstanceProfile': {'Arn': f'arn:aws:iam::{h.ACCOUNT}:instance-profile/{name}',
+                                            'Roles': [self.roles[name]]}}
             name=val('--role-name')
             if name not in self.roles:raise missing('NoSuchEntity',action)
             if action=='get-role':return {'Role':self.roles[name]}

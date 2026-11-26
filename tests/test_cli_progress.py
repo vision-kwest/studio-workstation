@@ -183,7 +183,9 @@ def test_readiness_retry_preserves_requests_checks_and_safe_diagnostics(gpu, suc
         assert [call[2] for call in calls] == ["send-command", "get-command-invocation"] * 2
         for call in calls[::2]:
             parameters = json.loads(call[call.index("--parameters") + 1])
-            assert [line for line in parameters["commands"] if not line.startswith("echo ")] == checks
+            commands = parameters["commands"]
+            marker = commands.index("echo 'Checking RES desktop readiness marker'")
+            assert [commands[0]] + [line for line in commands[marker:] if not line.startswith("echo ")] == checks
             assert parameters["executionTimeout"] == ["45"]
             assert call[call.index("--timeout-seconds") + 1] == "60"
             assert call[call.index("--document-name") + 1] == "AWS-RunShellScript"

@@ -105,21 +105,23 @@ if [ ! -f /root/bootstrap/semaphore/pre_install_finished.lock ]; then
   chmod +x /root/bootstrap/download_bootstrap.sh
 
   install_aws_cli
-  # Standalone safety gate: a failed S3 download must never create the
-  # pre-install completion marker (original RES script otherwise continues).
+  # Download and verify before marking pre-install complete.
   BOOTSTRAP_DOWNLOAD_URI="{{ bootstrap_package_uri }}"
   {% if bootstrap_version_id %}
-  # Standalone: fetch the exact immutable S3 object before invoking the
-  # original RES extraction helper with a verified local archive.
+  # Bound retries for the stack policy's IAM propagation.
   BOOTSTRAP_KEY="${BOOTSTRAP_DOWNLOAD_URI#s3://}"
   BOOTSTRAP_BUCKET="${BOOTSTRAP_KEY%%/*}"
   BOOTSTRAP_KEY="${BOOTSTRAP_KEY#*/}"
   BOOTSTRAP_ARCHIVE="${BOOTSTRAP_KEY##*/}"
   mkdir -p /root/bootstrap/pinned
-  if ! aws --region "$AWS_REGION" s3api get-object --bucket "$BOOTSTRAP_BUCKET" --key "$BOOTSTRAP_KEY" --version-id "{{ bootstrap_version_id }}" "/root/bootstrap/pinned/$BOOTSTRAP_ARCHIVE"; then
-    echo "ERROR: Version-pinned RES bootstrap download failed" >&2
-    exit 1
-  fi
+  for attempt in {1..13}; do
+    aws --region "$AWS_REGION" s3api get-object --bucket "$BOOTSTRAP_BUCKET" --key "$BOOTSTRAP_KEY" --version-id "{{ bootstrap_version_id }}" "/root/bootstrap/pinned/$BOOTSTRAP_ARCHIVE" && break
+    if [[ "$attempt" == 13 ]]; then
+      echo "ERROR: Version-pinned RES bootstrap download failed" >&2
+      exit 1
+    fi
+    sleep 10
+  done
   if ! echo "{{ bootstrap_sha256 }}  /root/bootstrap/pinned/$BOOTSTRAP_ARCHIVE" | sha256sum --check --status; then
     echo "ERROR: RES bootstrap SHA-256 mismatch" >&2
     exit 1
