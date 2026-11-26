@@ -248,3 +248,20 @@ CloudFormation's schedule `GetAtt` omits the custom group during lookup
 which caused `art4` creation to roll back. An explicit dependency on
 `AutoStopSchedule` preserves creation order before the readiness role and association.
 The IAM scope, timer behavior and RES provisioning are unchanged by this correction.
+
+## Complete workstation readiness (Issue #100)
+
+The CLI previously completed after DCV while shared setup could still be pending.
+Create, start and check-ready now reuse the existing lifetime readiness checks,
+including successful Studio setup, writable EFS, desktop-user access and the menu
+link. Both observers also require a readable shared launcher. Fixed check labels
+report the pending stage. RES 2026.06 provisioning, native EFS scheduling and
+package selection remain unchanged; offline checks and live GUI acceptance are
+reported separately.
+
+The CLI observation window uses the existing 60-minute setup allowance; native EFS
+first succeeded on art7 after 35m34s, beyond the previous fast retry budget.
+The GPU probe follows [RES's active Xorg authority discovery](https://github.com/aws/res/blob/1f526a241fb293a29fb018f08ccf81c100c05a42/source/idea/idea-bootstrap/src/ideabootstrap/dcv/linux/x_server.py) in `_x_server_validated`
+and derives the display from the sole X socket; missing or ambiguous selections fail.
+Art7's read-only probe `daeb48a1-b4d1-45fd-a183-3fa4c47b8f32` succeeded on
+`:1` after login at `2026-11-26T03:10:43Z` with hardware Tesla T4 rendering.

@@ -3,6 +3,7 @@ import copy
 import datetime as dt
 import json
 import os
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -229,6 +230,75 @@ class ReadinessLifetimeTests(unittest.TestCase):
                                                             'FAILED_SERVICE': failed, 'SESSION_STATUS': status})
                     self.assertEqual(result.returncode == 0, not failed and status == 'running')
                     self.assertEqual('STUDIO_WORKSTATION_READY' in result.stdout, not failed and status == 'running')
+
+    def test_shared_setup_needs_successful_service_mount_and_readable_launchers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shared, home = root / 'mount/shared', root / 'home'
+            for path in ('apps', 'models', 'projects', 'share/applications'):
+                (shared / path).mkdir(parents=True, exist_ok=True)
+            (home / '.local/share').mkdir(parents=True)
+            (root / 'studio').symlink_to(shared)
+            (home / '.local/share/applications').symlink_to(root / 'studio/share/applications')
+            launcher = shared / 'share/applications/example.desktop'
+            stub = '''systemctl() { case "$*" in
+  *SubState*) echo exited;; *Result*) echo "$SETUP_RESULT";; *ExecMainStatus*) echo 0;; esac; }
+findmnt() { test "$MOUNTED" = yes; }
+getent() { echo "workstation:x:2000:2000::$TEST_HOME:/bin/bash"; }
+runuser() { shift 3; "$@"; }
+'''
+            for gpu in (False, True):
+                checks = lifetime.checks(gpu)
+                shared_checks = checks[checks.index("echo 'Checking shared software setup'"):]
+                script = stub + '\n'.join(shared_checks)
+                script = script.replace('/opt/studio/packages', str(root / 'mount')).replace('/studio/', str(root / 'studio') + '/')
+                script = script.replace('readlink /studio)', 'readlink ' + str(root / 'studio') + ')')
+                for service, mounted, menu in (('success', 'yes', True), ('failed', 'yes', True),
+                                                ('success', 'no', True), ('success', 'yes', False)):
+                    with self.subTest(gpu=gpu, service=service, mounted=mounted, menu=menu):
+                        launcher.write_text('[Desktop Entry]\nName=Example\n')
+                        if not menu:
+                            launcher.unlink()
+                        result = subprocess.run(['bash', '-eu'], input=script, text=True, capture_output=True,
+                            env={**os.environ, 'SETUP_RESULT': service, 'MOUNTED': mounted, 'TEST_HOME': str(home)})
+                        ready = service == 'success' and mounted == 'yes' and menu
+                        self.assertEqual(result.returncode == 0, ready, result.stderr)
+                        self.assertEqual('STUDIO_WORKSTATION_READY' in result.stdout, ready)
+
+    def test_gpu_probe_follows_login_and_rejects_missing_ambiguous_or_broken_graphics(self):
+        checks = lifetime.checks(True)
+        probes = checks[checks.index("echo 'Checking NVIDIA OpenGL'"):checks.index("echo 'Checking shared software setup'")]
+        for case in ('greeter', 'user', 'missing-auth', 'multiple-auth', 'missing-socket',
+                     'multiple-sockets', 'software-renderer', 'probe-error'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                number, uid = (0, 119) if case == 'greeter' else (1, 2000)
+                auth = root / str(uid) / 'gdm/Xauthority'
+                auth.parent.mkdir(parents=True)
+                if case != 'missing-auth':auth.write_text('test authority')
+                xorg = f'/usr/lib/xorg/Xorg vt2 -displayfd 3 -auth {auth} -nolisten tcp'
+                if case == 'multiple-auth':xorg += '\n/usr/lib/xorg/Xorg -auth /another/authority'
+                for display in ([] if case == 'missing-socket' else [number, 2] if case == 'multiple-sockets' else [number]):
+                    # An inert socket inode exercises Bash -S without opening a network socket.
+                    os.mknod(root / f'X{display}', stat.S_IFSOCK | 0o600)
+                stub = '''ps() { printf '%s\\n' "$XORG_ARGS"; }
+glxinfo() {
+  test "$DISPLAY" = "$EXPECTED_DISPLAY" || return 1
+  test "$XAUTHORITY" = "$EXPECTED_AUTH" || return 1
+  test "$__GLX_VENDOR_LIBRARY_NAME" = nvidia || return 1
+  printf 'OpenGL renderer string: %s\\n' "$RENDERER"
+  return "$GL_EXIT"
+}
+'''
+                script = stub + '\n'.join(probes + ['echo STUDIO_WORKSTATION_READY'])
+                result = subprocess.run(['bash', '-eu'], input=script.replace('/tmp/.X11-unix/', tmp + '/'),
+                    text=True, capture_output=True, env={**os.environ, 'XORG_ARGS': xorg,
+                        'EXPECTED_DISPLAY': f':{number}', 'EXPECTED_AUTH': str(auth),
+                        'RENDERER': 'llvmpipe' if case == 'software-renderer' else 'Tesla T4/PCIe/SSE2',
+                        'GL_EXIT': '9' if case == 'probe-error' else '0'})
+                ready = case in ('greeter', 'user')
+                self.assertEqual(result.returncode == 0, ready, result.stderr)
+                self.assertEqual('STUDIO_WORKSTATION_READY' in result.stdout, ready)
 
     def test_every_failed_guest_check_prevents_false_readiness(self):
         with tempfile.TemporaryDirectory() as tmp:

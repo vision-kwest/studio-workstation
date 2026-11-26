@@ -15,6 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from runtime import cli_progress as progress, dcv_endpoint, publisher, pr65_one_shot_guard as guard
+from runtime.readiness_lifetime import checks as readiness_checks
 from scripts import studio_workstation_cli as cli
 from test_issue43_cli_lifecycle import CliFixture
 from workstation_fake import AWS, NOW, h, tags
@@ -147,12 +148,7 @@ def test_checkpoint_freshness_and_unchanged_time_are_independent(monkeypatch, ca
 @pytest.mark.parametrize("gpu", [False, True])
 @pytest.mark.parametrize("succeeds", [False, True])
 def test_readiness_retry_preserves_requests_checks_and_safe_diagnostics(gpu, succeeds):
-    label, records = "NVIDIA T4" if gpu else "GDM and DCV services", []
-    checks = ["set -e", "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
-              "systemctl is-active gdm3 dcvserver", "dcv describe-session console"]
-    if gpu:
-        checks += ["nvidia-smi -L | grep -q 'Tesla T4'", "pgrep -x Xorg",
-                   "DISPLAY=:0 XAUTHORITY=/run/user/119/gdm/Xauthority __GLX_VENDOR_LIBRARY_NAME=nvidia glxinfo -B | grep -q 'OpenGL renderer string: Tesla T4'"]
+    label, records = "shared application launchers" if gpu else "shared software setup", []
     failed = {"Status": "Failed", "StandardOutputContent": f"Checking {label}\nSECRET_STDOUT",
               "StandardErrorContent": "SECRET_STDERR"}
     for quiet in (False, True):
@@ -185,7 +181,7 @@ def test_readiness_retry_preserves_requests_checks_and_safe_diagnostics(gpu, suc
             parameters = json.loads(call[call.index("--parameters") + 1])
             commands = parameters["commands"]
             marker = commands.index("echo 'Checking RES desktop readiness marker'")
-            assert [commands[0]] + [line for line in commands[marker:] if not line.startswith("echo ")] == checks
+            assert commands[marker - 1:] == readiness_checks(gpu)
             assert parameters["executionTimeout"] == ["45"]
             assert call[call.index("--timeout-seconds") + 1] == "60"
             assert call[call.index("--document-name") + 1] == "AWS-RunShellScript"

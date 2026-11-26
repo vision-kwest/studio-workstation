@@ -244,7 +244,7 @@ class StudioCliTests(unittest.TestCase):
         import json
         checks = json.loads(args[args.index("--parameters") + 1])["commands"]
         self.assertIn("echo 'Checking RES desktop readiness marker'", checks)
-        self.assertIn("dcv describe-session console", checks)
+        self.assertTrue(any(check.startswith("dcv describe-session console --json") for check in checks))
         self.assertFalse(any("systemctl restart" in check or "touch " in check for check in checks))
 
 

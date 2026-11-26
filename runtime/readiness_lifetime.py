@@ -19,23 +19,39 @@ def managed(selected):
 
 
 def checks(gpu):
-    checks = ["set -eu", "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
+    checks = ["set -eu", "echo 'Checking RES desktop readiness marker'",
+              "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
+              "echo 'Checking GDM and DCV services'",
               "systemctl is-active gdm3 >/dev/null", "systemctl is-active dcvserver >/dev/null",
+              "echo 'Checking DCV console session'",
               "dcv describe-session console --json | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s.get(\"id\")==\"console\" and s.get(\"owner\")==\"workstation\" and s.get(\"status\")==\"running\"'",
+              "echo 'Checking DCV HTTPS endpoint'",
               "curl -k -fsS --connect-timeout 5 --max-time 10 https://127.0.0.1:8443/ >/dev/null"]
     if gpu:
-        checks += ["nvidia-smi -L | grep -q 'Tesla T4'", "pgrep -x Xorg >/dev/null",
-                   "DISPLAY=:0 XAUTHORITY=/run/user/119/gdm/Xauthority __GLX_VENDOR_LIBRARY_NAME=nvidia glxinfo -B | grep -q 'OpenGL renderer string: Tesla T4'"]
+        checks += ["echo 'Checking NVIDIA T4'", "nvidia-smi -L | grep -q 'Tesla T4'",
+                   "echo 'Checking Xorg'", "pgrep -x Xorg >/dev/null",
+                   "echo 'Checking NVIDIA OpenGL'",
+                   "auth=$(ps -C Xorg -o args= | sed -n 's/.*-auth \\([^ ]*\\).*/\\1/p')",
+                   "test -r \"$auth\"",
+                   "set -- /tmp/.X11-unix/X[0-9]*",
+                   "test \"$#\" -eq 1; test -S \"$1\"",
+                   "gl_info=$(DISPLAY=:${1##*/X} XAUTHORITY=\"$auth\" __GLX_VENDOR_LIBRARY_NAME=nvidia glxinfo -B)",
+                   "printf '%s\\n' \"$gl_info\" | grep -q 'OpenGL renderer string: Tesla T4'"]
     checks += [
+        "echo 'Checking shared software setup'",
         "systemctl is-active studio-software-setup.service >/dev/null",
         "test \"$(systemctl show studio-software-setup.service -p SubState --value)\" = exited",
         "test \"$(systemctl show studio-software-setup.service -p Result --value)\" = success",
         "test \"$(systemctl show studio-software-setup.service -p ExecMainStatus --value)\" = 0",
+        "echo 'Checking shared storage mount'",
         "findmnt -rn -t nfs4 -O rw --mountpoint /opt/studio/packages >/dev/null",
         "test \"$(readlink /studio)\" = /opt/studio/packages/shared",
         "desktop_user=$(getent passwd 2000 | cut -d: -f1)",
         "desktop_home=$(getent passwd 2000 | cut -d: -f6)",
+        "echo 'Checking shared application launchers'",
         "test \"$(readlink \"$desktop_home/.local/share/applications\")\" = /studio/share/applications",
+        "runuser -u \"$desktop_user\" -- python3 -c 'import glob,os; assert any(os.path.isfile(p) and os.access(p,os.R_OK) for p in glob.glob(\"/studio/share/applications/*.desktop\"))'",
+        "echo 'Checking shared user access'",
         "runuser -u \"$desktop_user\" -- python3 -c 'import os,tempfile; assert all(os.access(p,os.R_OK|os.W_OK|os.X_OK) for p in (\"/studio/apps\",\"/studio/models\",\"/studio/projects\")); f=tempfile.TemporaryFile(dir=\"/studio/projects\"); f.write(b\"ready\"); f.seek(0); assert f.read()==b\"ready\"; f.close()'",
         "echo STUDIO_WORKSTATION_READY"]
     return checks
