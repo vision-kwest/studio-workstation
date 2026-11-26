@@ -169,8 +169,9 @@ def gpu_release_preflight(args):
 
 
 def gpu_ready(stack, region, *, gpu=True):
-    """Read-only guest readiness via bounded SSM diagnostics; no secrets."""
+    """Verify desktop, shared software and launchers through bounded SSM checks."""
     import time
+    from runtime.readiness_lifetime import checks
     iid = instance_id(stack, region)
     commands = [
         "set -e",
@@ -182,22 +183,8 @@ def gpu_ready(stack, region, *, gpu=True):
         "  echo RES_BOOTSTRAP_FAILED",
         "  exit 42",
         "fi",
-        "echo 'Checking RES desktop readiness marker'",
-        "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
-        "echo 'Checking GDM and DCV services'",
-        "systemctl is-active gdm3 dcvserver",
-        "echo 'Checking DCV console session'",
-        "dcv describe-session console",
     ]
-    if gpu:
-        commands += [
-        "echo 'Checking NVIDIA T4'",
-        "nvidia-smi -L | grep -q 'Tesla T4'",
-        "echo 'Checking Xorg'",
-        "pgrep -x Xorg",
-        "echo 'Checking NVIDIA OpenGL'",
-        "DISPLAY=:0 XAUTHORITY=/run/user/119/gdm/Xauthority __GLX_VENDOR_LIBRARY_NAME=nvidia glxinfo -B | grep -q 'OpenGL renderer string: Tesla T4'",
-    ]
+    commands += checks(gpu)
     response = aws(region, "ssm", "send-command", "--instance-ids", iid,
                    "--document-name", "AWS-RunShellScript",
                    "--parameters", json.dumps({"commands": commands, "executionTimeout": ["45"]}),
@@ -214,7 +201,7 @@ def gpu_ready(stack, region, *, gpu=True):
             continue
         if result["Status"] == "Success":
             progress.checkpoint(None)
-            progress.stage("Ready: RES, GDM and DCV" + (", Xorg and Tesla T4 OpenGL" if gpu else ""))
+            progress.stage("Ready: RES/DCV, shared software and application launchers" + (", Tesla T4 OpenGL" if gpu else ""))
             return
         if result["Status"] in ("Failed", "Cancelled", "TimedOut"):
             if (result["Status"] == "Failed" and result.get("ResponseCode") == 42 and
@@ -232,10 +219,14 @@ def gpu_ready(stack, region, *, gpu=True):
     raise ValueError("GPU readiness timed out; inspect SSM and RES bootstrap logs")
 
 
-def wait_gpu_bootstrap(stack, region, *, attempts=96, sleep=time.sleep, gpu=True):
-    """Bound retries across native RES installation and reboots; keep fail-closed readiness.\n\n    The native workstation expiry and exact-instance fallback remain armed throughout.\n    """
+def wait_gpu_bootstrap(stack, region, *, attempts=240, sleep=time.sleep, gpu=True):
+    """Observe readiness for one setup window; native workstation expiry remains armed."""
+    from runtime.readiness_lifetime import SETUP_MINUTES
+    deadline = time.monotonic() + SETUP_MINUTES * 60
     for attempt in range(attempts):
-        progress.stage(f"Checking RES and DCV readiness via SSM (attempt {attempt + 1}/{attempts})")
+        if attempt and time.monotonic() >= deadline:
+            break
+        progress.stage(f"Checking workstation readiness via SSM (attempt {attempt + 1}/{attempts})")
         try:
             gpu_ready(stack, region, gpu=gpu)
             return
@@ -503,7 +494,7 @@ def command(args):
         print(json.dumps(publisher.command(args, aws), indent=2))
         return
     if args.action == "check-ready":
-        progress.stage("Checking RES and DCV readiness via SSM")
+        progress.stage("Checking workstation readiness via SSM")
         gpu_ready(args.stack, args.region, gpu=profile == "gpu")
         print(json.dumps(wait_dcv(args.stack, args.region), indent=2))
         return

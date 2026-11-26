@@ -23,7 +23,28 @@ class NativeBootstrapWaitTests(unittest.TestCase):
         with patch.object(cli, 'gpu_ready', side_effect=failure) as ready:
             with self.assertRaisesRegex(RuntimeError, 'SSM command=abc Checking RES marker'):
                 cli.wait_gpu_bootstrap('cpu-test', 'us-east-1', sleep=lambda _: None)
-        self.assertEqual(ready.call_count, 96)
+        self.assertEqual(ready.call_count, 240)
+
+    def test_setup_window_allows_slow_readiness_but_bounds_elapsed_time_and_attempts(self):
+        for success_at, attempts, expected_calls, expected_seconds in (
+                (110, 240, 110, 2185), (None, 240, 180, 3600), (None, 2, 2, 25)):
+            with self.subTest(success_at=success_at, attempts=attempts):
+                clock = [0]
+                def pause(seconds):
+                    clock[0] += seconds
+                def probe(*args, **kwargs):
+                    pause(5)
+                    if success_at is None or ready.call_count < success_at:
+                        raise ValueError('GPU readiness failed: shared storage mount')
+                with patch.object(cli.time, 'monotonic', side_effect=lambda: clock[0]), \
+                        patch.object(cli, 'gpu_ready', side_effect=probe) as ready:
+                    if success_at:
+                        cli.wait_gpu_bootstrap('test', 'us-east-1', attempts=attempts, sleep=pause)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'shared storage mount'):
+                            cli.wait_gpu_bootstrap('test', 'us-east-1', attempts=attempts, sleep=pause)
+                self.assertEqual(ready.call_count, expected_calls)
+                self.assertEqual(clock[0], expected_seconds)
 
     def test_explicit_small_budget_still_stops(self):
         with patch.object(cli, 'gpu_ready', side_effect=ValueError('GPU readiness timed out')) as ready:

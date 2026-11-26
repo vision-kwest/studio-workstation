@@ -99,8 +99,13 @@ exposes its user-owned `shared` directory as `/studio`. New desktop accounts use
 UID/GID 2000 consistently. Files saved there survive workstation destruction.
 Use `--no-studio-software` to skip Rez and the Ollama startup service while retaining shared storage. Complete explicit
 `--rez-version-id`/`--rez-sha256` pairs remain compatible; partial pairs and opt-out
-conflicts are rejected. Software setup completes asynchronously after DCV; a helper
-failure reports incomplete software setup while the desktop remains available.
+conflicts are rejected. DCV can become available before shared software finishes.
+Create, start and check-ready succeed only after the same checks used by the AWS
+lifetime handoff: successful setup service, writable `/studio`, desktop-user access,
+the shared menu link and readable application launchers. A helper failure keeps
+creation incomplete while an available desktop remains accessible.
+Create/start observation has a 60-minute monotonic limit and a 240-probe cap;
+a probe already in flight can finish just after the limit. AWS lifetime timing is unchanged.
 
 Each CPU/GPU stack creates its own `BootstrapReadPolicy` on the existing desktop
 role before EC2 starts. The policy follows the selected archive keys and versions;
