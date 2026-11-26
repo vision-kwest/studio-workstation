@@ -11,6 +11,35 @@ sys.path.insert(0,str(ROOT/"runtime"))
 from render_workstation import render, main as render_main
 
 class GpuProfileContracts(unittest.TestCase):
+    def test_policy_follows_a_new_selected_archive_version_without_manual_iam_edit(self):
+        module = sys.modules[render_main.__module__]
+        future = {name: ('future-' + str(i), str(i + 1) * 64)
+                  for i, name in enumerate(module.GPU_ARCHIVES)}
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(module.GPU_ARCHIVES, future):
+            for profile in ('cpu', 'gpu'):
+                out = Path(directory) / (profile + '.json')
+                argv = ['render', '--profile', profile, '--bucket', module.PINNED_GPU_BUCKET,
+                        '--prefix', module.PINNED_GPU_PREFIX, '--output', str(out)]
+                with mock.patch.object(sys, 'argv', argv):
+                    render_main()
+                resources = json.loads(out.read_text())['Resources']
+                props = resources['BootstrapReadPolicy']['Properties']
+                self.assertEqual(props['RoleName'], 'StudioWorkstationSSMRole')
+                data = resources['Workstation']['Properties']['UserData']['Fn::Base64']['Fn::Sub']
+                grants = props['PolicyDocument']['Statement'][:2]
+                self.assertEqual(len(props['PolicyDocument']['Statement']), 4 if profile == 'gpu' else 2)
+                for (name, (key, version, _)), grant in zip(module.archive_sources(
+                        module.PINNED_GPU_BUCKET, module.PINNED_GPU_PREFIX, profile).items(), grants):
+                    self.assertIn(key, data)
+                    self.assertEqual(grant['Resource'], f'arn:aws:s3:::{module.PINNED_GPU_BUCKET}/{key}')
+                    self.assertEqual(grant['Action'], 's3:GetObjectVersion' if version else 's3:GetObject')
+                    if version:
+                        self.assertEqual(version, future[name][0])
+                        self.assertIn(version, data)
+                        self.assertEqual(grant['Condition'], {'StringEquals': {'s3:VersionId': version}})
+                    else:
+                        self.assertNotIn('Condition', grant)
+
     def test_gpu_uses_upstream_nvidia_flag(self):
         cpu=render("studio-release-bucket","releases/v0.1.3/res-2026.06","workstation","cpu")
         gpu=render("studio-release-bucket","releases/v0.1.3/res-2026.06","workstation","gpu")
@@ -59,7 +88,7 @@ class GpuProfileContracts(unittest.TestCase):
             template = json.loads(out.read_text())
             self.assertEqual(set(template["Resources"]), {
                 "Workstation", "WorkstationSG", "EfsClientDocument",
-                "EfsClientAssociationRole", "EfsClientAssociation"})
+                "EfsClientAssociationRole", "EfsClientAssociation", "BootstrapReadPolicy"})
             props = template["Resources"]["Workstation"]["Properties"]
             self.assertTrue(props["PropagateTagsToVolumeOnCreation"])
             self.assertTrue(all(m["Ebs"]["DeleteOnTermination"] for m in props["BlockDeviceMappings"]))

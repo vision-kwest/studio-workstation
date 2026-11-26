@@ -18,6 +18,14 @@ GPU_ARCHIVES={
     "installation-scripts.tar.gz": ("AsJLU_Yt7gAiAV5i_z27HbETTJ7pg2cq", "a468151e178ded6f5c5386e6e41676613c318db63bec995e7b82fb4f627a8752"),
     "virtual-desktop.tar.gz": ("nzyYrLhYAQ.OTFNpFE_xSHPaK06T1V53", "e7686d6240db9062b5ea62f94859bd657de8c1231e8a3ba097704f9faa45d147"),
 }
+def archive_sources(bucket, prefix, profile):
+    """Select the same archive keys and optional pins for bootstrap and IAM."""
+    prefix = prefix.strip("/")
+    pinned = profile == "gpu" and bucket == PINNED_GPU_BUCKET and prefix == PINNED_GPU_PREFIX
+    return {name: (source + "/" + name, *(GPU_ARCHIVES[name] if pinned else (None, None)))
+            for name, source in (("installation-scripts.tar.gz", prefix),
+                                 ("virtual-desktop.tar.gz", PINNED_GPU_APP_PREFIX if pinned else prefix))}
+
 def render(bucket,prefix,user,profile="cpu",rez_version_id=None,rez_sha256=None):
     if not re.fullmatch(r"[a-z0-9.-]{3,63}",bucket): raise ValueError("bucket")
     if not re.fullmatch(r"[A-Za-z0-9_./-]+",prefix) or ".." in prefix: raise ValueError("prefix")
@@ -26,11 +34,11 @@ def render(bucket,prefix,user,profile="cpu",rez_version_id=None,rez_sha256=None)
     if bool(rez_version_id) != bool(rez_sha256): raise ValueError("Rez release requires version ID and SHA-256")
     if rez_version_id and (not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}",rez_version_id) or not re.fullmatch(r"[a-f0-9]{64}",rez_sha256)): raise ValueError("Invalid Rez release pin")
     gpu_family = "NVIDIA" if profile == "gpu" else "NONE"
-    pinned = profile == "gpu" and bucket == PINNED_GPU_BUCKET and prefix.strip("/") == PINNED_GPU_PREFIX
-    prefix=prefix.strip("/")
-    app_prefix = PINNED_GPU_APP_PREFIX if pinned else prefix
-    app="s3://"+bucket+"/"+app_prefix+"/virtual-desktop.tar.gz"
-    boot="s3://"+bucket+"/"+prefix+"/installation-scripts.tar.gz"
+    archives = archive_sources(bucket, prefix, profile)
+    bootstrap_key, bootstrap_version, bootstrap_sha = archives["installation-scripts.tar.gz"]
+    app_key, app_version, app_sha = archives["virtual-desktop.tar.gz"]
+    app="s3://"+bucket+"/"+app_key
+    boot="s3://"+bucket+"/"+bootstrap_key
     command="""set -e
 if ! id -u USERNAME >/dev/null 2>&1; then
   groupadd --gid 2000 USERNAME
@@ -78,8 +86,8 @@ if test -f /usr/share/glib-2.0/schemas/org.gnome.desktop.session.gschema.xml; th
 fi
 /bin/bash scripts/virtual-desktop-host/linux/install.sh -p false -m vdi-app -g GPUFAMILY -e standalone -n standalone -o USERNAME -d CONSOLE -i standalone-console -a REGION
 """.replace("USERNAME",user).replace("APPURI",app).replace("REGION",REGION).replace("GPUFAMILY",gpu_family).replace(
-        "APP_VERSION_LINE", "STUDIO_APP_VERSION_ID="+GPU_ARCHIVES["virtual-desktop.tar.gz"][0] if pinned else "").replace(
-        "APP_SHA_LINE", "STUDIO_APP_SHA256="+GPU_ARCHIVES["virtual-desktop.tar.gz"][1] if pinned else "")
+        "APP_VERSION_LINE", "STUDIO_APP_VERSION_ID="+app_version if app_version else "").replace(
+        "APP_SHA_LINE", "STUDIO_APP_SHA256="+app_sha if app_sha else "")
     if rez_version_id:
         command += f"""cat > /etc/studio-software-release.env <<'STUDIO_RELEASE'
 STUDIO_REZ_VERSION_ID={rez_version_id}
@@ -118,8 +126,7 @@ fi
     userdata=env.get_template("bootstrap_userdata_linux_base_non_substitution.sh.jinja2").render(
         base_os="ubuntu2404",aws_region=REGION,bootstrap_package_uri=boot,
         install_commands=[command],infra_config=None,proxy_config=None,
-        bootstrap_version_id=GPU_ARCHIVES["installation-scripts.tar.gz"][0] if pinned else None,
-        bootstrap_sha256=GPU_ARCHIVES["installation-scripts.tar.gz"][1] if pinned else None)
+        bootstrap_version_id=bootstrap_version,bootstrap_sha256=bootstrap_sha)
     # Fn::Sub must not interpolate original RES shell variables.
     # Preserve only CloudFormation's AWS::Region pseudo parameter.
     userdata=re.sub(r"\$\{(?!AWS::Region\})([^}]+)\}",lambda m: chr(36)+"{!"+m.group(1)+"}",userdata)
@@ -137,6 +144,24 @@ def main():
     p.add_argument("--output",type=Path,required=True)
     a=p.parse_args()
     template=json.loads((ROOT/"workstation-template.json").read_text())
+    template["Parameters"]["InstanceProfileName"]["AllowedValues"] = ["StudioWorkstationSSMRole"]
+    template["Parameters"]["InstanceProfileName"]["Description"] = "Existing supported SSM profile; this stack grants its selected release reads"
+    statements = []
+    for key, version, _ in archive_sources(a.bucket, a.prefix, a.profile).values():
+        statement = {"Effect": "Allow", "Action": "s3:GetObjectVersion" if version else "s3:GetObject",
+                     "Resource": f"arn:aws:s3:::{a.bucket}/{key}"}
+        if version:
+            statement["Condition"] = {"StringEquals": {"s3:VersionId": version}}
+        statements.append(statement)
+    if a.profile == "gpu":
+        statements.extend(json.loads((ROOT.parent / "infra/res202606-nvidia-grid-read.policy.json").read_text())["Statement"])
+    template["Resources"]["BootstrapReadPolicy"] = {
+        "Type": "AWS::IAM::RolePolicy", "Properties": {
+            "PolicyName": {"Fn::Join": ["", ["studio-bootstrap-",
+                {"Fn::Select": [2, {"Fn::Split": ["/", {"Ref": "AWS::StackId"}]}]}]]},
+            "RoleName": "StudioWorkstationSSMRole",
+            "PolicyDocument": {"Version": "2012-10-17", "Statement": statements}}}
+    template["Resources"]["Workstation"]["DependsOn"] = ["BootstrapReadPolicy"]
     template["Resources"]["Workstation"]["Properties"]["SecurityGroupIds"].append("sg-058f2babb18747976")
     if a.profile == "gpu":
         template["Description"] = "GPU g4dn RES 2026.06 derived runtime; requires separately validated NVIDIA-capable AMI"

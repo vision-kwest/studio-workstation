@@ -102,6 +102,16 @@ Use `--no-studio-software` to skip Rez and the Ollama startup service while reta
 conflicts are rejected. Software setup completes asynchronously after DCV; a helper
 failure reports incomplete software setup while the desktop remains available.
 
+Each CPU/GPU stack creates its own `BootstrapReadPolicy` on the existing desktop
+role before EC2 starts. The policy follows the selected archive keys and versions;
+GPU stacks also permit RES's upstream NVIDIA `latest/` download. No separate
+per-release IAM update is required. Preflight verifies the supported instance
+profile contains the expected role. The caller needs `iam:GetInstanceProfile`,
+and CloudFormation needs `iam:PutRolePolicy`, `iam:GetRolePolicy` and
+`iam:DeleteRolePolicy` on that role. Stack deletion removes only its own policy.
+Stopped stacks retain their policies and count toward the role's inline-policy
+size quota; a policy-creation failure prevents EC2 creation.
+
 ### SSH access
 
 [Issue #70](https://github.com/vision-kwest/studio-workstation/issues/70) makes SSH
@@ -317,6 +327,13 @@ A successful probe clears the previous failure. Labels come only from exact
 known markers, never arbitrary guest stdout/stderr; a terminal SSM failure
 includes the instance and command IDs for inspecting detailed output in SSM.
 No additional AWS calls, percentages or credentials are introduced by reporting.
+
+An explicitly failed initial `cloud-final.service` now ends local readiness
+observation with the instance, SSM command ID and bootstrap log location. This
+check requires a completed failed service and no RES application/ready marker;
+ordinary installation, reboot and post-reboot startup continue to retry. On a
+desktop with an AWS-managed lifetime, its stop deadline remains armed after the
+CLI reports the failure. This diagnostic does not restart or repair bootstrap.
 
 ```bash
 python3 studio workstation stop art > stop.json

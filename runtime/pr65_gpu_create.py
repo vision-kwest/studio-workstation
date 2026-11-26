@@ -121,7 +121,7 @@ def create_guarded(aws_call, region, stack, template, parameters, *, minutes=150
     if PROFILES[profile]["desktop"]:
         expected["WorkstationSG"] = "AWS::EC2::SecurityGroup"
         expected.update(EfsClientAssociation="AWS::SSM::Association", EfsClientAssociationRole="AWS::IAM::Role",
-                        EfsClientDocument="AWS::SSM::Document")
+                        EfsClientDocument="AWS::SSM::Document", BootstrapReadPolicy="AWS::IAM::RolePolicy")
     disks = [m["Ebs"] for m in instance["Properties"].get("BlockDeviceMappings", []) if "Ebs" in m]
     if (instance["Type"] != "AWS::EC2::Instance" or not disks or
             any(d.get("DeleteOnTermination") is not True for d in disks) or

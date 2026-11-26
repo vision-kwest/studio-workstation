@@ -55,6 +55,35 @@ class CliFixture(unittest.TestCase):
 
 
 class NamedLifecycleTests(CliFixture):
+    def test_bootstrap_permissions_are_stack_owned_and_delete_independently(self):
+        original = copy.deepcopy(self.aws.policies[cli.DEFAULT_PROFILE])
+        a, b = self.create('gpu', 'permissions-a'), self.create('cpu', 'permissions-b')
+        names = [next(r['PhysicalResourceId'] for r in selected['resources']
+                      if r['LogicalResourceId'] == 'BootstrapReadPolicy') for selected in (a, b)]
+        self.assertNotEqual(*names)
+        for name, template in zip(names, self.templates):
+            self.assertRegex(name, r'^studio-bootstrap-[0-9a-f-]{36}$')
+            self.assertEqual(template['Resources']['Workstation']['DependsOn'], ['BootstrapReadPolicy'])
+            self.assertIn(name, self.aws.policies[cli.DEFAULT_PROFILE])
+        self.invoke('destroy', a['stack'])
+        self.assertEqual(self.aws.policies[cli.DEFAULT_PROFILE], {
+            **original, names[1]: self.aws.policies[cli.DEFAULT_PROFILE][names[1]]})
+        self.assertEqual(inventory.context(self.aws, h.REGION, b['stack'])['state'], 'running')
+        self.assertFalse(any(c[:2] == ('iam', 'put-role-policy') and
+                             c[c.index('--policy-name') + 1].startswith('studio-bootstrap-')
+                             for c in self.aws.calls))
+
+    def test_profile_role_mismatch_fails_before_creation(self):
+        for roles in ([], [{'Arn': 'foreign'}], [{'Arn': 'foreign'}, {'Arn': 'other'}]):
+            def corrupt(service, action, args, result):
+                if (service, action) == ('iam', 'get-instance-profile'):
+                    result['InstanceProfile']['Roles'] = roles
+            self.aws.after = corrupt
+            with self.subTest(roles=roles), self.assertRaises(SystemExit):
+                self.create('gpu', 'bad-profile')
+            self.assertIn('must contain exactly', self.errors.getvalue())
+            self.assertFalse(self.aws.writes)
+
     def test_desktop_software_defaults_opt_out_and_complete_override(self):
         approved=(cli.DEFAULT_REZ_VERSION_ID,cli.DEFAULT_REZ_SHA256)
         cases=[('default',[],approved),('off',['--no-studio-software'],None),
@@ -211,6 +240,17 @@ class NamedLifecycleTests(CliFixture):
         self.assertEqual(b['state'],'running')
         self.assertEqual(self.aws.vms[a['instance']]['State']['Name'],'running')
         self.assertEqual(len(self.aws.schedules),1)
+        self.assertIn('not ready', self.errors.getvalue())
+        self.assertIn('AWS stop deadline remains armed', self.errors.getvalue())
+
+    def test_managed_readiness_error_does_not_expose_command_arguments(self):
+        cli.wait_gpu_bootstrap.side_effect = subprocess.CalledProcessError(
+            1, ['aws', 'SECRET_COMMAND_ARGUMENT'], stderr='AccessDenied')
+        with self.assertRaises(SystemExit):
+            self.create('gpu', 'private-error')
+        self.assertIn('AccessDenied', self.errors.getvalue())
+        self.assertNotIn('SECRET_COMMAND_ARGUMENT', self.errors.getvalue())
+        self.assertEqual(inventory.context(self.aws, h.REGION, 'private-error')['state'], 'running')
 
     def test_missing_guard_blocks_restart_but_does_not_block_stop(self):
         a=self.create('gpu','art');self.aws.schedules.clear()

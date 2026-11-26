@@ -1,5 +1,9 @@
 """Bounded native RES readiness without speculative bootstrap repairs."""
+import json
+import os
+from pathlib import Path
 import subprocess
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -39,3 +43,86 @@ class NativeBootstrapWaitTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Ownership mismatch'):
                 cli.wait_gpu_bootstrap('test', 'us-east-1', sleep=lambda _: None)
         self.assertEqual(ready.call_count, 1)
+
+
+class InitialBootstrapFailureTests(unittest.TestCase):
+    def probe(self, result, *, wait=False):
+        pauses = []
+        with patch.object(cli, "instance_id", return_value="i-test"), \
+                patch.object(cli.time, "sleep"), \
+                patch.object(cli, "aws", side_effect=[{"Command": {"CommandId": "probe-1"}}, result]) as aws:
+            error = None
+            try:
+                if wait:
+                    cli.wait_gpu_bootstrap("studio-test", "us-east-1", sleep=pauses.append)
+                else:
+                    cli.gpu_ready("studio-test", "us-east-1", gpu=False)
+            except (RuntimeError, ValueError) as exc:
+                error = exc
+            self.assertEqual(aws.call_count, 2)
+            args = aws.call_args_list[0].args
+            commands = json.loads(args[args.index("--parameters") + 1])["commands"]
+        return commands, error, pauses
+
+    def test_native_probe_only_reports_confirmed_initial_failure(self):
+        commands, error, _ = self.probe({"Status": "Success"})
+        self.assertIsNone(error)
+        prefix = "\n".join(commands[:commands.index("echo 'Checking RES desktop readiness marker'")])
+        stub = '''systemctl() {
+  case "$1" in
+    is-failed) test "$UNIT_STATE" = failed ;;
+    show) echo "$UNIT_RESULT" ;;
+    is-system-running) echo "$SYSTEM_STATE"; return 1 ;;
+  esac
+}
+'''
+        with TemporaryDirectory() as directory:
+            for unit, result, system, marker, expected in (
+                    ("failed", "exit-code", "degraded", "", 42),
+                    ("activating", "exit-code", "degraded", "", 0),
+                    ("inactive", "success", "running", "", 0),
+                    ("failed", "signal", "degraded", "", 0),
+                    ("failed", "exit-code", "starting", "", 0),
+                    ("failed", "exit-code", "stopping", "", 0),
+                    ("failed", "exit-code", "degraded", "app_installed.lock", 0),
+                    ("failed", "exit-code", "degraded", "linux_vdi_config_host_ready.lock", 0)):
+                with self.subTest(unit=unit, result=result, system=system, marker=marker):
+                    path = Path(directory) / marker if marker else None
+                    if path:
+                        path.touch()
+                    script = stub + prefix.replace("/root/bootstrap/semaphore/", directory + "/")
+                    completed = subprocess.run(["/bin/sh", "-c", script], capture_output=True, text=True,
+                                               env={**os.environ, "UNIT_STATE": unit,
+                                                    "UNIT_RESULT": result, "SYSTEM_STATE": system})
+                    self.assertEqual(completed.returncode, expected, completed.stderr)
+                    self.assertEqual("RES_BOOTSTRAP_FAILED" in completed.stdout, expected == 42)
+                    if path:
+                        path.unlink()
+
+    def test_terminal_response_ends_wait_without_retry_or_guest_output(self):
+        result = {"Status": "Failed", "ResponseCode": 42,
+                  "StandardOutputContent": "RES_BOOTSTRAP_FAILED\nSECRET_OUTPUT",
+                  "StandardErrorContent": "SECRET_ERROR"}
+        _, error, pauses = self.probe(result, wait=True)
+        self.assertIsInstance(error, RuntimeError)
+        self.assertIn("cloud-final.service", str(error))
+        self.assertIn("SSM command=probe-1", str(error))
+        self.assertNotIn("SECRET", str(error))
+        self.assertEqual(pauses, [])
+        for override in ({"Status": "Cancelled"}, {"Status": "TimedOut"}, {"ResponseCode": 1},
+                         {"StandardOutputContent": "prefix RES_BOOTSTRAP_FAILED suffix"}):
+            with self.subTest(override=override):
+                _, error, _ = self.probe({**result, **override})
+                self.assertIsInstance(error, ValueError)
+
+    def test_error_message_preserves_cause_without_subprocess_arguments(self):
+        for stderr in (None, "AccessDenied"):
+            error = subprocess.CalledProcessError(1, ["aws", "--secret", "SECRET_ARGUMENT"], stderr=stderr)
+            self.assertNotIn("SECRET_ARGUMENT", cli.error_message(error))
+            self.assertIn(stderr or "exit code 1", cli.error_message(error))
+        self.assertEqual(cli.error_message(ValueError("Ownership mismatch")), "Ownership mismatch")
+        self.assertEqual(cli.error_message(RuntimeError("RES bootstrap failed")), "RES bootstrap failed")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -44,6 +44,11 @@ GPU_KEYS = {
 
 TRUSTED_DCV_HOSTNAME = "dcv.kwesidavis.com"  # Only its verified owner gets the trusted URL.
 
+def error_message(exc):
+    return ((exc.stderr or f"AWS command failed with exit code {exc.returncode}; inspect the reported stage")
+            if isinstance(exc, subprocess.CalledProcessError) else str(exc)).strip()
+
+
 def gpu_duration_minutes(value):
     """Accept positive whole minutes, hours, or days without a product-duration cap."""
     match = re.fullmatch(r"([1-9][0-9]*)([mhd])", value)
@@ -169,6 +174,14 @@ def gpu_ready(stack, region, *, gpu=True):
     iid = instance_id(stack, region)
     commands = [
         "set -e",
+        "if test ! -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock &&",
+        "   test ! -f /root/bootstrap/semaphore/app_installed.lock &&",
+        "   systemctl is-failed --quiet cloud-final.service &&",
+        '   test "$(systemctl show cloud-final.service -p Result --value)" = exit-code &&',
+        '   test "$(systemctl is-system-running 2>/dev/null || true)" = degraded; then',
+        "  echo RES_BOOTSTRAP_FAILED",
+        "  exit 42",
+        "fi",
         "echo 'Checking RES desktop readiness marker'",
         "test -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock",
         "echo 'Checking GDM and DCV services'",
@@ -204,6 +217,12 @@ def gpu_ready(stack, region, *, gpu=True):
             progress.stage("Ready: RES, GDM and DCV" + (", Xorg and Tesla T4 OpenGL" if gpu else ""))
             return
         if result["Status"] in ("Failed", "Cancelled", "TimedOut"):
+            if (result["Status"] == "Failed" and result.get("ResponseCode") == 42 and
+                    "RES_BOOTSTRAP_FAILED" in result.get("StandardOutputContent", "").splitlines()):
+                progress.checkpoint("Failed: cloud-init bootstrap")
+                raise RuntimeError(f"RES bootstrap failed: instance={iid} SSM command={cid}; "
+                                   "cloud-final.service exited unsuccessfully; inspect "
+                                   "/root/bootstrap/logs/ and journalctl -u cloud-final.service")
             markers = {line[6:-1] for line in commands if line.startswith("echo 'Checking ")}
             label = next((line[9:] for line in reversed(result.get("StandardOutputContent", "").splitlines())
                           if line in markers), "not reported")
@@ -222,7 +241,7 @@ def wait_gpu_bootstrap(stack, region, *, attempts=96, sleep=time.sleep, gpu=True
             return
         except subprocess.CalledProcessError as exc:
             # SSM can disconnect while RES reboots. Never retry an IAM denial.
-            failure = (exc.stderr or "") + " " + str(exc)
+            failure = error_message(exc)
             if not any(message in failure for message in
                        ("TargetNotConnected", "InvalidInstanceId",
                         "InvalidInstanceID.NotFound", "InvocationDoesNotExist")):
@@ -416,6 +435,14 @@ def command(args):
             account = aws(args.region, "sts", "get-caller-identity")["Account"]
             if account != "401233741942":
                 raise ValueError("Unexpected AWS account")
+            if args.profile != "publisher":
+                profile = aws(args.region, "iam", "get-instance-profile",
+                              "--instance-profile-name", args.instance_profile)["InstanceProfile"]
+                if (profile.get("Arn") != f"arn:aws:iam::{account}:instance-profile/{DEFAULT_PROFILE}" or
+                        [role.get("Arn") for role in profile.get("Roles", [])] !=
+                        [f"arn:aws:iam::{account}:role/{DEFAULT_PROFILE}"]):
+                    raise ValueError("Workstation instance profile must contain exactly the supported "
+                                     + DEFAULT_PROFILE + " role")
             subnet = aws(args.region, "ec2", "describe-subnets", "--subnet-ids", args.subnet_id)["Subnets"]
             if (len(subnet) != 1 or subnet[0].get("MapPublicIpOnLaunch") is not True or
                     subnet[0].get("VpcId") != args.vpc_id):
@@ -436,17 +463,18 @@ def command(args):
                              (item.split("=", 1) for item in parameters)]
                 aws(args.region, "cloudformation", "create-stack", "--stack-name", args.stack,
                     "--template-body", "file://" + str(template), "--parameters", *cf_params,
-                    "--capabilities", "CAPABILITY_IAM",
+                    "--capabilities", "CAPABILITY_IAM" if args.profile == "publisher" else "CAPABILITY_NAMED_IAM",
                     "--tags", "Key=StudioManaged,Value=true", "Key=StudioProfile,Value=" + args.profile,
                     "--on-failure", "DELETE")
             aws(args.region, "cloudformation", "wait", "stack-create-complete", "--stack-name", args.stack)
             if args.profile != "publisher":
                 try:
                     endpoint = ready_desktop(args.stack, args.region, gpu=gpu)
-                except Exception:
+                except Exception as exc:
                     from runtime.readiness_lifetime import managed
                     if managed(context(aws, args.region, args.stack)):
-                        raise RuntimeError("Local readiness observation ended; AWS setup and its stop deadline continue")
+                        raise RuntimeError(f"Local readiness observation ended: {error_message(exc)}; "
+                                           "AWS stop deadline remains armed") from exc
                     # Failed desktop creation must not strand a billable, unreachable VM.
                     selected = context(aws, args.region, args.stack)
                     progress.stage("Stopping EC2 after desktop readiness failure")
@@ -525,10 +553,11 @@ def command(args):
             else:
                 try:
                     endpoint = ready_desktop(args.stack, args.region, gpu=profile == "gpu")
-                except Exception:
+                except Exception as exc:
                     from runtime.readiness_lifetime import managed
                     if managed(selected):
-                        raise RuntimeError("Local readiness observation ended; AWS setup and its stop deadline continue")
+                        raise RuntimeError(f"Local readiness observation ended: {error_message(exc)}; "
+                                           "AWS stop deadline remains armed") from exc
                     progress.stage("Stopping EC2 after desktop readiness failure")
                     aws(args.region, "ec2", "stop-instances", "--instance-ids", iid)
                     raise
@@ -622,9 +651,7 @@ def main(argv=None):
         with progress.operation(a.action, getattr(a, "stack", None) or a.region, enabled=enabled):
             command(a)
     except (ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as exc:
-        message = (exc.stderr or f"AWS command failed with exit code {exc.returncode}; inspect the reported stage") \
-            if isinstance(exc, subprocess.CalledProcessError) else str(exc)
-        p.exit(1, f"ERROR: {message.strip()}\n")
+        p.exit(1, f"ERROR: {error_message(exc)}\n")
 
 if __name__ == "__main__":
     main()

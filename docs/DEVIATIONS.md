@@ -127,6 +127,24 @@ shortcut and reinstalls the just-built package if the helper remains broken.
 Separate Rez selections remain intact.
 See [release provenance and deployment gates](../runtime/README.md#res-package-selection-policy--november-25-2026).
 
+## Issue #100 follow-up — creation bootstrap dependencies (November 25, 2026)
+
+RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`, archive contents
+and package selection remain unchanged. A native `AWS::IAM::RolePolicy` belongs
+to each desktop stack, and EC2 explicitly depends on it. The existing desktop role
+receives reads for the same archive keys/versions selected for user data, plus
+RES's upstream NVIDIA source for GPU stacks. CLI preflight verifies the actual
+profile-to-role mapping. No custom resource or client-side IAM continuation is
+added; deleting a desktop removes only its uniquely named policy.
+
+The initial versioned archive transfer retries up to 13 times with 10-second
+delays for IAM propagation and retains checksum/marker ordering. The existing
+read-only readiness probe recognizes an explicitly failed initial cloud-init
+run, preserving ordinary reboot retries and the AWS stop deadline. This does not
+change data ownership, expiration or installer stages. Offline/source validation
+does not establish fresh-instance acceptance; no `art6` bootstrap recovery is part
+of this correction.
+
 ## Comfy helper argument validation (Issue #142)
 
 The existing Studio Comfy helper now strictly parses its own options before configuration access or app launch. Native AppImage arguments follow an explicit `--` separator. This prevents a mistyped option from starting Desktop and retains normal launch, default selection and update behavior. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`, provisioning, Comfy Desktop, shared templates and local-state handling are unchanged.
