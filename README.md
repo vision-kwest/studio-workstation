@@ -76,6 +76,10 @@ Assignment intentionally transfers the hostname from its current Studio owner. A
 failures print a warning and retry command; a checked public-IP endpoint remains
 usable. If endpoint recovery fails, the CLI reports failure.
 
+## Application installation
+
+See the [Application Installation Guide](docs/installation/README.md) for shared installation patterns and app-specific setup, integration and acceptance instructions.
+
 ## Studio application shell
 
 After the [one-time shared command installation](docs/shared-applications.md#studio-shell-and-application-commands), run `studio env` in a desktop terminal. The child shell exposes `BLENDER`, `CODE`, `COMFY`, `OPENCODE`, `OLLAMA` and `RESOLVE`, with shared application settings and optional installed Rez. Run `exit` to return to the original terminal environment.
