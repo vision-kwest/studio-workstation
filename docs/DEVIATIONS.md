@@ -145,6 +145,19 @@ change data ownership, expiration or installer stages. Offline/source validation
 does not establish fresh-instance acceptance; no `art6` bootstrap recovery is part
 of this correction.
 
+## Issue #100 follow-up — lifetime Automation authorization (November 25, 2026)
+
+The `art7` State Manager dispatch failed before starting Automation: CloudTrail
+event `8ff03a2c-989e-4278-9255-5474334ac08b` records denial on the readiness
+document ARN. Replace the deprecated `automation-definition` grant with the exact
+document ARN and account/region-scoped `automation-execution/*`, as required by
+[AWS's current IAM resource guidance](https://docs.aws.amazon.com/systems-manager/latest/userguide/security_iam_service-with-iam.html).
+Execution IDs are allocated when started; other runbook documents remain outside
+the grant. The existing trust, PassRole, workflow, timers and RES 2026.06 commit
+`1f526a241fb293a29fb018f08ccf81c100c05a42` provisioning remain unchanged.
+Read-only policy simulation confirms the denial/correction; fresh native dispatch
+and lifetime handoff remain live acceptance gates until recorded in the PR.
+
 ## Comfy helper argument validation (Issue #142)
 
 The existing Studio Comfy helper now strictly parses its own options before configuration access or app launch. Native AppImage arguments follow an explicit `--` separator. This prevents a mistyped option from starting Desktop and retains normal launch, default selection and update behavior. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`, provisioning, Comfy Desktop, shared templates and local-state handling are unchanged.
