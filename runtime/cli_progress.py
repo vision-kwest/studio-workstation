@@ -8,6 +8,11 @@ from threading import Event, Lock, Thread
 import time
 
 _current = ContextVar("studio_progress", default=None)
+_ACTIVITIES = {"res": "RES bootstrap; no specific worker observed", "packages": "APT/dpkg process active",
+               "compiler": "Native compiler process active", "nvidia": "NVIDIA installer active",
+               "efs_build": "EFS helper pending; Rust compiler active", "efs_wait": "Waiting for EFS helper",
+               "shared": "Shared software setup running", "retry": "Shared setup retry after unsuccessful exit",
+               "failed": "Shared setup service failed", "complete": "Shared setup completed", "unknown": "Unknown"}
 _STATES = set(("pending running stopping stopped shutting-down terminated "
                "Pending InProgress Delayed Success Cancelled Cancelling Failed TimedOut "
                "CREATE_IN_PROGRESS CREATE_COMPLETE CREATE_FAILED DELETE_IN_PROGRESS "
@@ -24,17 +29,27 @@ class _Reporter:
         self.stage, self.last, self.observations = "Validating request", "not observed", {}
         self.observed_at = None
         self.checkpoint, self.checked_at, self.changed_at = None, None, None
+        self.installation = None
 
     def _write(self, event):
         timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         now = time.monotonic()
         age = f"{now - self.observed_at:.1f}s" if self.observed_at is not None else "unknown"
-        checkpoint = (f" last_check={self.checkpoint} unchanged_for={now - self.changed_at:.1f}s"
+        checkpoint = (f" readiness={self.checkpoint} checkpoint_unchanged_for={now - self.changed_at:.1f}s"
                       f" checked_age={now - self.checked_at:.1f}s" if self.checkpoint else "")
+        activity = " activity=Unknown source=unavailable" if self.checkpoint else ""
+        if self.installation:
+            label, source, modified, sampled, restarts = self.installation
+            current = time.time()
+            log_age = f"{sampled - modified}s" if 0 <= modified <= sampled <= current else "unknown"
+            sample_age = f"{current - sampled:.1f}s" if 0 <= sampled <= current else "unknown"
+            activity = (f" activity={label} source={source} log_age_at_sample={log_age}"
+                        f" sampled_at={sampled} sample_age={sample_age}"
+                        f" setup_retries={restarts if restarts >= 0 else 'unknown'}")
         try:
             print(f"[{timestamp}] {self.action} scope={self.scope} "
                   f"elapsed={now - self.started:.1f}s stage={self.stage} "
-                  f"last={self.last} last_age={age}{checkpoint} | {event}", file=self.stream, flush=True)
+                  f"last={self.last} last_age={age}{checkpoint}{activity} | {event}", file=self.stream, flush=True)
         except (OSError, ValueError):
             pass  # A closed progress pipe must never interrupt cleanup or rollback.
 
@@ -103,6 +118,17 @@ def checkpoint(label):
         reporter.checked(label)
 
 
+def activity(output):
+    """Accept only the probe's fixed labels and bounded numeric metadata."""
+    if reporter := _current.get():
+        with reporter.lock:
+            reporter.installation = None
+            for line in output.splitlines():
+                match = re.fullmatch(r"STUDIO_ACTIVITY ([a-z_]+) (res|nvidia|efs|studio) (-?\d{1,12}) (\d{1,12}) (-?\d{1,9})", line)
+                if match and match[1] in _ACTIVITIES:
+                    reporter.installation = (_ACTIVITIES[match[1]], match[2], *map(int, match.group(3, 4, 5)))
+
+
 def observe(service, response):
     """Read only documented state fields; never log argv, tags or guest output."""
     reporter = _current.get()
@@ -121,4 +147,6 @@ def observe(service, response):
                    for i in response.get(key, [])]
     for value in values:
         if isinstance(value, str) and value in _STATES:
-            reporter.observed(service, value)
+            comment = response.get("Comment", response.get("Command", {}).get("Comment"))
+            source = "readiness-probe" if service == "ssm" and comment == "Studio desktop readiness: no credentials" else service
+            reporter.observed(source, value)

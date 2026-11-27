@@ -174,6 +174,8 @@ def gpu_ready(stack, region, *, gpu=True):
     from runtime.readiness_lifetime import checks
     iid = instance_id(stack, region)
     commands = [
+        "timeout 10s python3 - <<'STUDIO_ACTIVITY'",
+        (ROOT / "runtime/installation_activity.py").read_text(), "STUDIO_ACTIVITY",
         "set -e",
         "if test ! -f /root/bootstrap/semaphore/linux_vdi_config_host_ready.lock &&",
         "   test ! -f /root/bootstrap/semaphore/app_installed.lock &&",
@@ -200,10 +202,12 @@ def gpu_ready(stack, region, *, gpu=True):
                 raise
             continue
         if result["Status"] == "Success":
+            progress.activity(result.get("StandardOutputContent", ""))
             progress.checkpoint(None)
             progress.stage("Ready: RES/DCV, shared software and application launchers" + (", Tesla T4 OpenGL" if gpu else ""))
             return
         if result["Status"] in ("Failed", "Cancelled", "TimedOut"):
+            progress.activity(result.get("StandardOutputContent", ""))
             if (result["Status"] == "Failed" and result.get("ResponseCode") == 42 and
                     "RES_BOOTSTRAP_FAILED" in result.get("StandardOutputContent", "").splitlines()):
                 progress.checkpoint("Failed: cloud-init bootstrap")
@@ -213,7 +217,8 @@ def gpu_ready(stack, region, *, gpu=True):
             markers = {line[6:-1] for line in commands if line.startswith("echo 'Checking ")}
             label = next((line[9:] for line in reversed(result.get("StandardOutputContent", "").splitlines())
                           if line in markers), "not reported")
-            progress.checkpoint(f"{result['Status']}: {label}")
+            status = "Not ready" if result["Status"] == "Failed" and label != "not reported" else result["Status"]
+            progress.checkpoint(f"{status}: {label}")
             raise ValueError(f"GPU readiness failed: instance={iid} SSM command={cid}; {result['Status']}: {label}")
     progress.checkpoint("SSM readiness polling timed out")
     raise ValueError("GPU readiness timed out; inspect SSM and RES bootstrap logs")
