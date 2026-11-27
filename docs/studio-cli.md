@@ -313,25 +313,35 @@ stage; the command can still fail later. `last_age` shows time since that AWS st
 was observed, including repeated observations of the same state. Heartbeats alone
 do not refresh it. A heartbeat proves the CLI is alive, not that AWS is advancing.
 
-Readiness retries include the attempt number and the existing 15-second retry
-delay. `last_check` retains the last reported checkpoint and result during the
-next wait/probe. Separate fixed labels identify the RES marker, GDM/DCV services,
-DCV console, NVIDIA T4, Xorg and NVIDIA OpenGL. For example:
+Readiness and installation activity are reported separately. `readiness` names
+the last check that did not pass, while `activity` describes an observed process,
+service state or missing prerequisite. For example, an incomplete desktop can show:
 
 ```text
-[2026-11-21T21:26:28+00:00] start scope=art elapsed=1820.0s stage=Waiting to retry readiness after attempt 70/96 (15s delay) last=ssm:Failed last_age=10.0s last_check=Failed: NVIDIA T4 unchanged_for=480.0s checked_age=10.0s | heartbeat
+last=readiness-probe:Failed readiness=Not ready: shared software setup activity=EFS helper pending; Rust compiler active source=efs log_age_at_sample=4s sampled_at=1795725760 sample_age=5.0s setup_retries=28
 ```
 
-`checked_age` measures time since the readiness observation was recorded;
-`unchanged_for` measures time since that same result was first observed. A repeat
-refreshes only `checked_age`. Neither field proves continuous guest failure or
-estimates completion. The checkpoint names the last check started by that probe,
-not the underlying OS cause. Missing checkpoint output is reported as `not reported`;
-SSM unavailability and local polling timeout have their own fixed descriptions.
-A successful probe clears the previous failure. Labels come only from exact
-known markers, never arbitrary guest stdout/stderr; a terminal SSM failure
-includes the instance and command IDs for inspecting detailed output in SSM.
-No additional AWS calls, percentages or credentials are introduced by reporting.
+`Failed` here is the SSM probe's exit status: a readiness assertion did not pass.
+It does not prove that installation failed. Cancelled/timed-out probes, unavailable
+SSM and a confirmed bootstrap failure remain distinct. Activity never changes
+the strict readiness checks or the AWS-managed lifetime.
+
+The same probe samples native process names, EFS helper health, the shared setup
+unit and known log modification times, including both EFS stdout and stderr.
+Sampling is limited to 10 seconds; unavailable metadata does not bypass readiness.
+`sampled_at` is the guest's
+Unix timestamp; `sample_age` includes delivery delay and keeps increasing between
+observations. `log_age_at_sample` describes the selected log source at that instant.
+An old or quiet log alone does not establish a stall. A retry count can include
+expected waits for prerequisites; `activity` distinguishes these from a shared
+setup retry after its prerequisites exist. Missing activity metadata is `Unknown`.
+
+Retries retain their attempt number and 15-second delay. `checked_age` measures
+time since the last readiness observation; `checkpoint_unchanged_for` measures
+how long the same checkpoint label has repeated, not installer inactivity.
+Successful readiness clears that checkpoint. Only fixed labels and numeric
+metadata are exported; process arguments and raw log contents remain private.
+No additional AWS calls, services, percentages or credentials are introduced.
 
 An explicitly failed initial `cloud-final.service` now ends local readiness
 observation with the instance, SSM command ID and bootstrap log location. This

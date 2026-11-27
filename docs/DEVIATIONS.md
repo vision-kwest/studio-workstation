@@ -265,3 +265,15 @@ The GPU probe follows [RES's active Xorg authority discovery](https://github.com
 and derives the display from the sole X socket; missing or ambiguous selections fail.
 Art7's read-only probe `daeb48a1-b4d1-45fd-a183-3fa4c47b8f32` succeeded on
 `:1` after login at `2026-11-26T03:10:43Z` with hardware Tesla T4 rendering.
+
+## Separate installation activity and readiness (Issue #106)
+
+The existing CLI SSM readiness probe now samples native process names, shared
+setup service state and known log modification times. Fixed activity labels and
+numeric metadata distinguish observable work, prerequisite waits and service
+retries from the strict readiness result. EFS freshness considers stdout and
+stderr. RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` log sources,
+installers, package policy and reboot sequence remain unchanged, as do native
+lifetime checks. There are no additional AWS calls, services or state files.
+This observation cannot establish a stall from a quiet log or substitute for
+actual desktop readiness; offline and live acceptance are reported separately.

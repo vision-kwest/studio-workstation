@@ -136,13 +136,13 @@ def test_checkpoint_freshness_and_unchanged_time_are_independent(monkeypatch, ca
             line = capsys.readouterr().err.splitlines()[-1]
             assert f"last_age={reported - observed:.1f}s" in line
             assert f"checked_age={reported - observed:.1f}s" in line
-            assert f"last_check=Failed: NVIDIA T4 unchanged_for={reported:.1f}s" in line
+            assert f"readiness=Failed: NVIDIA T4 checkpoint_unchanged_for={reported:.1f}s" in line
         progress.checkpoint("Failed: Xorg")
         progress.stage("Another readiness check")
-        assert "last_check=Failed: Xorg unchanged_for=0.0s checked_age=0.0s" in capsys.readouterr().err
+        assert "readiness=Failed: Xorg checkpoint_unchanged_for=0.0s checked_age=0.0s" in capsys.readouterr().err
         progress.checkpoint(None)
         progress.stage("Ready")
-        assert "last_check=" not in capsys.readouterr().err
+        assert "readiness=" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("gpu", [False, True])
@@ -193,9 +193,9 @@ def test_readiness_retry_preserves_requests_checks_and_safe_diagnostics(gpu, suc
             assert stderr.getvalue() == ""
         else:
             assert len(waiting) == 1 and "after attempt 1/2 (15s delay)" in waiting[0]
-            assert f"last_check=Failed: {label}" in waiting[0]
+            assert f"readiness=Not ready: {label}" in waiting[0]
             assert "attempt 2/2" in stderr.getvalue()
-            assert ("last_check=" in stderr.getvalue().splitlines()[-1]) == (not succeeds)
+            assert ("readiness=" in stderr.getvalue().splitlines()[-1]) == (not succeeds)
         records.append((calls, pauses, error))
     assert records[0] == records[1]
 
