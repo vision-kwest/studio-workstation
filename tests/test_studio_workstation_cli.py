@@ -238,7 +238,8 @@ class StudioCliTests(unittest.TestCase):
                 message = str(raised.exception)
                 self.assertEqual(message, f"GPU readiness failed: instance={INSTANCE} "
                                  f"SSM command=readiness-command; Failed: {label}")
-                checkpoint.assert_called_once_with(f"Failed: {label}")
+                status = "Failed" if label == "not reported" else "Not ready"
+                checkpoint.assert_called_once_with(f"{status}: {label}")
                 self.assertNotIn("SECRET", message)
         args = aws.call_args_list[0].args
         import json
