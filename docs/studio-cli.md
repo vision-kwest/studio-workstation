@@ -276,7 +276,9 @@ Commands print flushed progress to **stderr**, including the operation, selected
 scope, UTC timestamp, elapsed seconds, active stage and last observed AWS state.
 A heartbeat appears every **10 seconds** while blocked, including inside native
 AWS waiters, bootstrap/reboot retries and publisher SSM checks. EFS helper setup
-continues through the stack's State Manager association after the CLI exits.
+continues through the stack's readiness Automation after the CLI exits; its
+60-second retry starts installation promptly after RES readiness, with the
+existing State Manager association as a fallback.
 State observations reuse existing responses; reporting makes no extra AWS calls.
 Progress reporting does not alter AWS operations or their retry limits.
 
@@ -385,15 +387,15 @@ Duplicate checks, associations and RES reboots cannot restart the selected clock
 Initial CloudFormation creation retains its five-minute timeout and normal
 failed-create rollback, which can remove incomplete new resources.
 
-Readiness polling occurs inside bounded, ten-minute Run Command invocations;
-it does not charge an Automation step for each 15-second guest check. A successful
-path with two interrupted probes uses 19 Automation steps. The 12-attempt limit
-bounds the failed path at 74 steps; each short Python action has a 30-second limit.
-These counts cover the authored runbook, excluding the initial association's parent
-dispatch overhead and any additional executions triggered by association edits or retries.
-Native waits and five-minute retry delays keep transient offline/registration failures
-from exhausting attempts early. Readiness observation can take up to five extra minutes
-after a reboot, delivery failure or completed probe; it must finish before the setup deadline.
+EFS installation first checks the RES marker, then uses the existing 20-minute
+build limit. Failed prerequisites retry after 60 seconds through native Automation;
+reboots and SSM registration/delivery can add delay. Full readiness polling still
+occurs inside bounded, ten-minute Run Command invocations, without an Automation
+step for each 15-second guest check. The 60-iteration cap bounds the authored
+failed path at 422 steps; the setup-deadline check normally ends it earlier.
+This count excludes the initial association's parent dispatch and additional
+executions from association edits or retries. Each short Python action retains its
+30-second limit. No guest installer waits through a RES reboot for its prerequisite.
 The independent 60-minute setup stop remains the compute-cost boundary.
 
 For every timed profile, `start` updates and independently verifies a fresh deadline

@@ -125,9 +125,10 @@ remain byte-for-byte upstream. NVIDIA follows the signed `latest/` download with
 `--dkms`; readiness checks use the installed module version. The fixed filename
 checksum is removed. DCV, Ubuntu and RES Python selections are unchanged.
 
-The existing post-ready State Manager association reuses the packaged native
-Debian EFS build functions, including their unpinned Git source and Rust stable
-selection. A fresh build directory, functional checks and conditional reinstall
+The existing EFS command document reuses the packaged native Debian EFS build
+functions, including their unpinned Git source and Rust stable selection. The
+readiness Automation invokes it promptly after RES readiness; State Manager
+retains periodic fallback attempts. A fresh build directory, functional checks and conditional reinstall
 of the just-built package retain interrupted-install recovery. This replaces the
 fixed Distributor version while preserving AWS-owned retries and DCV isolation.
 Rez remains a separate Studio application choice; code archives remain immutable.
