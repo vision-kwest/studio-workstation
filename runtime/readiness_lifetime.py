@@ -83,7 +83,7 @@ def resources(token, stop_role, setup, profile):
                 "parameters": {key: {"type": "String"} for key in
                                ("InstanceId", "AutomationAssumeRole", "SetupDescription", "SetupDeadline")},
                 "mainSteps": [{"name": "awaitReadiness", "action": "aws:loop", "inputs": {
-                    "MaxIterations": 12, "LoopCondition": {"Variable": "{{ validateSetup.Done }}", "BooleanEquals": False}, "Steps": [
+                    "MaxIterations": 60, "LoopCondition": {"Variable": "{{ validateSetup.Done }}", "BooleanEquals": False}, "Steps": [
         {"name": "validateSetup", "action": "aws:executeScript", "timeoutSeconds": 30, "inputs": action("verify"),
          "outputs": [{"Name": "Done", "Selector": "$.Payload.Done", "Type": "Boolean"}]},
         {"name": "alreadyReady", "action": "aws:branch", "inputs": {
@@ -98,11 +98,14 @@ def resources(token, stop_role, setup, profile):
             "Service": "ssm", "Api": "DescribeInstanceInformation",
             "Filters": [{"Key": "InstanceIds", "Values": ["{{ InstanceId }}"]}],
             "PropertySelector": "$.InstanceInformationList[0].PingStatus", "DesiredValues": ["Online"]}},
+        {"name": "installEfs", "action": "aws:runCommand", "timeoutSeconds": 1350,
+         "onFailure": "step:retryDelay", "isCritical": False, "inputs": {
+            "DocumentName": {"Ref": "EfsClientDocument"}, "InstanceIds": ["{{ InstanceId }}"], "TimeoutSeconds": 30}},
         {"name": "checkReady", "action": "aws:runCommand", "timeoutSeconds": 700,
          "onFailure": "step:retryDelay", "isCritical": False, "nextStep": "handoff", "inputs": {
             "DocumentName": "AWS-RunShellScript", "InstanceIds": ["{{ InstanceId }}"], "TimeoutSeconds": 30,
             "Parameters": {"commands": commands(profile == "gpu"), "executionTimeout": ["630"]}}},
-        {"name": "retryDelay", "action": "aws:sleep", "inputs": {"Duration": "PT300S"}}]}},
+        {"name": "retryDelay", "action": "aws:sleep", "inputs": {"Duration": "PT60S"}}]}},
         {"name": "exhausted", "action": "aws:executeScript", "timeoutSeconds": 30, "isEnd": True, "inputs": {
             "Runtime": "python3.11", "Handler": "fail", "Script": "def fail(event, context):\n    raise RuntimeError('Workstation did not become ready; setup stop remains armed')"}},
         {"name": "handoff", "action": "aws:executeScript", "timeoutSeconds": 30, "inputs": action("handoff"), "isEnd": True},
@@ -113,6 +116,7 @@ def resources(token, stop_role, setup, profile):
                                          "ssm:GetCommandInvocation", "ssm:ListCommands", "ssm:ListCommandInvocations"], "Resource": "*"},
         {"Effect": "Allow", "Action": "ssm:SendCommand", "Resource": [
             "arn:aws:ssm:us-east-1::document/AWS-RunShellScript",
+            {"Fn::Sub": "arn:aws:ssm:us-east-1:401233741942:document/${EfsClientDocument}"},
             {"Fn::Sub": "arn:aws:ec2:us-east-1:401233741942:instance/${Workstation}"}]},
         {"Effect": "Allow", "Action": ["scheduler:GetSchedule", "scheduler:UpdateSchedule"],
          # Scheduler GetAtt omits GroupName (aws-cloudformation/cloudformation-coverage-roadmap#1726).

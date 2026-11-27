@@ -201,6 +201,9 @@ def main():
                 {"action": "aws:runShellScript", "name": "install", "inputs": {
                     "runCommand": [
                         "/bin/bash -se <<'STUDIO_RES_EFS'",
+                        "exec 9>/run/studio-efs-install.lock",
+                        "flock -n 9",
+                        "/usr/sbin/mount.efs --version >/dev/null 2>&1 && exit 0",
                         "BASE_OS=ubuntu2404",
                         "SCRIPT_DIR=/root/bootstrap/latest/scripts/virtual-desktop-host",
                         'source "$SCRIPT_DIR/../common/linux/debian/nfs_utils.sh"',

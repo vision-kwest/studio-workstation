@@ -165,8 +165,17 @@ class ReadinessLifetimeTests(unittest.TestCase):
         document = self.aws.documents[name]['Content']
         steps = {step['name']: step for step in document['mainSteps']}
         loop = steps['awaitReadiness']
-        self.assertEqual((loop['action'], loop['inputs']['MaxIterations']), ('aws:loop', 12))
+        self.assertEqual((loop['action'], loop['inputs']['MaxIterations']), ('aws:loop', 60))
         steps.update({step['name']: step for step in loop['inputs']['Steps']})
+        order = [step['name'] for step in loop['inputs']['Steps']]
+        self.assertLess(order.index('waitOnline'), order.index('installEfs'))
+        self.assertLess(order.index('installEfs'), order.index('checkReady'))
+        efs = next(r['PhysicalResourceId'] for r in self.selected['resources']
+                   if r['LogicalResourceId'] == 'EfsClientDocument')
+        self.assertEqual(steps['installEfs']['inputs'], {
+            'DocumentName': efs, 'InstanceIds': ['{{ InstanceId }}'], 'TimeoutSeconds': 30})
+        self.assertEqual(steps['installEfs']['onFailure'], 'step:retryDelay')
+        self.assertFalse(steps['installEfs']['isCritical'])
         self.assertEqual(steps['checkReady']['action'], 'aws:runCommand')
         self.assertEqual(steps['checkReady']['onFailure'], 'step:retryDelay')
         self.assertNotIn('nextStep', steps['retryDelay'])
@@ -175,11 +184,17 @@ class ReadinessLifetimeTests(unittest.TestCase):
         self.assertEqual(steps['waitRunning']['timeoutSeconds'], 300)
         self.assertEqual(steps['waitOnline']['timeoutSeconds'], 300)
         retry_seconds = int(steps['retryDelay']['inputs']['Duration'][2:-1])
+        self.assertEqual(retry_seconds, 60)
         self.assertGreaterEqual(loop['inputs']['MaxIterations'] * retry_seconds, lifetime.SETUP_MINUTES * 60)
         shell = '\n'.join(steps['checkReady']['inputs']['Parameters']['commands'])
         subprocess.run(['bash', '-n'], input=shell, text=True, check=True)
         self.assertIn('SubState --value)" = exited', shell)
         statements = self.aws.policies['studio-ready-' + self.selected['token']]['ReadinessLifetime']['Statement']
+        send = next(s for s in statements if s['Action'] == 'ssm:SendCommand')
+        self.assertEqual(send['Resource'], [
+            'arn:aws:ssm:us-east-1::document/AWS-RunShellScript',
+            f'arn:aws:ssm:{h.REGION}:{h.ACCOUNT}:document/{efs}',
+            f'arn:aws:ec2:{h.REGION}:{h.ACCOUNT}:instance/{self.selected["instance"]}'])
         for action in ('scheduler:GetSchedule', 'scheduler:UpdateSchedule'):
             granted = next(s for s in statements if action in s['Action'])
             self.assertTrue(granted['Resource'].endswith('/' + self.name))

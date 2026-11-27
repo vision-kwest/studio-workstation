@@ -1,4 +1,5 @@
 """Native EFS provisioning remains owned by the stack after the client exits."""
+import fcntl
 import os
 from pathlib import Path
 import subprocess
@@ -116,6 +117,10 @@ fi
                         "/root/bootstrap/semaphore/linux_vdi_config_host_ready.lock", str(ready))
                     command = command.replace("/root/bootstrap/latest", str(root)).replace(
                         "/usr/sbin/mount.efs", str(helper))
+                    command = command.replace("/run/studio-efs-install.lock", str(root / "install.lock"))
+                    if step["name"] == "install" and outcome == "race":
+                        helper.write_text("#!/bin/sh\nexit 0\n")
+                        helper.chmod(0o755)
                     result = subprocess.run(["/bin/sh", "-c", command], env=environment,
                                             capture_output=True, text=True, timeout=10)
                     if result.returncode:
@@ -135,6 +140,11 @@ fi
 
             self.assertEqual(execute(), ("Failed", []))  # RES has not finished.
             ready.touch()
+            with (root / "install.lock").open("w") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                self.assertEqual(execute(), ("Failed", []))  # Another native invocation owns the build.
+            self.assertEqual(execute("race"), ("Success", []))  # Recheck after acquiring the lock.
+            helper.unlink()
             for version in ("8.2.7", "9.1.0"):
                 with self.subTest(version=version):
                     self.assertEqual(execute("fail", version), ("Failed", ["stunnel", "build"]))

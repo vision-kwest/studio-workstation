@@ -206,6 +206,14 @@ RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42`, driver/DCV stages
 EFS permissions and shared-data handling remain unchanged. Source evidence and
 remaining live gates are in [EFS helper provisioning](efs-helper-install.md).
 
+The readiness Automation now invokes that same EFS document before full readiness
+and retries through native Automation every 60 seconds, subject to the existing
+setup deadline. This removes the demonstrated wait for State Manager's next
+30-minute run after RES readiness. A nonblocking native file lock and a second
+helper check prevent overlapping Automation/association builds. No RES source,
+package selection, guest IAM or additional AWS resource changes. The PR records
+offline and fresh-instance acceptance separately.
+
 ## NVIDIA kernel updates (Issue #168)
 
 RES 2026.06 commit `1f526a241fb293a29fb018f08ccf81c100c05a42` installs Ubuntu's
